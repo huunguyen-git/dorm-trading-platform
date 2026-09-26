@@ -1,6 +1,6 @@
 # ADR-001: Core stack and delivery tooling
 
-Status: **Accepted technical decision**, 2026-09-25, under the team leader's explicit delegation to select stack/versions. This does not approve OPEN business policies. Versions were checked against publisher registries/release metadata. They are selected for the upcoming scaffold; no application compatibility test has run yet.
+Status: **Accepted technical decision**, 2026-09-25, under the team leader's explicit delegation to select stack/versions. This does not approve OPEN business policies. Versions were checked against publisher registries/release metadata. Backend pins are now represented in the generated POM and Maven Wrapper; see README for backend verification. Frontend pins still await implementation.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ Why: Java supports the OOAD course directly; the monolith allows atomic cross-do
 | Testcontainers | 2.0.5 | Inherit Boot BOM; use v2 module coordinates |
 | JUnit Jupiter | 6.0.3 | Inherit Boot BOM, replacing old brief's JUnit 5 assumption |
 
-Spring Security, Spring Data JPA, Hibernate, PostgreSQL JDBC driver and Mockito follow the Boot BOM. Do not independently override their versions. Exact auxiliary npm peers/types/lint packages go in the scaffold's package-lock.json after resolution; they are not separately hand-pinned here. REST Assured is deferred to the first API-test task; Spring's HTTP test support is sufficient for the skeleton. JaCoCo is added with the coverage task using a release compatible with Java 21. No claim that all integrations work until the scaffold passes.
+Spring Security, Spring Data JPA, Hibernate, PostgreSQL JDBC driver and Mockito follow the Boot BOM. Do not independently override their versions. Exact auxiliary npm peers/types/lint packages go in the scaffold's package-lock.json after resolution; they are not separately hand-pinned here. REST Assured is deferred to the first API-test task; Spring's HTTP test support is sufficient for the skeleton. JaCoCo is added with the coverage task using a release compatible with Java 21. Backend verification covers the database/security foundation; frontend integration is still unverified.
 
 The first scaffold must create and commit the Maven Wrapper and frontend lockfile, resolve peers, build both applications and exercise PostgreSQL. On an incompatibility, document a minimal version adjustment here and in manifests together; do not silently switch the architecture. Review security patch updates during the project; avoid unneeded major upgrades in the eight-week window. Never use floating latest tags for application dependencies or deployed images.
 

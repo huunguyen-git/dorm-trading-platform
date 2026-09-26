@@ -6,7 +6,7 @@ Root [AGENTS.md](../../AGENTS.md) adapts the [official instruction pattern](http
 
 Open this repository as the AI/editor project. Codex combines global and project guidance; overrides can supersede earlier instructions. Verify discovery on the next turn and reopen/restart if needed. Other assistants may need files loaded explicitly. [Official skill discovery guidance](https://learn.chatgpt.com/docs/build-skills).
 
-Ask: “List the instruction files and repository skills you actually loaded, selected stack, implementation status and relevant unresolved decisions. Do not edit files.” Expected today: documentation foundation, selected stack, no runnable app/tests yet.
+Ask: “List the instruction files and repository skills you actually loaded, selected stack, implementation status and relevant unresolved decisions. Do not edit files.” Expected today: backend foundation with documented Maven verification; frontend and business features are pending.
 
 ## Available-first skill selection
 

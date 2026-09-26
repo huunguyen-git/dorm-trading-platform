@@ -1,6 +1,6 @@
 # Team onboarding
 
-Working directory: the dorm-trading-platform Git root. Read [README](../../README.md) first. Technical stack selection is complete in [ADR-001](../architecture/ADR-001-stack.md); business questions remain in [the brief](../product/brief.md). App/CI scaffold is still the next implementation task.
+Working directory: the dorm-trading-platform Git root. Read [README](../../README.md) first. Technical stack selection is complete in [ADR-001](../architecture/ADR-001-stack.md); business questions remain in [the brief](../product/brief.md). Backend/CI scaffolding is present. Follow the root README to run checks, then the team-kickoff table for assignments.
 
 ## Leader: do these in order
 
@@ -18,9 +18,9 @@ CODEOWNERS is not access control. Require human review through GitHub settings, 
 
 - Clone the repository, open this folder as your editor/AI project and pull current main before a new branch.
 - Read [CONTRIBUTING](../../CONTRIBUTING.md) and [AI workflow](ai-workflow.md).
-- Install the ADR-selected JDK and Node/npm; use Docker with Compose support. Maven Wrapper will come with the scaffold, so a separate system Maven installation is unnecessary then.
+- Install the ADR-selected JDK and Node/npm; use Docker with Compose support. Maven Wrapper is committed; a separate system Maven installation is unnecessary.
 - Current prerequisite checks: java -version, node --version, npm --version, docker version, docker compose version. These inspect your machine, not proof that the app runs.
-- Once scaffolded, follow actual README commands for environment, DB migrations, seed, run and test. Report missing steps; do not rely on undocumented help.
+- Follow actual README commands for environment, DB migrations, seed, run and test. Report missing steps; do not rely on undocumented help.
 - Submit one small PR and review another. Explain the changed rule and one failure test without quoting the AI response.
 
 ## First scaffold acceptance

@@ -1,0 +1,24 @@
+openapi: 3.1.0
+info:
+  title: Dorm Trading Platform - foundation API
+  version: 0.0.1
+paths:
+  /api/v1/system/status:
+    get:
+      operationId: getSystemStatus
+      summary: Public application identification; use actuator health for DB readiness
+      responses:
+        '200':
+          description: Backend is responding
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [application, apiVersion]
+                properties:
+                  application:
+                    type: string
+                    const: dorm-trading-platform
+                  apiVersion:
+                    type: string
+                    const: v1

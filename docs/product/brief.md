@@ -100,7 +100,7 @@ For completion versus expiry, lock the same reservation/listing rows and use ser
 
 ## 6. Accepted technical baseline
 
-[ADR-001](../architecture/ADR-001-stack.md) owns stack versions and architecture, selected under the leader's delegation: Java/Spring Boot modular monolith, React/TypeScript frontend and PostgreSQL with migrations. The application is not yet scaffolded or compatibility-tested.
+[ADR-001](../architecture/ADR-001-stack.md) owns stack versions and architecture, selected under the leader's delegation: Java/Spring Boot modular monolith, React/TypeScript frontend and PostgreSQL with migrations. The backend foundation is scaffolded; frontend and business features remain pending. See README for current checks.
 
 Domain services/DTOs form boundaries. Database transactions protect inventory and quota; server authorization protects resources. Detailed conventions belong in the ADR and contribution guide. Technical approval does not resolve A01-A19 business questions.
 
