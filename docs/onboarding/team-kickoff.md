@@ -1,5 +1,7 @@
 # Team kickoff and task distribution
 
+> **Cập nhật nghiệp vụ 26/09/2026:** Đọc [đặc tả yêu cầu hiện hành](../product/client-requirements.md) trước khi nhận việc. Kế hoạch/bảng việc bên dưới chưa được đồng bộ đầy đủ: bỏ tự hết hạn giữ chỗ 24 giờ và sự kiện thanh lý; dùng ngưỡng khóa mới tại FR-12. Các nhiệm vụ mâu thuẫn phải được sửa trước khi triển khai; giải pháp tại mục 7 của đặc tả vẫn chưa được duyệt.
+
 ## Leader: next steps after the setup branch is published
 
 1. Invite the other four GitHub accounts and confirm names/handles below. The display names come from the earlier team brief; handles are still unknown.

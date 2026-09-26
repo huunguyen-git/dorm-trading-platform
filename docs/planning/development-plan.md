@@ -1,5 +1,7 @@
 # Development plan: Campus & Dormitory Trading Platform
 
+> **Cập nhật nghiệp vụ 26/09/2026:** Đọc [đặc tả yêu cầu hiện hành](../product/client-requirements.md) trước khi nhận việc. Kế hoạch/bảng việc bên dưới chưa được đồng bộ đầy đủ: bỏ tự hết hạn giữ chỗ 24 giờ và sự kiện thanh lý; dùng ngưỡng khóa mới tại FR-12. Các nhiệm vụ mâu thuẫn phải được sửa trước khi triển khai; giải pháp tại mục 7 của đặc tả vẫn chưa được duyệt.
+
 Planning baseline: 2026-09-25. **Eight weeks, five students, OOAD documents plus working application**, per team leader. Target window approximately 2026-09-25 to 2026-11-20; exact submission date remains to be confirmed. The leader delegated technical selection; [ADR-001](../architecture/ADR-001-stack.md) defines the accepted stack. Backend foundation is scaffolded; frontend and domain implementation remain pending.
 
 ## 1. Delivery strategy and scope control

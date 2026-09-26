@@ -11,7 +11,7 @@ The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, r
 ## Start here
 
 1. [Team onboarding](docs/onboarding/README.md): leader checklist and scaffold acceptance.
-2. [Product brief](docs/product/brief.md): 18 requirements and 19 OPEN decisions.
+2. [Living client requirements (Vietnamese)](docs/product/client-requirements.md): current requirements, confirmed changes and a separate register of unresolved questions with proposed solutions. FR-14/A16 are retired; proposals require approval.
 3. [Accepted stack ADR](docs/architecture/ADR-001-stack.md): exact versions and tooling rollout.
 4. [Eight-week plan](docs/planning/development-plan.md): backlog, ownership, OOAD and tests.
 5. [Contributing](CONTRIBUTING.md) and [AI workflow](docs/onboarding/ai-workflow.md).
