@@ -1,12 +1,12 @@
 # Development plan: Campus & Dormitory Trading Platform
 
-> **Cập nhật nghiệp vụ 26/09/2026:** Đọc [đặc tả yêu cầu hiện hành](../product/client-requirements.md) trước khi nhận việc. Kế hoạch/bảng việc bên dưới chưa được đồng bộ đầy đủ: bỏ tự hết hạn giữ chỗ 24 giờ và sự kiện thanh lý; dùng ngưỡng khóa mới tại FR-12. Các nhiệm vụ mâu thuẫn phải được sửa trước khi triển khai; giải pháp tại mục 7 của đặc tả vẫn chưa được duyệt.
+> **Đồng bộ 26/09/2026:** [Đặc tả yêu cầu hiện hành](../product/client-requirements.md) là nguồn nghiệp vụ. FR-14/A16 đã loại bỏ; giữ chỗ không tự hết hạn sau 24 giờ; đúng 30 điểm thuộc mức khóa vĩnh viễn. Các phương án ở mục 7 vẫn cần phê duyệt.
 
 Planning baseline: 2026-09-25. **Eight weeks, five students, OOAD documents plus working application**, per team leader. Target window approximately 2026-09-25 to 2026-11-20; exact submission date remains to be confirmed. The leader delegated technical selection; [ADR-001](../architecture/ADR-001-stack.md) defines the accepted stack. Backend foundation is scaffolded; frontend and domain implementation remain pending.
 
 ## 1. Delivery strategy and scope control
 
-Use [product brief](../product/brief.md) as the source-indexed requirement baseline and [onboarding](../onboarding/README.md) for team workflow. First resolve business ambiguity, then design and implement small vertical slices. Deliver an integrated demo every week; each member contributes analysis, code, tests and documentation.
+Use [client requirements](../product/client-requirements.md) as the source-indexed requirement baseline and [onboarding](../onboarding/README.md) for team workflow. First resolve business ambiguity, then design and implement small vertical slices. Deliver an integrated demo every week; each member contributes analysis, code, tests and documentation.
 
 Planning assumption, not a commitment: 8-10 focused hours/member/week = 320-400 gross team hours. Reserve roughly 25% for review, integration, defects and presentation; plan 240-300 hours of feature/document work. Confirm capacity at kickoff. If capacity is lower, agree a reduced assessed scope with the lecturer rather than silently dropping PDF requirements.
 
@@ -16,11 +16,11 @@ Delivery levels:
 | --- | --- | --- |
 | Walking skeleton, W1 | Reproducible local setup, CI, DB migration, frontend/API connection, synthetic login fixture | All five machines run it; a peer can reproduce the documented setup |
 | Core alpha, W4 | Verified/admin-activated member, moderated listing, search, messaging/proposal, atomic reservation | Two members demonstrate the flow with shared database; competing hold test passes |
-| Beta, W6 | Handover code, ratings/reputation, reports/sanctions, scheduled expiry/renewal | Full sale and giveaway, failed/expired hold, complaint decision demonstrated |
-| Full course candidate, W7 | Annual review, campaign/combo behavior, six report families, integrated docs and deployment | All FR-01..18 accounted for with evidence or explicitly accepted limitation |
+| Beta, W6 | Handover code, ratings/reputation, reports/sanctions, reservation reminders and listing renewal | Full sale and giveaway, cancelled hold, complaint decision demonstrated |
+| Full course candidate, W7 | Annual review, ordinary combo listing behavior under A02/A19, six report families, integrated docs and deployment | All current FRs accounted for with evidence or explicitly accepted limitation; FR-14 recorded as retired |
 | Submission, W8 | Stabilized application, diagrams/report, demo fixtures, presentation and contribution evidence | Release checklist and reproducible demo pass |
 
-Do not describe the core alpha as full PDF compliance. Annual review, campaigns and reports are SOURCE requirements even though implemented later. If they cannot fit, record a lecturer-approved deferral and keep them in the analysis models.
+Do not describe the core alpha as full current-requirements compliance. Annual review and reports remain in scope; clearance campaigns do not. If current requirements cannot fit, record a lecturer-approved deferral and keep them in the analysis models.
 
 Exclude optional infrastructure: microservices, Kubernetes, Terraform, Redis, paid cloud dependencies, multiple overlapping security scanners, recommendation algorithms and real payment gateway. Use a single deployment and local fallback. Do not drop reservation correctness or human review to save time.
 
@@ -33,10 +33,10 @@ Weeks are relative to kickoff; adjust dates when the lecturer confirms submissio
 | W1, Sep 25-Oct 1 | Requirements baseline + runnable skeleton | M1 kickoff/eligibility/roles; M2 glossary/listing wireframes; M3 hold/negotiation scenarios; M4 completion/rating questions; M5 moderation/report definitions. Pair on scaffold, PR templates and CI. Resolve A01/A03/A04/A07/A13/A17/A18. | Approved or explicitly deferred questions; use-case inventory; initial domain model; each member's onboarding PR; UI calls API and migration runs |
 | W2, Oct 2-8 | Analysis/design baseline + identity/listing start | Resolve remaining A IDs. M1 auth/admin activation; M2 listing/images/categories; M3 chat/proposal contracts; M4 challenge/history contracts; M5 review queue/audit. Freeze API conventions and initial schema ownership. | Detailed critical use cases, class/state/sequence diagrams, API contract, initial migrations; authorized user can submit listing |
 | W3, Oct 9-15 | Publish, search and negotiate | M1 permissions integration; M2 filters/geo/quota; M3 persisted chat/proposals; M4 appointment/handover UI using agreed contract; M5 approval/rejection and report submission. | Member publishes through moderator; search returns correct published items; participants chat and accept price; unauthorized access tests |
-| W4, Oct 16-22 | Reliable reservations: core alpha | M3 acceptance/expiry/concurrency; M2 publication-state coordination; M4 appointment/agreed-price snapshot integration; M1 buyer quota/restriction checks; M5 job framework and notification inbox. | One winner in competing holds; three-item cap across listings; timed expiry without browser refresh; integrated demo |
-| W5, Oct 23-29 | Complete trade and apply feedback | M4 six-digit code/history/rating; M1 ledger/idempotency; M3 expiry/completion race; M2 completed listings/giveaways; M5 justified-rating decision and no-show resolution. | Full sale + giveaway; invalid/expired/replayed codes rejected; one ledger effect per accepted event; no automatic completion |
-| W6, Oct 30-Nov 5 | Moderation and lifecycle beta | M5 sanctions/disputes; M1 restrictions/annual review; M2 renewal/15-day extension; M3 job retries/hold cleanup; M4 appeal/reversal integration and E2E support. | Threshold tests; renewal notification and three-day timeout using controlled clock; annual review fixture; beta deployed |
-| W7, Nov 6-12 | Complete source scope + UAT | M5 reporting/campaign endpoints; M2 combos/campaign UI; M3 search-event aggregation support; M4 UAT/demo script; M1 deployment/backup restore and integration. All reconcile diagrams with implementation. | Six report families verified against known seed counts; campaign opens/closes; UAT findings triaged; scope freeze |
+| W4, Oct 16-22 | Reliable reservations: core alpha | M3 acceptance/cancellation/concurrency; M2 publication-state coordination; M4 appointment/agreed-price snapshot integration; M1 buyer quota/restriction checks; M5 notification inbox. | One winner in competing holds; three-item cap across listings; no automatic hold cancellation; integrated demo |
+| W5, Oct 23-29 | Complete trade and apply feedback | M4 six-digit code/history/rating; M1 ledger/idempotency; M3 cancellation/completion race; M2 completed listings/giveaways; M5 justified-rating decision and no-show resolution. | Full sale + giveaway; invalid/expired/replayed codes rejected under approved A06 rules; one ledger effect per accepted event; no automatic completion |
+| W6, Oct 30-Nov 5 | Moderation and lifecycle beta | M5 sanctions/disputes; M1 restrictions/annual review; M2 listing renewal pending A10; M3 reminder retries; M4 appeal/reversal integration and E2E support. | 30/31/50-point tests and no repeated ban; approved renewal behavior tested with controlled clock; annual review fixture; beta deployed |
+| W7, Nov 6-12 | Complete current scope + UAT | M5 reporting endpoints; M2 ordinary combo listing behavior pending A02/A19; M3 search-event aggregation support; M4 UAT/demo script; M1 deployment/backup restore and integration. All reconcile diagrams with implementation. | Six report families verified against known seed counts; UAT findings triaged; scope freeze |
 | W8, Nov 13-19; buffer Nov 20 | Stabilization and defense | Fix defects, improve reproducibility/accessibility, rehearse role-based demo and oral explanation; freeze final diagrams and release notes. No unplanned features. | Tagged release, final report, test evidence, presentation, clean-machine demo and backup local demo |
 
 Critical dependency chain: identity/permissions -> approved listing -> accepted hold -> handover confirmation -> ratings/reputation -> sanctions/reports. Contracts allow parallel UI work, but integrated completion depends on the preceding slice. Mock contracts must be replaced by real API calls before the corresponding gate.
@@ -48,7 +48,7 @@ Confirm the lecturer's exact template at kickoff. The workspace includes an OOAD
 | Artifact | Required content | Owner / review / due |
 | --- | --- | --- |
 | Vision, scope, stakeholder map, glossary | Problem, actors, boundaries, Vietnamese-English terms, source IDs, assumptions | M1 with all / M2 / W1 |
-| Requirements and decision log | FR-01..18, measurable acceptance, A01..19 decisions with evidence; nonfunctional targets | Each domain owner / lead / W1-W2 |
+| Requirements and decision log | Current FRs with FR-14/A16 marked retired, measurable acceptance, A01..19 decisions with evidence; nonfunctional targets | Each domain owner / lead / W1-W2 |
 | Use-case diagram and specifications | Member, admin, moderator, clock/scheduler and external email boundary; avoid buyer/seller as separate accounts | Each owner / paired review / W2 |
 | Activity diagrams | Submit/review listing; reserve; handover; complaint; renewal, including failure paths | M2/M3/M4/M5 / peers / W2 |
 | Domain class model | Concepts, associations, multiplicities, invariants and composition; no framework details in analysis model | M1 consolidates / all / W2 |
@@ -73,15 +73,16 @@ Use-case inventory:
 | UC-04 | Review listing / moderator | 05 | M5 |
 | UC-05 | Browse/search / member; guest access to be decided | 06 | M2 |
 | UC-06 | Chat/negotiate price / buyer + seller | 07 | M3 |
-| UC-07 | Request/accept/cancel/expire hold and agree meeting / buyer + seller | 08,09 | M3 |
+| UC-07 | Request/accept/cancel hold, send reminder and agree meeting / buyer + seller | 08,09 | M3 |
 | UC-08 | Confirm handover with code / seller + buyer | 09 | M4 |
 | UC-09 | Rate completed transaction / participants | 10 | M4 |
 | UC-10 | Report, investigate, decide and apply restriction / member + moderator | 11,12 | M5 |
 | UC-11 | Renew/close/expire listing / seller + scheduled job | 13 | M2/M5 |
-| UC-12 | Manage clearance campaign/combo / admin + seller | 14 | M5/M2 |
 | UC-13 | View semester/month/category/zone/giveaway reports / admin | 15-18 | M5 |
 
-For each detailed UC include goal, trigger, actors, preconditions, main numbered flow, alternatives, exceptions, postconditions, referenced rules, data, authorization and acceptance cases. Example UC-07: seller accepts a pending request; server verifies both accounts and listing eligibility, locks quota/listing, checks effective expiry and buyer count, creates accepted hold with agreed-price snapshot, updates listing and commits. Competing acceptance -> conflict with no partial state; fourth hold -> quota error; expired or hidden listing -> reject; retry -> same accepted result or documented conflict, never duplicate hold.
+UC-12 is retired with FR-14/A16; do not reuse its ID. Ordinary combos remain within UC-03 and need A02/A19 decisions.
+
+For each detailed UC include goal, trigger, actors, preconditions, main numbered flow, alternatives, exceptions, postconditions, referenced rules, data, authorization and acceptance cases. Example UC-07: seller accepts a pending request; server verifies both accounts and listing eligibility, locks the buyer row then the listing row, checks accepted-hold count and availability, creates an accepted hold with agreed-price snapshot, updates listing and commits. Competing acceptance -> conflict with no partial state; fourth hold -> quota error; hidden listing -> reject; retry -> same accepted result or documented conflict, never duplicate hold. Pending requests counting toward the cap remains A05, not an assumed rule.
 
 ## 4. Implementable backlog and traceability
 
@@ -95,18 +96,19 @@ Effort uses S = about half a day, M = 1-2 focused days, L = split into smaller i
 | B04 Listing/category/image management | 04 / 03 | M2 | B01,A02 | L | Required data validated; image boundaries 0/1/5/6 tested |
 | B05 Moderation queue and publication quota | 05 / 04 | M5+M2 | B03,B04,A03,A14 | M | Hidden/pending absent from results; quota checked atomically |
 | B06 Search and geographic filters | 06 / 05 | M2 | B05,A11 | M | Price/course/zone/radius boundary fixtures correct |
-| B07 Persisted chat and price proposals | 07 / 06 | M3 | B03,B04,A04 | L | Only participants read/write; price acceptance does not lock |
+| B07 Persisted chat and price proposals | 07 / 06 | M3 | B03,B04,A04 | L | Only participants read/write; effect of price acceptance follows approved A04 |
 | B08 Atomic holds and meeting | 08,09 / 07 | M3 | B05,B07,A05 | L | One winner; buyer cap across listings; price snapshot retained |
-| B09 Expiry worker and notification inbox | 08 / 07 | M3; M5 infrastructure | B08 | M | Restart/retry safely expires once; commands reject stale holds |
+| B09 Reservation reminders and notification inbox | 08 / 07 | M3; M5 infrastructure | B08,A05 | M | Approved reminders sent once across retries; no job cancels a hold for elapsed time |
 | B10 Handover challenge and history | 09 / 08 | M4 | B08,A06 | L | Authenticated buyer completes once; invalid/replayed code fails |
 | B11 Ratings and reputation ledger | 10 / 09 | M4+M1 | B10,A07 | L | Only participants/completed trades; justified -5; duplicate safe |
 | B12 Reports/evidence/moderator decision | 11 / 10 | M5 | B03,A08,A12 | L | Unsold listing report supported; evidence restricted; audit stored |
 | B13 Restrictions and penalty orchestration | 12 / 10 | M5+M1 | B11,B12,A09 | M | Threshold precedence and duration; duplicate decision no double penalty |
-| B14 Listing renewal and expiry | 13 / 11 | M2; M5 job support | B05,B09,A10 | M | One reminder; 15-day extension; no reply expires at approved deadline |
+| B14 Listing renewal and expiry | 13 / 11 | M2; M5 job support | B05,B09,A10 | M | Listing-only renewal/archival follows approved A10 deadline; never expires a reservation |
 | B15 Annual review | 02 / 02 | M1 | B03,B09,A13 | M | Due cohort notified once; campus/graduation response stored |
-| B16 Campaigns and combos | 14 / 12 | M2+M5 | B04,A02,A16,A19 | M | Approved combo promoted within campaign window only |
 | B17 Search events and report queries | 15-18 / 13 | M5; M3 event support | B06,B10,B12,A15 | L | Known fixtures produce exact counts for all six families |
-| B18 Integrated UAT, deployment and final report | All | All; M4 coordinates | B03-B17 | L | Release gate, traceability and reproducible role-based demo |
+| B18 Integrated UAT, deployment and final report | Current FRs | All; M4 coordinates | B03-B15,B17 | L | Release gate, traceability and reproducible role-based demo |
+
+B16 is retired with FR-14/A16; do not create an issue or reuse the ID. Combo listing validation belongs to B04 and awaits A02/A19.
 
 Example traceability row (template, not evidence of implementation): FR-08 -> UC-07 -> reservation state/acceptance sequence -> B08 -> PR TBD -> T03/T04/T05 -> test report TBD. Replace placeholders with actual links as work lands. An unimplemented requirement remains visible as not delivered.
 
@@ -122,30 +124,31 @@ Proposed contracts to agree in W2:
 | --- | --- | --- |
 | Eligibility | member ID + action -> permission/restriction reason | M1 -> M2/M3/M4/M5 |
 | Listing availability | listing ID/version -> approved/visible/state/price snapshot | M2 -> M3/M4 |
-| Hold acceptance | reservation request + authenticated seller -> accepted hold/expiresAt or conflict | M3 -> M2/M4 |
+| Hold acceptance | reservation request + authenticated seller -> accepted hold or conflict; no hold expiry timestamp | M3 -> M2/M4 |
 | Trade completion | trade ID + authenticated buyer + code -> completed trade or error | M4 -> M2/M3/M1 |
 | Reputation ledger | validated event ID/type/subject/delta/reference -> exactly-once ledger effect | M1 -> M4/M5 |
 | Moderation decision | case ID/version/verdict -> audit + approved sanction command | M5 -> M1/M2 |
 | Notifications | recipient/event key/template payload -> durable inbox item | Shared adapter -> all |
 
-OpenAPI should specify request/response examples, validation, authentication, pagination, timestamps, monetary representation and error codes. Candidate `/api/v1` resource groups: auth/members, listings/categories/search, conversations/proposals, reservations, trades/ratings, reports/moderation, notifications/campaigns/analytics. Freeze concrete endpoints before parallel implementation; these names are not an existing API.
+OpenAPI should specify request/response examples, validation, authentication, pagination, timestamps, monetary representation and error codes. Candidate `/api/v1` resource groups: auth/members, listings/categories/search, conversations/proposals, reservations, trades/ratings, reports/moderation, notifications/analytics. Freeze concrete endpoints before parallel implementation; these names are not an existing API. Review mobile client requirements and session/CSRF feasibility before freezing authentication contracts; a Bearer-token scheme would require a separate ADR and threat review.
 
-Use integer VND amounts or an agreed exact-decimal representation, never binary floating-point currency. Giveaway amount is zero. Store immutable agreed price/category/zone snapshots needed for historical reporting. Use ISO-8601 timestamps; server clock decides expiry. Choose UUID or another single ID convention once. Errors distinguish 401 unauthenticated, 403 unauthorized, 404 unavailable resource, 409 state/quota conflict and documented validation errors. Avoid leaking another user's private resource existence through errors.
+Use integer VND amounts or an agreed exact-decimal representation, never binary floating-point currency. Giveaway amount is zero. Store immutable agreed price/category/zone snapshots needed for historical reporting. Use ISO-8601 timestamps; server clock decides challenge and listing deadlines, never an automatic reservation deadline. Choose UUID or another single ID convention once. Errors distinguish 401 unauthenticated, 403 unauthorized, 404 unavailable resource, 409 state/quota conflict and documented validation errors. Avoid leaking another user's private resource existence through errors.
 
 ## 6. Data integrity, jobs and security design
 
-Candidate tables: members, roles/member_roles, verifications, restrictions, reputation_entries, categories, zones, listings, listing_images, study_material_details, conversations, messages, price_proposals, reservations, appointments, trades, completion_challenges, ratings, reports, report_evidence, moderation_decisions, notifications, campaigns/campaign_listings, search_events, academic_review_cycles. Merge unnecessary one-to-one tables only after reviewing domain needs; this is not a final schema.
+Candidate tables: members, roles/member_roles, verifications, account_restrictions, reputation_entries, categories, zones, listings, listing_images, study_material_details, conversations, messages, price_proposals, reservations, appointments, trades, completion_challenges, ratings, reports, report_evidence, moderation_decisions, notifications, search_events, academic_review_cycles. Merge unnecessary one-to-one tables only after reviewing domain needs; this is not a final schema. Campaign tables are out of scope.
 
 Key protections:
 
 - Unique normalized institutional identity under the approved eligibility model; banned identity cannot simply re-register. Restrict access to IDs, addresses and phone numbers.
-- One live accepted hold per listing. A partial unique constraint may enforce state='ACCEPTED', but wall-clock expiry cannot simply be a volatile index predicate: expire stale rows in a transaction before replacement acceptance. Lock buyer row for the three-hold cap and listing row for exclusivity; all commands/jobs share consistent lock ordering and retry policy.
+- One live accepted hold per listing, enforced by a database constraint consistent with the final state model. For acceptance, lock the buyer's User/member row first, then the Listing row in one transaction; recheck both the accepted-hold count and listing state under those locks before writing. Every path that needs both locks (acceptance, cancellation, completion, moderation or cleanup) uses the same order and a bounded deadlock retry policy. Requests for one listing serialize on its row; concurrent acceptances on different listings for one buyer serialize on the buyer row. No SELECT-then-INSERT without these guards and no wall-clock reservation expiry. A05 decides whether pending requests count toward the cap.
 - Approval checks visible-listing quota under the seller lock. Concurrency tests include simultaneous approvals. Resolve reopening at quota through A03/A14.
-- Unique trade per accepted reservation and completed offer; unique rating per trade/author; unique reputation source-event key. Enforce nonnegative prices and reject buyer=seller.
-- Completion code: cryptographically generated, bound to trade and authenticated buyer, short configurable TTL/attempt limit after A06 decision, stored as protected verifier, excluded from logs; invalidate previous code on reissue. It is not bank verification.
-- Jobs use persistent due timestamps and server checks, not in-memory timers alone. Re-running overdue jobs after restart must not duplicate alerts, penalties or renewals. Inject a clock into time-dependent code so tests can advance time.
+- Unique trade per reservation (`trades.reservation_id`), unique rating per trade/author and unique reputation source-event key. Completion is one atomic, idempotent trade transition under a row lock or guarded update. The +2 reputation effect belongs to a subsequent five-star rating (FR-10), applied once for that rating event, never for completion alone. Enforce nonnegative prices and reject buyer=seller.
+- Completion code: cryptographically generated, bound to trade and authenticated buyer, stored as a keyed hash/protected verifier and excluded from logs. Enforce endpoint rate limits, per-code failed-attempt limits, single use and invalidation on reissue. A06 proposes 10 minutes and five failed attempts; these numbers require approval before implementation. Code expiry never expires the reservation or completes the trade. It is not bank verification.
+- Restrictions originate from a unique verified violation/decision event. Store the event ID, `punished_at`, `expires_at` (null for permanent) and active state; one event cannot generate a second restriction. Expiry deactivates a temporary restriction after 14 days without recalculating punishment from the unchanged score. A new verified violation may trigger a new decision under A09; an active permanent restriction still wins.
+- Jobs use persistent due timestamps and server checks for reminders, listing renewal and temporary-ban release, not in-memory timers alone. Re-running overdue jobs after restart must not duplicate alerts, penalties or renewals. Inject a clock into time-dependent code so tests can advance time.
 - Persist proof and moderator reasoning; never penalize solely because a report was filed. Prevent self-review of one's own complaint where practical; log admin overrides.
-- Validate uploaded type/content/size, randomize storage names, separate public listing photos from private complaint evidence. Proposed limit: 5 MB/image, configurable and explicitly a technical target, not PDF policy. Use synthetic demo identities and evidence.
+- Validate uploaded type/content/size. Store listing photos under `public/listings` and report evidence under `restricted/evidences` with server-generated random UUID names; never use client paths or sequential IDs as file names. Resolve and validate storage paths under their configured roots. Serve evidence through an endpoint that checks case assignment and moderator/admin authority for each request; a direct static URL or guessable ID must not bypass authorization. Proposed limit: 5 MB/image, configurable and explicitly a technical target, not PDF policy. Use synthetic demo identities and evidence. A12 still needs decisions about formats, retention and any additional viewer roles.
 - Secure password hashing, access checks for every resource, CSRF for cookie sessions, HTTPS for hosted demo, rate limits for auth/code endpoints and least-privilege DB credentials. Keep secrets in environment/hosting secret store; no real student data in Git or prompts.
 - Proposed data-retention and deletion periods require client/lecturer agreement; do not invent legal compliance guarantees.
 
@@ -157,19 +160,19 @@ Test behavior, especially boundaries and concurrent requests. Suggested initial 
 | --- | --- | --- |
 | T01 | Verified email alone does not bypass admin activation; student/moderator/admin permissions differ | 01,03 |
 | T02 | Submit 0 or 6 images fails; 1 and 5 succeed; required study fields validated; pending/hidden never public | 04,05 |
-| T03 | Two concurrent sellers' acceptance requests for same listing yield exactly one accepted hold | 08 |
+| T03 | Two competing acceptances of pending requests for one listing yield exactly one accepted hold; no partial reservation or listing state | 08 |
 | T04 | Buyer with two active holds receives two simultaneous acceptances on different listings: exactly one succeeds, total three | 08 |
-| T05 | Before expiry accepted hold blocks others; at/after deadline cannot complete under approved rule; restart catches overdue jobs | 08,09 |
-| T06 | Only seller initiates handover; only relevant buyer confirms; wrong/expired/replayed code rejected; no silence auto-success | 09 |
-| T07 | Rating before completion/outsider rejected; 5 stars +2 once; justified 1 and 2 stars each -5 once; other effects match A07 decision | 10 |
-| T08 | Confirmed first no-show -20 once; 50/49 and 30/29 boundaries; permanent ban overrides temporary restriction; A09 reactivation tested | 12 |
-| T09 | Prohibited unsold listing report supported under A12; evidence access limited; complaint alone applies no penalty | 11 |
-| T10 | Renewal eligibility before/at/after approved age; one notice; accepted extension +15 days from agreed anchor; no response at three days expires | 13 |
+| T05 | Elapsed time never cancels an accepted hold; approved reminder is delivered once across restart/retry; cancellation versus acceptance/completion has one coherent outcome | 08,09 |
+| T06 | Only seller initiates handover; only relevant buyer confirms; wrong/expired/replayed code rejected, rate and attempt limits enforced under approved A06; concurrent/repeated completion creates one trade and no duplicate history; no silence auto-success | 09 |
+| T07 | Rating before completion/outsider rejected; five-star rating adds +2 once even after repeated completion requests; justified 1 and 2 stars each deduct -5 once; other effects match A07 decision | 10 |
+| T08 | Confirmed first no-show -20 once; 51/50/31/30/29 boundaries; one event creates one restriction, temporary restriction ends after 14 days without rebanning at unchanged score, new verified event may trigger a new decision; permanent ban overrides temporary restriction | 12 |
+| T09 | Prohibited unsold listing report supported under A12; evidence access limited to authorized case handlers; guessed IDs and traversal paths rejected; complaint alone applies no penalty | 11 |
+| T10 | Listing-only renewal eligibility, notice and archival follow the approved A10 rule; test before/at/after deadlines with a controlled clock | 13 |
 | T11 | Zone/radius center, units and boundary fixtures; max-price inclusive; no private member address exposed | 06 |
-| T12 | Annual reminder once per cycle; update recorded; campaign outside dates not prioritized; overlapping stock handled per A02 | 02,14 |
+| T12 | Annual reminder once per cycle; update recorded; ordinary combo listing follows approved A02/A19 stock policy | 02,04 |
 | T13 | Known fixtures verify top searches versus trades separately; low-score list, monthly disputes, category/zone counts and giveaways | 15-18 |
 | T14 | Complete sale and zero-price giveaway across member/moderator sessions; notification and history accurate | 01-12,18 |
-| T15 | Hidden held listing never reopens through expiry; completion versus expiry commits a single coherent outcome | 05,08,09 |
+| T15 | Hidden held listing never reopens through cancellation without publication checks; cancellation versus completion commits a single coherent outcome | 05,08,09 |
 | T16 | Simultaneous publication cannot exceed approved quota; reputation exactly 120 versus 121 follows A03 | 05 |
 
 Proposed nonfunctional course targets, to approve in W1: reproducible startup within 15 minutes on the documented machine prerequisites; typical list/search p95 <= 1 second with 20 concurrent users and 1,000 seeded listings on a named demo machine; mobile layout usable at 360 px; keyboard-accessible main flows and labelled forms; no known critical authorization/data-loss defect at release. Record test environment and results; these are targets, not measured claims. 24/7 production availability needs operations funding outside a classroom demo.
@@ -189,17 +192,17 @@ Search rankings cannot be derived from completed trades alone. Record normalized
 | Trades by zone | completed trade location snapshot | count completed trades by agreed handover zone and completion period |
 | Giveaways | completed trades with agreed amount=0 + giveaway flag | count completed offers; count individual goods only if bundle quantity is modeled |
 
-Store report fixtures with expected totals. Access limited to approved admin role; do not display private complaint evidence in aggregate views. Campaign promotion must still respect approval, availability and active dates.
+Store report fixtures with expected totals. Access limited to approved admin role; do not display private complaint evidence in aggregate views.
 
 ## 9. Collaboration, change control and AI use
 
 Short branches from main; one issue/vertical slice per PR. No permanent member branches or separate unintegrated applications. One human owns each issue; a second reviews. Hold two short integration meetings weekly and demonstrate working behavior weekly. Keep one active implementation task per member when possible.
 
-Before using AI: read AGENTS.md, current brief, approved decision/UC, API contract and neighboring code; request a bounded plan and state allowed files. Ask it to identify conflicts rather than invent requirements. After generation: inspect diff, run checks, test a negative case, explain the change aloud, add FR/UC/decision links and record AI assistance in PR. Another AI review does not replace the human peer. Do not use the weaker-model archive as current context.
+Before using AI: read AGENTS.md, current client requirements, approved decision/UC, API contract and neighboring code; request a bounded plan and state allowed files. Ask it to identify conflicts rather than invent requirements. After generation: inspect diff, run checks, test a negative case, explain the change aloud, add FR/UC/decision links and record AI assistance in PR. Another AI review does not replace the human peer. Do not use the weaker-model archive as current context.
 
 Shared contracts/migrations: announce interface changes in an issue; affected owners review the contract before implementations diverge. Never edit a merged migration: add a new one. Lead coordinates migration IDs and shared build-file edits. Unexpected changes outside task scope require review, not automatic deletion. AI must not merge its own work or bypass checks.
 
-Policy change: create issue with source, impacted A/FR/UC, alternative choices, implementation/test impact and decision owner; record approval then update brief/contracts/models and code together. The lead can approve technical simplification, but cannot silently rewrite client business rules.
+Policy change: create issue with source, impacted A/FR/UC, alternative choices, implementation/test impact and decision owner; record approval then update client requirements/contracts/models and code together. The lead can approve technical simplification, but cannot silently rewrite client business rules.
 
 ## 10. Risks and response
 
@@ -222,19 +225,19 @@ Before release:
 
 - [ ] Fresh clone follows README successfully; migrations create schema; deterministic synthetic seed produces documented accounts/counts.
 - [ ] No secrets or real personal data committed; evidence storage authorization checked.
-- [ ] Each FR maps to implementation/test evidence or explicit lecturer-approved deferral; all OPEN decisions are visibly documented.
+- [ ] Each current FR maps to implementation/test evidence or explicit lecturer-approved deferral; FR-14/A16 remain marked retired and all OPEN decisions are visibly documented.
 - [ ] Unit, database integration and critical E2E tests pass on release commit; failure logs/results retained.
 - [ ] Database and image backup restore rehearsed; deployment smoke test passes; rollback uses previous app version with a compatible schema or a rehearsed restore.
 - [ ] Final diagrams correspond to delivered code; PDF/report generated per lecturer template; five members can explain responsibilities and cross-domain flow.
-- [ ] Demo script: admin activation -> submit/approve -> search/propose -> reserve -> code completion -> rating; alternate expired hold, violation/sanction, renewal, annual review, campaign and reports.
+- [ ] Demo script: admin activation -> submit/approve -> search/propose -> reserve -> code completion -> rating; alternate hold cancellation/reminder, violation/sanction, listing renewal, annual review and reports.
 - [ ] Version tag, release notes, known limitations, presentation and local fallback archived.
 
 ## 12. First 48 hours
 
 1. Confirm exact deadline, weekly capacity, GitHub handles, lecturer rubric and the selected stack.
-2. Review the corrected brief together; assign decision owners and send A01/A03/A06/A07/A09/A13/A17 to the lecturer/client proxy first.
+2. Review the current client requirements together; assign decision owners and send A01/A03/A06/A07/A09/A13/A17 to the lecturer/client proxy first.
 3. Follow docs/onboarding/README.md: invitations, foundation docs PR, safeguards, one shared scaffold and working CI.
-4. Create B01-B18 as scoped issues, splitting L items; assign next-week tasks only, with reviewers and dependencies.
+4. Create current backlog entries as scoped issues, excluding retired B16; split L items and assign next-week tasks only, with reviewers and dependencies.
 5. Each member clones and submits one small reviewed onboarding PR; then implement one integrated identity-to-listing slice before expanding.
 
 Technical references checked 2026-09-25: [Spring Boot requirements](https://docs.spring.io/spring-boot/system-requirements.html), [Vite setup/runtime requirements](https://vite.dev/guide/). Use these to validate the agreed stack, not to upgrade blindly to latest.

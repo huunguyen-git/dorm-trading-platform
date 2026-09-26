@@ -1,13 +1,13 @@
 # Team onboarding
 
-Working directory: the dorm-trading-platform Git root. Read [README](../../README.md) first. Technical stack selection is complete in [ADR-001](../architecture/ADR-001-stack.md); business questions remain in [the brief](../product/brief.md). Backend/CI scaffolding is present. Follow the root README to run checks, then the team-kickoff table for assignments.
+Working directory: the dorm-trading-platform Git root. Read [README](../../README.md) first. Technical stack selection is in [ADR-001](../architecture/ADR-001-stack.md); current business rules and open questions are in [client requirements](../product/client-requirements.md). Backend/CI scaffolding is present. Follow the root README to run checks, then the team-kickoff table for assignments.
 
 ## Leader: do these in order
 
 1. Invite four individual GitHub accounts; confirm handles, availability, exact deadline and lecturer rubric. Use personal credentials, never a shared leader token.
-2. Review/publish the documentation foundation through a PR. Populate CODEOWNERS once actual handles are known; do not invent usernames. Use the domain/reviewer assignments in the brief.
+2. Review/publish the documentation foundation through a PR. Populate CODEOWNERS once actual handles are known; do not invent usernames. Use the domain/reviewer assignments in the current plan and kickoff table.
 3. Protect main: require a PR, one human approval, resolution of comments, and no force pushes/deletion; apply to administrators where supported. Use squash merge and short task branches. Add required check names only after real CI runs exist. Protection availability depends on plan/visibility; record any manual-enforcement limitation. [GitHub guidance](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
-4. Create a board with Backlog, Ready, In progress, In review, Blocked, Done. Seed and split B01-B18 from [the plan](../planning/development-plan.md). Every Ready issue has FR/UC references, acceptance, owner, reviewer and dependencies.
+4. Create a board with Backlog, Ready, In progress, In review, Blocked, Done. Seed and split current backlog entries from [the plan](../planning/development-plan.md); B16/UC-12 are retired. Every Ready issue has FR/UC references, acceptance, owner, reviewer and dependencies.
 5. Resolve A01/A03/A06/A07/A09/A13/A17 with the client/lecturer first. Stack selection does not settle quota, consent, penalties or eligibility.
 6. Have two teammates pair on one shared scaffold using ADR-001; everyone else develops specifications/contracts. Do not generate five apps.
 7. Require all five to reproduce setup and complete a reviewed onboarding PR. Weekly integrated demo; two short coordination meetings per week. Each owner handles analysis, API, UI and tests.

@@ -6,7 +6,7 @@ Five-student OOAD project: campus/dormitory sales and zero-price giveaways. Eigh
 
 ## Current state
 
-The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, reference category seed, health/status endpoints, default-deny security and database integration tests. Frontend, login and marketplace features are not implemented yet. Business questions in the brief remain OPEN.
+The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, reference category seed, health/status endpoints, default-deny security and database integration tests. Frontend, login and marketplace features are not implemented yet. Business questions in the client requirements remain OPEN.
 
 ## Start here
 

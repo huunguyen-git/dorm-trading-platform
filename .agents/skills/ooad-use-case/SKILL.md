@@ -5,7 +5,7 @@ description: Draft or review detailed OOAD use cases for the dorm trading projec
 
 # OOAD use-case workflow
 
-Locate the Git root. Read the requested FR rows and relevant A rows in docs/product/brief.md,
+Locate the Git root. Read the requested FR rows and relevant A rows in docs/product/client-requirements.md,
 the UC inventory in docs/planning/development-plan.md, and any recorded decisions affecting
 this use case. Read only related existing diagrams/API contracts, if present.
 

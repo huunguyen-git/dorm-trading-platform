@@ -345,7 +345,7 @@ Use case / UML / API / dữ liệu / kiểm thử / nhiệm vụ cần cập nh�
 
 - Đưa tài liệu này cho thành viên/AI khi tiếp tục phân tích nghiệp vụ; đọc thêm [AGENTS.md](../../AGENTS.md) để biết quy tắc làm việc và [README](../../README.md) để biết trạng thái chạy thực tế.
 - [ADR công nghệ](../architecture/ADR-001-stack.md) quản lý lựa chọn kỹ thuật; tài liệu này quản lý yêu cầu nghiệp vụ.
-- [Kế hoạch phát triển](../planning/development-plan.md) và [bảng giao việc](../onboarding/team-kickoff.md) còn nội dung từ trước quyết định mới, cần đồng bộ trước khi nhận việc liên quan. Những nhiệm vụ giữ chỗ tự hết hạn, chiến dịch thanh lý hoặc ngưỡng khóa cũ không còn là chỉ dẫn hiện hành.
+- [Kế hoạch phát triển](../planning/development-plan.md) và [bảng giao việc](../onboarding/team-kickoff.md) đã được đồng bộ với việc bỏ FR-14/A16, không tự hết hạn giữ chỗ và ngưỡng khóa hiện hành. Các kiểm soát kỹ thuật trong kế hoạch/ADR không phê duyệt các phương án nghiệp vụ còn mở ở mục 7.
 - [Brief cũ](brief.md) chỉ còn là đường dẫn chuyển tiếp để các liên kết cũ không hỏng.
 
 Ở thời điểm lập v1.0, backend mới có nền tảng và dữ liệu danh mục; mô hình dữ liệu nghiệp vụ đầy đủ chưa được định nghĩa/triển khai. Tài liệu này không thay cho việc chốt các A ưu tiên P0 và phân tích OOAD trước khi xây dựng schema.
