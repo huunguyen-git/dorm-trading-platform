@@ -29,6 +29,8 @@ Why: Java supports the OOAD course directly; the monolith allows atomic cross-do
 | Testcontainers | 2.0.5 | Inherit Boot BOM; use v2 module coordinates |
 | JUnit Jupiter | 6.0.3 | Inherit Boot BOM, replacing old brief's JUnit 5 assumption |
 
+CI uses Adoptium's normalized SemVer `21.0.12+101.0.LTS` for the vendor version `21.0.12.1+1`; setup-java rejects the four-component display version. The Linux runner is pinned to ubuntu-24.04 and action revisions are pinned.
+
 Spring Security, Spring Data JPA, Hibernate, PostgreSQL JDBC driver and Mockito follow the Boot BOM. Do not independently override their versions. Exact auxiliary npm peers/types/lint packages go in the scaffold's package-lock.json after resolution; they are not separately hand-pinned here. REST Assured is deferred to the first API-test task; Spring's HTTP test support is sufficient for the skeleton. JaCoCo is added with the coverage task using a release compatible with Java 21. Backend verification covers the database/security foundation; frontend integration is still unverified.
 
 The first scaffold must create and commit the Maven Wrapper and frontend lockfile, resolve peers, build both applications and exercise PostgreSQL. On an incompatibility, document a minimal version adjustment here and in manifests together; do not silently switch the architecture. Review security patch updates during the project; avoid unneeded major upgrades in the eight-week window. Never use floating latest tags for application dependencies or deployed images.
