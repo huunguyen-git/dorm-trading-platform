@@ -1,0 +1,29 @@
+name: Backend CI
+on:
+  push:
+    branches: [main, 'chore/repository-setup-backend-init']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+101.0.LTS' # Adoptium SemVer for 21.0.12.1+1
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Build and test against PostgreSQL with Testcontainers
+        working-directory: backend
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: backend-test-results
+          path: backend/target/surefire-reports/
+          if-no-files-found: ignore

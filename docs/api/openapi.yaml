@@ -1,0 +1,2473 @@
+openapi: 3.1.0
+info:
+  title: Dorm Trading Platform - shared implementation contracts
+  version: 0.1.0
+  description: Requirements v1.1. Only system status and actuator health are implemented. Business operations are
+    planned contracts, not runtime routes. x-policy-gates list OPEN decisions; see docs/api/README.md before implementation.
+security:
+- sessionCookie: []
+tags:
+- name: Identity
+- name: Listings
+- name: Negotiation
+- name: Reservations
+- name: Trades
+- name: Moderation
+- name: Notifications
+- name: Media
+paths:
+  /api/v1/members/me:
+    get:
+      operationId: getCurrentMember
+      tags:
+      - Identity
+      summary: Authenticated self profile
+      description: Authenticated self profile
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters: []
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/inventory/items:
+    post:
+      operationId: createInventoryItem
+      tags:
+      - Listings
+      summary: Create one physical item in actor inventory
+      description: Create one physical item in actor inventory
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateItemRequest'
+    get:
+      operationId: listOwnInventory
+      tags:
+      - Listings
+      summary: Read own inventory and derived availability
+      description: Read own inventory and derived availability
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/size'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemPage'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/listings:
+    post:
+      operationId: createListing
+      tags:
+      - Listings
+      summary: Create a draft revision from own items and listing photos
+      description: Create a draft revision from own items and listing photos
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateListingRequest'
+    get:
+      operationId: listListings
+      tags:
+      - Listings
+      summary: Browse approved published revisions
+      description: Authenticated initial contract; guest access not approved. Stable order createdAt DESC, id DESC.
+        Availability HELD if any item is held, SOLD if any item is sold (SOLD wins). No private seller details.
+        Optional q matches title/description, categoryId is exact category, maxPriceVnd is inclusive, and courseCode
+        is exact stored text without cross-school equivalence (A15). Radius/coordinates are deferred.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A11: geographic search is deferred'
+      - 'A14: unavailable listing display/quota classification'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/size'
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 200
+      - name: categoryId
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - name: maxPriceVnd
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+      - name: courseCode
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 80
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingPage'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/listings/{listingId}:
+    get:
+      operationId: getListing
+      tags:
+      - Listings
+      summary: Read published listing; drafts only for owner or authorized reviewer
+      description: Read published listing; drafts only for owner or authorized reviewer
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: listingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/listings/{listingId}/revisions:
+    post:
+      operationId: reviseListing
+      tags:
+      - Listings
+      summary: Create a new draft revision; never overwrite agreed content
+      description: Deny if this listing is held or completed. A different listing holding a shared item does not
+        prohibit this edit. Do not edit inventory records or allocations through this endpoint.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A14: old published revision visibility while editing'
+      parameters:
+      - name: listingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviseListingRequest'
+  /api/v1/listings/{listingId}/submission:
+    post:
+      operationId: submitListing
+      tags:
+      - Listings
+      summary: Submit current draft for moderation
+      description: Owner only. Validate one or more own physical items, 1-5 own listing photos, price and category.
+        Submitted revision content becomes immutable; changes create a new revision.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: listingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+  /api/v1/listings/{listingId}/withdrawal:
+    post:
+      operationId: withdrawListing
+      tags:
+      - Listings
+      summary: Withdraw an unheld listing without deleting history
+      description: Withdraw an unheld listing without deleting history
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A14: final lifecycle details'
+      parameters:
+      - name: listingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+  /api/v1/moderation/listings/{listingId}/decisions:
+    post:
+      operationId: reviewListing
+      tags:
+      - Moderation
+      summary: Review a specific listing revision
+      description: Authorized listing reviewer only. Approval and publication quota check occur atomically under
+        seller guard. 5 open/held below 120; 10 from 120. Score drop preserves existing publications.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A14: classification of unavailable related listings'
+      parameters:
+      - name: listingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewListingRequest'
+  /api/v1/conversations:
+    post:
+      operationId: createConversation
+      tags:
+      - Negotiation
+      summary: Start or return buyer conversation with listing seller
+      description: Start or return buyer conversation with listing seller
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+  /api/v1/conversations/{conversationId}/messages:
+    post:
+      operationId: sendMessage
+      tags:
+      - Negotiation
+      summary: Participant sends message
+      description: Participant sends message
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+    get:
+      operationId: listMessages
+      tags:
+      - Negotiation
+      summary: Participants read messages
+      description: Only this conversation buyer/seller. Stable order createdAt ASC, id ASC.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/size'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/conversations/{conversationId}/proposals:
+    post:
+      operationId: proposePrice
+      tags:
+      - Negotiation
+      summary: Buyer proposes price for a specific revision
+      description: Does not reserve any item. Giveaway proposals must stay zero; verify revision belongs to conversation
+        listing.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposePriceRequest'
+  /api/v1/proposals/{proposalId}/decision:
+    post:
+      operationId: decideProposal
+      tags:
+      - Negotiation
+      summary: Seller accepts or rejects a pending price proposal
+      description: No inventory hold. Serialize proposal decision; a terminal decision cannot be overwritten. Later
+        reservation acceptance rechecks listing revision.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: proposalId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideProposalRequest'
+  /api/v1/reservations:
+    post:
+      operationId: requestReservation
+      tags:
+      - Reservations
+      summary: Buyer requests whole listing; no hold yet
+      description: Buyer requests whole listing; no hold yet
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+  /api/v1/reservations/{reservationId}:
+    get:
+      operationId: getReservation
+      tags:
+      - Reservations
+      summary: Participants read reservation
+      description: Participants read reservation
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/reservations/{reservationId}/acceptance:
+    post:
+      operationId: acceptReservation
+      tags:
+      - Reservations
+      summary: Seller atomically holds listing and all shared items
+      description: Lock guards in documented order, recheck approved revision and item set, snapshot price/content/items,
+        allocate ALL items and create unique trade in one transaction. Conflict rolls back everything. No buyer
+        quota; no expiry timestamp.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+  /api/v1/reservations/{reservationId}/rejection:
+    post:
+      operationId: rejectReservation
+      tags:
+      - Reservations
+      summary: Seller rejects a pending request
+      description: Seller rejects a pending request
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+  /api/v1/reservations/{reservationId}/cancellation:
+    post:
+      operationId: cancelBeforeHandover
+      tags:
+      - Reservations
+      summary: Either participant cancels before handover report
+      description: Only before evidence-backed handover. Record actor/reason, release allocations atomically and
+        notify peer. Reopening requires separate publication/permission/quota checks. After handover return 409;
+        mutual/admin cancellation is a deferred contract (A06).
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+  /api/v1/reservations/{reservationId}/appointment:
+    put:
+      operationId: setAppointment
+      tags:
+      - Reservations
+      summary: Participant records meeting arrangement
+      description: Only accepted reservation participants. expectedVersion is reservation version, increment it
+        atomically; response version is the new reservation version. A meeting edit does not reserve or release
+        items.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentRequest'
+  /api/v1/reservations/{reservationId}/trade:
+    get:
+      operationId: getReservationTrade
+      tags:
+      - Trades
+      summary: Participants read trade created at acceptance
+      description: Participants read trade created at acceptance
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: reservationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/trades/{tradeId}/handover:
+    post:
+      operationId: reportHandover
+      tags:
+      - Trades
+      summary: Seller reports handover with protected photos
+      description: Require seller-owned HANDOVER image assets. First report fixes reviewDueAt = handoverReportedAt
+        +24h; repeats/reissue cannot move it. Never complete from silence.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A06/A12: evidence validation/access policy'
+      parameters:
+      - name: tradeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportHandoverRequest'
+  /api/v1/trades/{tradeId}/completion-challenges:
+    post:
+      operationId: issueCompletionChallenge
+      tags:
+      - Trades
+      summary: Buyer obtains or reissues completion challenge
+      description: 'Only authenticated buyer after handover. Require configured issuance/attempt rate limits before
+        enabling. Six digits, 10 minutes, five failures, keyed verifier, one use. Reissue invalidates old code;
+        no change to handover deadline. Cache-Control: no-store. This operation increments trade version. Lost issuance
+        response requires a fresh version and a rate-limited reissue; stale retries return 409. Plaintext codes
+        are never stored in command receipts.'
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A06: issuance/attempt rate-limit windows'
+      parameters:
+      - name: tradeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionChallengeView'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Never cache plaintext challenge
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+  /api/v1/trades/{tradeId}/completion:
+    post:
+      operationId: confirmCompletion
+      tags:
+      - Trades
+      summary: Buyer confirms completion with own action-bound challenge
+      description: Same terminal transaction boundary as future evidence-backed admin completion. Verify buyer/code,
+        increment bad attempts durably; mark items SOLD, reservation/trade COMPLETED and rating deadline +15 days
+        exactly once.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A06: issuance/attempt rate-limit windows'
+      parameters:
+      - name: tradeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmCompletionRequest'
+  /api/v1/trades/{tradeId}/rating:
+    post:
+      operationId: submitRating
+      tags:
+      - Trades
+      summary: Buyer submits one rating within 15 days after completion
+      description: Serialize with deadline job using trade guard and unique outcome row. 5 stars +2, 4 stars 0;
+        1-3 pending admin review before any negative effect. Pending/rejected submissions exclude no-rating +1.
+        Public review display/appeals deferred.
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: tradeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitRatingRequest'
+  /api/v1/reports:
+    post:
+      operationId: submitReport
+      tags:
+      - Moderation
+      summary: Submit account/listing report with evidence
+      description: No penalty on submission. Unsold listing report needs no trade. Verify reported member matches
+        referenced listing/trade; protect all evidence. Numeric sanctions and duplicate-incident resolution are
+        separate deferred work.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A12: evidence formats/access/retention'
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+  /api/v1/reports/{reportId}:
+    get:
+      operationId: getReport
+      tags:
+      - Moderation
+      summary: Reporter or authorized case handler reads report acknowledgement
+      description: Reporter or authorized case handler reads report acknowledgement
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A08/A12: case authority/evidence access'
+      parameters:
+      - name: reportId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      tags:
+      - Notifications
+      summary: Read own inbox
+      description: Read own inbox
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/size'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/notifications/{notificationId}/read:
+    post:
+      operationId: markNotificationRead
+      tags:
+      - Notifications
+      summary: Mark own notification read
+      description: Mark own notification read
+      x-implementation-status: planned
+      x-policy-gates: []
+      parameters:
+      - name: notificationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Success (planned contract)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+  /api/v1/system/status:
+    get:
+      operationId: getSystemStatus
+      summary: Public application identification
+      security: []
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: Backend responds
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - application
+                - apiVersion
+                properties:
+                  application:
+                    type: string
+                    const: dorm-trading-platform
+                  apiVersion:
+                    type: string
+                    const: v1
+  /actuator/health:
+    get:
+      operationId: getHealth
+      summary: Public database readiness without component details
+      security: []
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    const: UP
+        '503':
+          description: Not ready
+  /api/v1/media:
+    post:
+      operationId: uploadMedia
+      tags:
+      - Media
+      summary: Upload an asset for a declared purpose
+      description: Planned multipart upload. Owner derives from session. Server generates storage key and validates
+        actual content/type/size; MIME supplied by client is not proof. Listing photos and restricted evidence use
+        separate storage roots. Evidence formats, viewer roles and retention await A12. No URL fetching or client
+        paths. Upload first, then reference opaque ID; upload alone grants no case access.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A06/A12: evidence rules; listing-only photo adapter can proceed'
+      parameters:
+      - $ref: '#/components/parameters/Csrf'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - purpose
+              - file
+              properties:
+                purpose:
+                  $ref: '#/components/schemas/MediaPurpose'
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Validated asset metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaView'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+        '413':
+          description: Configured upload limit exceeded
+        '415':
+          description: Unsupported or invalid media
+  /api/v1/media/{mediaId}:
+    get:
+      operationId: readMedia
+      tags:
+      - Media
+      summary: Read an authorized asset
+      description: Listing photo readable only through a visible approved listing or by owner/authorized reviewer.
+        Restricted evidence requires authorization to its verification/trade/case on every read; possession of ID
+        or uploader ownership alone grants no case-handler access. Never expose a filesystem key/path. No public
+        static hosting for private assets.
+      x-implementation-status: planned
+      x-policy-gates:
+      - 'A06/A12: evidence viewers'
+      parameters:
+      - name: mediaId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 'Asset bytes after authorization; restricted responses use Cache-Control: no-store'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+  /api/v1/categories:
+    get:
+      operationId: listCategories
+      tags:
+      - Listings
+      summary: Read category taxonomy
+      x-implementation-status: planned
+      x-policy-gates: []
+      responses:
+        '200':
+          description: Category nodes with optional parent ID
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryView'
+        '401':
+          $ref: '#/components/responses/401'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: Server session; unsafe requests also require X-CSRF-TOKEN. Login/CSRF bootstrap is deferred to
+        the identity slice and native-client scope check.
+  parameters:
+    Csrf:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      schema:
+        type: string
+      description: CSRF token bound to current session; obtain through the future identity bootstrap.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Scoped to actor and operation. Same key/payload returns the original resource ID with its current
+        representation; different payload returns 409. Commit receipt and domain mutation atomically. Sensitive
+        challenge issuance uses expectedVersion instead.
+    page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    size:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+  responses:
+    '400':
+      description: Invalid JSON, parameter or field validation
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    '401':
+      description: Session authentication required
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    '403':
+      description: Actor permission or CSRF denied
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    '404':
+      description: Resource not found or intentionally concealed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    '409':
+      description: Stale version, unavailable item, quota, invalid transition or idempotency conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    '429':
+      description: Rate limit exceeded
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+  schemas:
+    Role:
+      type: string
+      enum:
+      - MEMBER
+      - MODERATOR
+      - ADMIN
+      x-java-type: com.campus.identity.api.IdentityDtos$Role
+    MemberView:
+      type: object
+      required:
+      - id
+      - displayName
+      - roles
+      - activated
+      - reputation
+      - graduated
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          minLength: 1
+          pattern: \S
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        activated:
+          type: boolean
+        reputation:
+          type: integer
+          format: int32
+        graduated:
+          type: boolean
+      x-java-type: com.campus.identity.api.IdentityDtos$MemberView
+      description: Self profile only; no student ID, email, phone, address or verification evidence in public listing
+        responses.
+    FieldViolation:
+      type: object
+      required:
+      - field
+      - message
+      properties:
+        field:
+          type: string
+          minLength: 1
+          pattern: \S
+        message:
+          type: string
+          minLength: 1
+          pattern: \S
+      x-java-type: com.campus.shared.api.SharedDtos$FieldViolation
+    ApiProblem:
+      type: object
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - instance
+      - code
+      - violations
+      properties:
+        type:
+          type: string
+          minLength: 1
+          pattern: \S
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+          minLength: 1
+          pattern: \S
+        instance:
+          type: string
+          minLength: 1
+          pattern: \S
+        code:
+          type: string
+          minLength: 1
+          pattern: \S
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldViolation'
+      x-java-type: com.campus.shared.api.SharedDtos$ApiProblem
+      description: Planned application/problem+json envelope. Existing security filter errors may be empty until
+        the error-handler slice. Never include rejected values or secrets.
+    VersionRequest:
+      type: object
+      required:
+      - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+      x-java-type: com.campus.shared.api.SharedDtos$VersionRequest
+    ReasonRequest:
+      type: object
+      required:
+      - expectedVersion
+      - reason
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        reason:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 4000
+      x-java-type: com.campus.shared.api.SharedDtos$ReasonRequest
+    OfferType:
+      type: string
+      enum:
+      - SALE
+      - GIVEAWAY
+      x-java-type: com.campus.listing.api.ListingDtos$OfferType
+    PublicationState:
+      type: string
+      enum:
+      - DRAFT
+      - PUBLISHED
+      - HIDDEN
+      - WITHDRAWN
+      - ARCHIVED
+      x-java-type: com.campus.listing.api.ListingDtos$PublicationState
+    ReviewState:
+      type: string
+      enum:
+      - DRAFT
+      - PENDING
+      - APPROVED
+      - REJECTED
+      x-java-type: com.campus.listing.api.ListingDtos$ReviewState
+    Availability:
+      type: string
+      enum:
+      - AVAILABLE
+      - HELD
+      - SOLD
+      x-java-type: com.campus.listing.api.ListingDtos$Availability
+    CategoryView:
+      type: object
+      required:
+      - id
+      - code
+      - name
+      properties:
+        id:
+          type: integer
+          format: int64
+        code:
+          type: string
+          minLength: 1
+          pattern: \S
+        name:
+          type: string
+          minLength: 1
+          pattern: \S
+        parentId:
+          type: integer
+          format: int64
+      x-java-type: com.campus.listing.api.ListingDtos$CategoryView
+    CreateItemRequest:
+      type: object
+      required:
+      - name
+      - conditionDescription
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        conditionDescription:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 4000
+      x-java-type: com.campus.listing.api.ListingDtos$CreateItemRequest
+    ItemView:
+      type: object
+      required:
+      - id
+      - sellerId
+      - name
+      - conditionDescription
+      - availability
+      properties:
+        id:
+          type: string
+          format: uuid
+        sellerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          pattern: \S
+        conditionDescription:
+          type: string
+          minLength: 1
+          pattern: \S
+        availability:
+          $ref: '#/components/schemas/Availability'
+      x-java-type: com.campus.listing.api.ListingDtos$ItemView
+    ListingContent:
+      type: object
+      required:
+      - title
+      - description
+      - categoryId
+      - offerType
+      - priceVnd
+      - areaLabel
+      - itemIds
+      - photoIds
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 10000
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+        offerType:
+          $ref: '#/components/schemas/OfferType'
+        priceVnd:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Integer VND; bounded to JavaScript safe integers (technical transport limit).
+        areaLabel:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        itemIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          uniqueItems: true
+        photoIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+        author:
+          type: string
+          maxLength: 200
+        publisher:
+          type: string
+          maxLength: 200
+        courseCode:
+          type: string
+          maxLength: 80
+        lecturer:
+          type: string
+          maxLength: 200
+      x-java-type: com.campus.listing.api.ListingDtos$ListingContent
+      description: One item or whole combo; giveaway price must be zero. Study-field requiredness remains A14/form
+        review; do not treat optional fields as a resolved client decision.
+      allOf:
+      - if:
+          properties:
+            offerType:
+              const: GIVEAWAY
+          required:
+          - offerType
+        then:
+          properties:
+            priceVnd:
+              const: 0
+    CreateListingRequest:
+      type: object
+      required:
+      - content
+      properties:
+        content:
+          $ref: '#/components/schemas/ListingContent'
+      x-java-type: com.campus.listing.api.ListingDtos$CreateListingRequest
+    ReviseListingRequest:
+      type: object
+      required:
+      - expectedVersion
+      - content
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        content:
+          $ref: '#/components/schemas/ListingContent'
+      x-java-type: com.campus.listing.api.ListingDtos$ReviseListingRequest
+    ListingView:
+      type: object
+      required:
+      - id
+      - sellerId
+      - revisionId
+      - version
+      - publicationState
+      - reviewState
+      - availability
+      - content
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        sellerId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
+        publicationState:
+          $ref: '#/components/schemas/PublicationState'
+        reviewState:
+          $ref: '#/components/schemas/ReviewState'
+        availability:
+          $ref: '#/components/schemas/Availability'
+        content:
+          $ref: '#/components/schemas/ListingContent'
+        createdAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.listing.api.ListingDtos$ListingView
+    ListingPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - totalElements
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingView'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+      x-java-type: com.campus.listing.api.ListingDtos$ListingPage
+    ItemPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - totalElements
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemView'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+      x-java-type: com.campus.listing.api.ListingDtos$ItemPage
+    CreateConversationRequest:
+      type: object
+      required:
+      - listingId
+      properties:
+        listingId:
+          type: string
+          format: uuid
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$CreateConversationRequest
+    ConversationView:
+      type: object
+      required:
+      - id
+      - listingId
+      - sellerId
+      - buyerId
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        listingId:
+          type: string
+          format: uuid
+        sellerId:
+          type: string
+          format: uuid
+        buyerId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$ConversationView
+    SendMessageRequest:
+      type: object
+      required:
+      - body
+      properties:
+        body:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 4000
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$SendMessageRequest
+    MessageView:
+      type: object
+      required:
+      - id
+      - conversationId
+      - senderId
+      - body
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        senderId:
+          type: string
+          format: uuid
+        body:
+          type: string
+          minLength: 1
+          pattern: \S
+        createdAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$MessageView
+    MessagePage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - totalElements
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageView'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$MessagePage
+    ProposalState:
+      type: string
+      enum:
+      - PENDING
+      - ACCEPTED
+      - REJECTED
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$ProposalState
+    ProposePriceRequest:
+      type: object
+      required:
+      - revisionId
+      - amountVnd
+      properties:
+        revisionId:
+          type: string
+          format: uuid
+        amountVnd:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Integer VND; bounded to JavaScript safe integers (technical transport limit).
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$ProposePriceRequest
+    ProposalView:
+      type: object
+      required:
+      - id
+      - conversationId
+      - revisionId
+      - amountVnd
+      - state
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        amountVnd:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Integer VND; bounded to JavaScript safe integers (technical transport limit).
+        state:
+          $ref: '#/components/schemas/ProposalState'
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$ProposalView
+    ProposalVerdict:
+      type: string
+      enum:
+      - ACCEPTED
+      - REJECTED
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$ProposalVerdict
+    DecideProposalRequest:
+      type: object
+      required:
+      - verdict
+      properties:
+        verdict:
+          $ref: '#/components/schemas/ProposalVerdict'
+      x-java-type: com.campus.negotiation.api.NegotiationDtos$DecideProposalRequest
+    ReservationState:
+      type: string
+      enum:
+      - REQUESTED
+      - ACCEPTED
+      - REJECTED
+      - CANCELLED
+      - COMPLETED
+      x-java-type: com.campus.reservation.api.ReservationDtos$ReservationState
+    CreateReservationRequest:
+      type: object
+      required:
+      - listingId
+      - revisionId
+      properties:
+        listingId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        proposalId:
+          type: string
+          format: uuid
+      x-java-type: com.campus.reservation.api.ReservationDtos$CreateReservationRequest
+      description: Buyer is the authenticated actor. Price comes from this approved revision or this buyer's accepted
+        proposal; no client supplied seller/price.
+    ReservationView:
+      type: object
+      required:
+      - id
+      - listingId
+      - revisionId
+      - sellerId
+      - buyerId
+      - state
+      - version
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        listingId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        sellerId:
+          type: string
+          format: uuid
+        buyerId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/ReservationState'
+        version:
+          type: integer
+          format: int64
+        agreedPriceVnd:
+          type: integer
+          format: int64
+        acceptedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.reservation.api.ReservationDtos$ReservationView
+    AppointmentRequest:
+      type: object
+      required:
+      - expectedVersion
+      - meetingAt
+      - placeDescription
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        meetingAt:
+          type: string
+          format: date-time
+        placeDescription:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 2000
+      x-java-type: com.campus.reservation.api.ReservationDtos$AppointmentRequest
+    AppointmentView:
+      type: object
+      required:
+      - reservationId
+      - meetingAt
+      - placeDescription
+      - version
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+        meetingAt:
+          type: string
+          format: date-time
+        placeDescription:
+          type: string
+          minLength: 1
+          pattern: \S
+        version:
+          type: integer
+          format: int64
+      x-java-type: com.campus.reservation.api.ReservationDtos$AppointmentView
+    TradeState:
+      type: string
+      enum:
+      - AWAITING_HANDOVER
+      - AWAITING_CONFIRMATION
+      - ADMIN_REVIEW
+      - COMPLETED
+      - CANCELLED
+      x-java-type: com.campus.trade.api.TradeDtos$TradeState
+    TradeView:
+      type: object
+      required:
+      - id
+      - reservationId
+      - sellerId
+      - buyerId
+      - state
+      - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        reservationId:
+          type: string
+          format: uuid
+        sellerId:
+          type: string
+          format: uuid
+        buyerId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/TradeState'
+        version:
+          type: integer
+          format: int64
+        handoverReportedAt:
+          type: string
+          format: date-time
+        reviewDueAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        ratingDueAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.trade.api.TradeDtos$TradeView
+    ReportHandoverRequest:
+      type: object
+      required:
+      - expectedVersion
+      - photoIds
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        photoIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          uniqueItems: true
+      x-java-type: com.campus.trade.api.TradeDtos$ReportHandoverRequest
+    ConfirmCompletionRequest:
+      type: object
+      required:
+      - expectedVersion
+      - challengeId
+      - code
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        challengeId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          minLength: 1
+          pattern: ^[0-9]{6}$
+      x-java-type: com.campus.trade.api.TradeDtos$ConfirmCompletionRequest
+    CompletionChallengeView:
+      type: object
+      required:
+      - id
+      - code
+      - expiresAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          minLength: 1
+          pattern: ^[0-9]{6}$
+        expiresAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.trade.api.TradeDtos$CompletionChallengeView
+      description: 'Buyer-only issuance response, Cache-Control: no-store. Never log or include in trade/history
+        DTOs. Reissue invalidates previous challenge. Reissue frequency is gated on A06.'
+    SubmitRatingRequest:
+      type: object
+      required:
+      - stars
+      - comment
+      properties:
+        stars:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 4000
+      x-java-type: com.campus.trade.api.TradeDtos$SubmitRatingRequest
+    RatingReviewState:
+      type: string
+      enum:
+      - PENDING
+      - APPROVED
+      - REJECTED
+      - REMOVED
+      x-java-type: com.campus.trade.api.TradeDtos$RatingReviewState
+    RatingView:
+      type: object
+      required:
+      - tradeId
+      - stars
+      - comment
+      - reviewState
+      - submittedAt
+      properties:
+        tradeId:
+          type: string
+          format: uuid
+        stars:
+          type: integer
+          format: int32
+        comment:
+          type: string
+          minLength: 1
+          pattern: \S
+        reviewState:
+          $ref: '#/components/schemas/RatingReviewState'
+        submittedAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.trade.api.TradeDtos$RatingView
+      description: Submission acknowledgement to buyer; public pending/rejected rating visibility is not decided.
+    ListingVerdict:
+      type: string
+      enum:
+      - APPROVED
+      - REJECTED
+      x-java-type: com.campus.moderation.api.ModerationDtos$ListingVerdict
+    ReviewListingRequest:
+      type: object
+      required:
+      - expectedVersion
+      - revisionId
+      - verdict
+      - reason
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        revisionId:
+          type: string
+          format: uuid
+        verdict:
+          $ref: '#/components/schemas/ListingVerdict'
+        reason:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 4000
+      x-java-type: com.campus.moderation.api.ModerationDtos$ReviewListingRequest
+    CreateReportRequest:
+      type: object
+      required:
+      - reportedMemberId
+      - description
+      - evidenceIds
+      properties:
+        reportedMemberId:
+          type: string
+          format: uuid
+        listingId:
+          type: string
+          format: uuid
+        tradeId:
+          type: string
+          format: uuid
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 10000
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          uniqueItems: true
+      x-java-type: com.campus.moderation.api.ModerationDtos$CreateReportRequest
+      description: Account report may omit listing/trade. Server verifies target relationships and evidence authorization.
+        Asset references do not settle A12 supported file formats.
+    ReportState:
+      type: string
+      enum:
+      - SUBMITTED
+      - UNDER_REVIEW
+      - RESOLVED
+      - DISMISSED
+      x-java-type: com.campus.moderation.api.ModerationDtos$ReportState
+    ReportView:
+      type: object
+      required:
+      - id
+      - reportedMemberId
+      - state
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        reportedMemberId:
+          type: string
+          format: uuid
+        listingId:
+          type: string
+          format: uuid
+        tradeId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/ReportState'
+        createdAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.moderation.api.ModerationDtos$ReportView
+      description: Reporter acknowledgement; excludes evidence links and moderator-only notes.
+    MediaPurpose:
+      type: string
+      enum:
+      - LISTING
+      - STUDENT_CARD
+      - HANDOVER
+      - REPORT
+      x-java-type: com.campus.media.api.MediaDtos$MediaPurpose
+    MediaView:
+      type: object
+      required:
+      - id
+      - purpose
+      - contentType
+      - byteSize
+      properties:
+        id:
+          type: string
+          format: uuid
+        purpose:
+          $ref: '#/components/schemas/MediaPurpose'
+        contentType:
+          type: string
+          minLength: 1
+          pattern: \S
+        byteSize:
+          type: integer
+          format: int64
+      x-java-type: com.campus.media.api.MediaDtos$MediaView
+      description: Opaque asset ID. No storage path or unrestricted evidence URL.
+    NotificationView:
+      type: object
+      required:
+      - id
+      - kind
+      - message
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          minLength: 1
+          pattern: \S
+        message:
+          type: string
+          minLength: 1
+          pattern: \S
+        createdAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+      x-java-type: com.campus.notification.api.NotificationDtos$NotificationView
+    NotificationPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - totalElements
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationView'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+      x-java-type: com.campus.notification.api.NotificationDtos$NotificationPage
