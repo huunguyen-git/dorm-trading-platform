@@ -8,6 +8,41 @@ Open this repository as the AI/editor project. Codex combines global and project
 
 Ask: “List the instruction files and repository skills you actually loaded, selected stack, implementation status and relevant unresolved decisions. Do not edit files.” Expected today: backend foundation with documented Maven verification; frontend and business features are pending.
 
+## Required briefing at the start of a task
+
+Root [AGENTS.md](../../AGENTS.md#task-start-problem-briefing) requires the agent to inspect
+the task's sources and raise relevant existing problems **before implementation edits**.
+This is proactive behavior for every new assignment, even when the member does not ask
+about risks. An initial “I will inspect the repository” message is not the problem briefing.
+
+The agent checks current requirements/decision IDs, the assigned issue or user task,
+the [owner/dependency guide](../api/README.md), affected OpenAPI `x-policy-gates` and actual
+implementation, plus schema/transaction guidance where relevant. Its first substantive
+update should explain:
+
+- Which open decision, contradiction, missing implementation dependency or setup problem
+  affects this task, with the ID and source.
+- What part of the requested behavior is affected, what can proceed now, and what must wait.
+- A safe workaround or narrower starting slice, and the documented decision owner/reviewer.
+
+For example, a listing-edit task should surface A14's unresolved old-revision visibility
+before choosing what users will see. It should also preserve the already approved rule:
+a hold on a different listing sharing the item does not itself prohibit this edit.
+The agent can work on independent revision storage/validation while the display decision
+remains open. It must not ask whether to reapprove the settled rule or list every unrelated
+question in the project.
+
+When no relevant blocker is found, the agent says so for the sources it checked and
+states its scope/checks. New findings are raised as soon as discovered, not saved for
+the final answer. A briefing does not require stopping all work or requesting blanket
+permission; only a genuinely blocking missing decision needs a focused question.
+Follow-up messages on the same task do not require repeating unchanged warnings.
+
+Members should check this behavior on their first real task. If their assistant has not
+loaded the repository guidance, explicitly include `Read AGENTS.md` in the prompt. These
+shared instructions establish expected behavior; they are not a technical guarantee that
+every AI/editor configuration will load or follow them.
+
 ## Available-first skill selection
 
 The curated OpenAI catalog was inspected first. One existing skill fits our generic CI workflow; one OOAD-specific gap needs a custom skill. Both live in .agents/skills so teammates receive them with the repository.
@@ -36,8 +71,12 @@ Skills should be available on the next turn with this repository as the working 
 ```text
 Read AGENTS.md and the relevant client requirements, approved decision, UC and API contract.
 Task: issue #..., FR-..., UC-.... Scope: ... Acceptance: ... Dependencies: ...
-Inspect existing code and identify unresolved policy conflicts. Implement the bounded
-change using the ADR stack; preserve unrelated edits. Run actual documented checks.
+Before implementation edits, inspect existing code and give me the task-start problem
+briefing required by AGENTS.md. Include relevant decision IDs/sources, impact, work that
+can proceed, blocked steps and safe workarounds. If none are found, say so for the sources
+checked. Continue independent work; do not invent policy or reopen approved decisions.
+Implement the bounded change using the ADR stack; preserve unrelated edits. Raise newly
+discovered relevant problems immediately. Run actual documented checks.
 Report behavior, files, commands/results, limitations and affected OOAD artifacts.
 Explain authorization/state/transaction choices. Do not merge or publish.
 ```

@@ -106,6 +106,7 @@
 				<configuration>
 					<systemPropertyVariables>
 						<user.timezone>UTC</user.timezone>
+						<contract.path>${project.basedir}/../docs/api/openapi.yaml</contract.path>
 					</systemPropertyVariables>
 				</configuration>
 			</plugin>

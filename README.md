@@ -6,12 +6,12 @@ Five-student OOAD project: campus/dormitory sales and zero-price giveaways. Eigh
 
 ## Current state
 
-The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, reference category seed, health/status endpoints, default-deny security and database integration tests. Frontend, login and marketplace features are not implemented yet. Business questions in the client requirements remain OPEN.
+The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, reference category seed, health/status endpoints, default-deny security and database integration tests. Shared OpenAPI contracts, validated Java DTOs and the V2 domain schema are ready for owner review: start with the [backend contract handoff](docs/api/README.md). Frontend, login and marketplace endpoints are not implemented yet. Business questions in the client requirements remain OPEN.
 
 ## Start here
 
 1. [Team onboarding](docs/onboarding/README.md): leader checklist and scaffold acceptance.
-2. [Living client requirements (Vietnamese)](docs/product/client-requirements.md): current requirements, confirmed changes and a separate register of unresolved questions with proposed solutions. FR-14/A16 are retired; proposals require approval.
+2. [Living client requirements (Vietnamese), v1.1](docs/product/client-requirements.md): confirmed decisions and remaining questions. Shared physical items coordinate availability across listings; buyers have no hold quota. Fixed report penalties and barter remain unresolved. FR-14/A16 are retired; proposals require approval. See the [analysis diagrams](docs/uml/marketplace-lifecycle.md) for the approved flow.
 3. [Accepted stack ADR](docs/architecture/ADR-001-stack.md): exact versions and tooling rollout.
 4. [Eight-week plan](docs/planning/development-plan.md): backlog, ownership, OOAD and tests.
 5. [Contributing](CONTRIBUTING.md) and [AI workflow](docs/onboarding/ai-workflow.md).
@@ -92,8 +92,10 @@ Linux/CI equivalent, from the root:
 ./backend/mvnw -f backend/pom.xml --batch-mode --no-transfer-progress verify
 ```
 
-Tests cover public status/health, private endpoint denial, CSRF, migrated category seed and
-safe migration reruns. Docker failures are test failures, not silently skipped tests.
+Tests cover public status/health, private endpoint denial, CSRF, DTO/OpenAPI alignment,
+V1-to-V2 migration and reruns, shared-item exclusivity, combo rollback and history/rating
+constraints. See the [schema guide](docs/architecture/shared-domain-schema.md) for database
+guarantees versus future service checks. Docker failures are test failures, not silently skipped tests.
 Reports: backend/target/surefire-reports/. Runnable jar: backend/target/backend-0.0.1-SNAPSHOT.jar.
 `java -jar` needs the same DB environment variables as above. GitHub workflow: backend-checks.
 

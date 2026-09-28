@@ -1,6 +1,6 @@
 # Team kickoff and task distribution
 
-> **Đồng bộ 26/09/2026:** Đọc [đặc tả yêu cầu hiện hành](../product/client-requirements.md) trước khi nhận việc. FR-14/A16 và UC-12/B16 đã loại khỏi kế hoạch; giữ chỗ không tự hết hạn sau 24 giờ. Các giải pháp A chưa chốt vẫn cần duyệt.
+> **Đồng bộ 28/09/2026:** Đọc [đặc tả v1.1](../product/client-requirements.md) trước khi nhận việc. Kho cá nhân liên kết đồ vật với nhiều tin; bỏ hạn mức giữ chỗ người mua, giữ hạn mức công khai tin người bán. FR-14/A16 và UC-12/B16 đã loại; không tự hết hạn giữ chỗ. Bảng phạt báo cáo và đổi đồ chưa duyệt; không hỏi lại các quyết định đã chốt.
 
 ## Leader: next steps after the setup branch is published
 
@@ -18,11 +18,11 @@ D1 means the first working day after foundation merge. Each member owns document
 | Task | Owner | First deliverable and completion evidence | Depends on / blocked policy | Reviewer | Due |
 | --- | --- | --- | --- | --- | --- |
 | SET-01 Foundation and onboarding | M1 Hữu Nguyên (leader) | Merge reviewed setup, record five successful local builds, create issues/board | Published branch and CI | M2 | D1-D2 |
-| ID-01 Identity specification | M1 | UC-01/02, account/role model, activation API contract; distinguish email verification from admin approval | A01/A13 eligibility and internal verification; no invented SSO | M4 | D3 |
-| LIST-01 Listing/category specification | M2 Hoàng Nguyên | UC-03/05, listing state diagram, fields/image validation and API contract; inspect existing category baseline | A02/A03/A11/A14; quota above 120 remains blocked | M1 | D3 |
-| NEG-01 Negotiation/hold specification | M3 Quốc Nguyên | UC-06/07, proposal vs accepted-hold distinction, acceptance/cancellation/reminder sequence and concurrency tests for buyer-first then listing locks | A04/A05, M1 buyer contract, M2 listing contract; no new tables before contract review | M2 + M1 | D3 |
-| TRADE-01 Handover/rating specification | M4 Thành Nguyên | UC-08/09, code recovery, rate/attempt limits, single-use and repeat-completion cases, transition diagram and rating ledger contract | A06/A07; 10-minute/five-attempt proposal needs approval; no auto-completion | M3 + M1 for ledger | D3 |
-| MOD-01 Moderation/reporting specification | M5 Việt | UC-04/10, moderator queue/report fields, event-linked restriction and evidence authorization, decision audit and report metrics | A08/A09/A12/A15; do not penalize on report submission or reban from unchanged score | M4 + M1 | D3 |
+| ID-01 Identity specification | M1 | UC-01/02, email OTP plus protected student-card/admin approval, account/role and activation contracts | A01/A13 exceptions/source checks remain open; no invented SSO | M4 | D3 |
+| LIST-01 Inventory/listing/category specification | M2 Hoàng Nguyên | UC-03/05, item-to-listing links, whole combos, publication/edit states and snapshots; 5/10 cap below/from 120 | A02/A03/A19 approved; A11/A14 details remain; target-listing edit guard, not shared-item edit ban | M1 | D3 |
+| NEG-01 Negotiation/hold specification | M3 Quốc Nguyên | UC-06/07, seller acceptance locks listing and all shared items atomically; agree deterministic locking and all-or-nothing combo tests | A04/A05, M1 eligibility, M2 inventory; no buyer hold quota; reminder schedule open; contracts before tables | M2 + M1 | D3 |
+| TRADE-01 Handover/rating specification | M4 Thành Nguyên | UC-08/09, protected handover photo, 10-minute/five-failure code, 24h admin escalation; buyer-only ratings, negative review and exclusive 15-day no-rating +1 | A06/A07 remaining details; admin completion needs evidence, no silence auto-success | M3 + M1 for ledger; M5 admin | D3 |
+| MOD-01 Moderation/reporting specification | M5 Việt | UC-04/10, revised-content review, negative-rating/admin handover queues, restrictions, evidence authorization and audit | A08 amounts/authority deferred, including no-show; no repeat-offense premium; A09/A12/A15 details remain; no penalty on report submission or reban from old score | M4 + M1 | D3 |
 | UI-01 Shared frontend scaffold | M2 + M4 pair, M2 accountable | React/Vite shell, status API call through proxy, unit/build check; instructions for all members | ADR versions + backend foundation; use fixture UI, not invented login | M3 | D4-D5 |
 | ID-02 First identity implementation slice | M1 | Agreed registration/activation slice with authorization/negative tests and migration | ID-01 approved + A01/A13 decisions | M4 | D5 or mark blocked |
 | LIST-02 First listing implementation slice | M2 | Listing submission/validation using approved contract, tests and migration | LIST-01 + member interface; combine with UI work only if capacity permits | M1 | Start D5 |
@@ -32,14 +32,20 @@ D1 means the first working day after foundation merge. Each member owns document
 
 One person should normally have one active implementation issue. If UI-01 consumes M2's capacity, defer LIST-02 rather than pretending both are completed. API fixtures are not delivered end-to-end features; replace them before milestone acceptance. M1 coordinates migration numbers to prevent duplicate versions.
 
+The [shared backend contract handoff](../api/README.md) now provides planned OpenAPI routes,
+Java DTOs, the V2 schema, owner-specific starting slices and remaining policy gates.
+All five owners should review this baseline together before creating overlapping migrations.
+Business endpoints are still unimplemented; use the handoff's database/service distinction
+when interpreting the passing foundation tests.
+
 ## Continuing ownership
 
 | Owner | Main domain | Scheduled work | Must coordinate with |
 | --- | --- | --- | --- |
 | M1 | Identity, permissions, reputation ledger; integration lead | Annual account review | M4 ratings, M5 sanctions |
-| M2 | Listings, category tree, images, geographic search, ordinary combos pending A02/A19 | Listing renewal | M3 holds, M5 moderation/evidence |
-| M3 | Chat, price proposals, reservations and appointments | Reservation reminders, never automatic hold expiry | M1 buyer quota, M2 availability, M4 completion |
-| M4 | Handover confirmation, history, ratings; test evidence | Completion-code expiry | M3 races, M1 ledger |
+| M2 | Personal inventory/shared items, listings, category tree, images, search and whole combos | Listing renewal | M3 holds, M5 moderation/evidence |
+| M3 | Chat, price proposals, reservations and appointments | Reservation reminders, never automatic hold expiry | M1 eligibility, M2 item availability, M4 completion |
+| M4 | Handover confirmation/admin resolution, history, buyer ratings; test evidence | Code expiry, 24h escalation and 15-day no-rating award | M3 races, M1 ledger, M5 admin review |
 | M5 | Moderation, complaints and reports | Notification/job coordination, not every domain job | M1 restrictions, M2 publication |
 
 Do not assign all frontend to one person or all background jobs to M5. Follow the eight-week milestones in ../planning/development-plan.md. Required core flow: activated member -> moderated listing -> proposal -> accepted hold -> confirmed handover -> rating; reports/sanctions and lifecycle tasks build on that.
