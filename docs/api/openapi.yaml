@@ -1111,9 +1111,10 @@ paths:
       description: No penalty on submission. Unsold listing report needs no trade. Verify reported member matches
         referenced listing/trade; protect all evidence. Numeric sanctions and duplicate-incident resolution are
         separate deferred work.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates:
       - 'A12: evidence formats/access/retention'
+      - 'A08: numeric sanction deferred; submission records no penalty'
       parameters:
       - $ref: '#/components/parameters/Csrf'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -1149,7 +1150,7 @@ paths:
       - Moderation
       summary: Reporter or authorized case handler reads report acknowledgement
       description: Reporter or authorized case handler reads report acknowledgement
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates:
       - 'A08/A12: case authority/evidence access'
       parameters:
@@ -1296,13 +1297,13 @@ paths:
       tags:
       - Media
       summary: Upload an asset for a declared purpose
-      description: Planned multipart upload. Owner derives from session. Server generates storage key and validates
-        actual content/type/size; MIME supplied by client is not proof. Listing photos and restricted evidence use
-        separate storage roots. Evidence formats, viewer roles and retention await A12. No URL fetching or client
-        paths. Upload first, then reference opaque ID; upload alone grants no case access.
-      x-implementation-status: planned
+      description: Slice 1 wires purpose REPORT only; LISTING/STUDENT_CARD/HANDOVER stay planned. Owner derives
+        from session. Server generates storage key and validates actual content/type/size; MIME supplied by client
+        is not proof. Evidence formats, viewer roles and retention await A12. No URL fetching or client paths.
+        Upload first, then reference opaque ID; upload alone grants no case access.
+      x-implementation-status: implemented
       x-policy-gates:
-      - 'A06/A12: evidence rules; listing-only photo adapter can proceed'
+      - 'A06/A12: evidence rules; only REPORT purpose is wired in slice 1'
       parameters:
       - $ref: '#/components/parameters/Csrf'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -1352,9 +1353,9 @@ paths:
         Restricted evidence requires authorization to its verification/trade/case on every read; possession of ID
         or uploader ownership alone grants no case-handler access. Never expose a filesystem key/path. No public
         static hosting for private assets.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates:
-      - 'A06/A12: evidence viewers'
+      - 'A06/A12: evidence viewers; slice 1 allows uploader or case handler only'
       parameters:
       - name: mediaId
         in: path
