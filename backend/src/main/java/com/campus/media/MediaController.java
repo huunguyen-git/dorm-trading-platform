@@ -4,20 +4,16 @@ import com.campus.media.api.MediaDtos.MediaPurpose;
 import com.campus.media.api.MediaDtos.MediaView;
 import com.campus.shared.security.SecurityUtils;
 import com.campus.shared.web.ApiException;
-import java.io.IOException;
-import java.util.UUID;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.util.Objects;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/media")
@@ -64,7 +60,7 @@ public class MediaController {
         }
         // Never expose storage_key and never let a private evidence image be cached.
         return ResponseEntity.ok()
-            .header(HttpHeaders.CACHE_CONTROL, CacheControl.noStore().getHeaderValue())
+            .header(HttpHeaders.CACHE_CONTROL, Objects.requireNonNull(CacheControl.noStore().getHeaderValue()))
             .header("X-Content-Type-Options", "nosniff")
             .contentType(MediaType.parseMediaType(asset.contentType()))
             .body(bytes);
