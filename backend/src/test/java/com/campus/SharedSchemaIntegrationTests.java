@@ -70,7 +70,7 @@ class SharedSchemaIntegrationTests {
         old.migrate();
         jdbc.update("insert into "+schema+".categories(code,name) values ('EXISTING','Existing reference')");
         Flyway upgraded=Flyway.configure().dataSource(dataSource).schemas(schema).load();
-        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(jdbc.queryForObject("select count(*) from "+schema+".categories",Long.class)).isEqualTo(4);
         upgraded.validate();
         assertThat(upgraded.migrate().migrationsExecuted).isZero();

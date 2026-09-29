@@ -46,6 +46,6 @@ class BackendIntegrationTests {
             .containsExactlyInAnyOrder("TEXTBOOKS", "APPLIANCES", "FURNITURE");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         assertThat(categories.count()).isEqualTo(3);
-        assertThat(jdbc.queryForObject("select count(*) from flyway_schema_history where success = true", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from flyway_schema_history where success = true", Long.class)).isEqualTo(3);
     }
 }
