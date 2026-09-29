@@ -1,5 +1,6 @@
 package com.campus.shared.security;
 
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,6 +32,10 @@ public final class SecurityUtils {
     public static boolean hasRole(String role) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null) return false;
-        return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + role) || a.getAuthority().equals(role));
+        return auth.getAuthorities().stream().anyMatch(
+            a -> Objects.equals(
+                a.getAuthority(), "ROLE_" + role) ||
+                Objects.equals(a.getAuthority(), role)
+        );
     }
 }
