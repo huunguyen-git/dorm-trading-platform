@@ -65,8 +65,8 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiProblem> handleMaxUpload(MaxUploadSizeExceededException ex, HttpServletRequest req) {
-        ApiProblem body = problem(req, 413, "PAYLOAD_TOO_LARGE", "Tệp vượt quá dung lượng cho phép (tối đa 10MB)", List.of());
-        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+        ApiProblem body = problem(req, 413, "CONTENT_TOO_LARGE", "Tệp vượt quá dung lượng cho phép (tối đa 10MB)", List.of());
+        return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
             .contentType(MediaType.parseMediaType("application/problem+json"))
             .body(body);
     }
