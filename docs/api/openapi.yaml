@@ -2,8 +2,9 @@ openapi: 3.1.0
 info:
   title: Dorm Trading Platform - shared implementation contracts
   version: 0.1.0
-  description: Requirements v1.1. Only system status and actuator health are implemented. Business operations are
-    planned contracts, not runtime routes. x-policy-gates list OPEN decisions; see docs/api/README.md before implementation.
+  description: Requirements v1.1. System status, health, report/media operations, listing-review decisions, and notification
+    inbox/read operations are implemented. Other business operations remain planned. x-policy-gates list OPEN decisions;
+    see docs/api/README.md before implementation.
 security:
 - sessionCookie: []
 tags:
@@ -387,7 +388,7 @@ paths:
       summary: Review a specific listing revision
       description: Authorized listing reviewer only. Approval and publication quota check occur atomically under
         seller guard. 5 open/held below 120; 10 from 120. Score drop preserves existing publications.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates:
       - 'A14: classification of unavailable related listings'
       parameters:
@@ -1186,7 +1187,7 @@ paths:
       - Notifications
       summary: Read own inbox
       description: Read own inbox
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates: []
       parameters:
       - $ref: '#/components/parameters/page'
@@ -1217,7 +1218,7 @@ paths:
       - Notifications
       summary: Mark own notification read
       description: Mark own notification read
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-policy-gates: []
       parameters:
       - name: notificationId
