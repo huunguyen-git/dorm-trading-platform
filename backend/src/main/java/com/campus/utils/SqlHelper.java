@@ -1,4 +1,4 @@
-﻿package com.campus.utils;
+package com.campus.utils;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
