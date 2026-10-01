@@ -21,9 +21,6 @@ public final class ModerationDtos {
     private ModerationDtos() {
     }
 
-    private ModerationDtos() {
-    }
-
     public enum ListingVerdict {APPROVED, REJECTED}
 
     public enum ReportState {SUBMITTED, UNDER_REVIEW, RESOLVED, DISMISSED}
