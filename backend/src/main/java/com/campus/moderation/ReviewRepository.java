@@ -18,7 +18,10 @@ public class ReviewRepository {
     private final JdbcTemplate jdbc;
     private final SqlHelper ssqlHelper;
 
-    public ReviewRepository(JdbcTemplate jdbc, SqlHelper ssqlHelper) {
+    public ReviewRepository(
+        JdbcTemplate jdbc,
+        SqlHelper ssqlHelper
+    ) {
         this.jdbc = jdbc;
         this.ssqlHelper = ssqlHelper;
     }
@@ -43,9 +46,9 @@ public class ReviewRepository {
 
     public long countPublished(UUID sellerId) {
         Long value = jdbc.queryForObject("""
-            select count(*) from listings
-            where seller_id = ? and publication_state = 'PUBLISHED'
-            """, Long.class, sellerId);
+                select count(*) from listings
+                where seller_id = ? and publication_state = 'PUBLISHED'
+                """, Long.class, sellerId);
         return value == null ? 0 : value;
     }
 
@@ -56,9 +59,17 @@ public class ReviewRepository {
         return value == null ? 0 : value;
     }
 
-    public void lockMember(UUID id)   { ssqlHelper.lock("members", id); }
-    public void lockListing(UUID id)  { ssqlHelper.lock("listings", id); }
-    public void lockRevision(UUID id) { ssqlHelper.lock("listing_revisions", id); }
+    public void lockMember(UUID id) {
+        ssqlHelper.lock("members", id);
+    }
+
+    public void lockListing(UUID id) {
+        ssqlHelper.lock("listings", id);
+    }
+
+    public void lockRevision(UUID id) {
+        ssqlHelper.lock("listing_revisions", id);
+    }
 
     public void publish(UUID listingId, UUID revisionId) {
         jdbc.update("""
@@ -106,9 +117,7 @@ public class ReviewRepository {
                 from listings l
                 join listing_revisions lr on lr.id = ? and lr.listing_id = l.id
                 where l.id = ?
-                """,
-                (rs, n) -> toView(rs, revisionId),
-                revisionId, listingId);
+                """, (rs, n) -> toView(rs, revisionId), revisionId, listingId);
     }
 
     private ListingView toView(ResultSet rs, UUID revisionId) throws SQLException {

@@ -2,14 +2,14 @@ package com.campus.moderation;
 
 import com.campus.moderation.api.ModerationDtos.ReportState;
 import com.campus.moderation.api.ModerationDtos.ReportView;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
-
 import com.campus.utils.SqlHelper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 public class ReportRepository {
@@ -25,7 +25,10 @@ public class ReportRepository {
     private final JdbcTemplate jdbc;
     private final SqlHelper sqlHelper;
 
-    public ReportRepository(JdbcTemplate jdbc, SqlHelper sqlHelper) {
+    public ReportRepository(
+        JdbcTemplate jdbc,
+        SqlHelper sqlHelper
+    ) {
         this.jdbc = jdbc;
         this.sqlHelper = sqlHelper;
     }
@@ -50,7 +53,9 @@ public class ReportRepository {
                 tradeId);
     }
 
-    /** Evidence must already be a REPORT asset owned by the reporter; the composite FK enforces it too. */
+    /**
+     * Evidence must already be a REPORT asset owned by the reporter; the composite FK enforces it too.
+     */
     public boolean evidenceBelongsToReporter(UUID mediaId, UUID reporterId) {
         Boolean ok = jdbc.queryForObject("""
                 select exists(

@@ -1,16 +1,15 @@
 package com.campus.notification;
 
 import com.campus.notification.api.NotificationDtos.NotificationView;
+import com.campus.utils.SqlHelper;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-
-import com.campus.utils.SqlHelper;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 
 @Repository
 public class NotificationRepository {
@@ -32,7 +31,10 @@ public class NotificationRepository {
     private final JdbcTemplate jdbc;
     private final SqlHelper sqlHelper;
 
-    public NotificationRepository(JdbcTemplate jdbc, SqlHelper sqlHelper) {
+    public NotificationRepository(
+        JdbcTemplate jdbc,
+        SqlHelper sqlHelper
+    ) {
         this.jdbc = jdbc;
         this.sqlHelper = sqlHelper;
     }
@@ -46,10 +48,10 @@ public class NotificationRepository {
 
     public List<NotificationView> page(UUID recipientId, int size, long offset) {
         return jdbc.query(SELECT_VIEW + """
-                where recipient_id = ?
-                order by created_at desc, id desc
-                limit ? offset ?
-                """,
+                        where recipient_id = ?
+                        order by created_at desc, id desc
+                        limit ? offset ?
+                        """,
                 VIEW_MAPPER, recipientId, size, offset);
     }
 
