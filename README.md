@@ -11,7 +11,7 @@ The backend foundation includes Spring Boot, Maven Wrapper, PostgreSQL/Flyway, r
 ## Start here
 
 1. [Team onboarding](docs/onboarding/README.md): leader checklist and scaffold acceptance.
-2. [Living client requirements (Vietnamese), v1.1](docs/product/client-requirements.md): confirmed decisions and remaining questions. Shared physical items coordinate availability across listings; buyers have no hold quota. Fixed report penalties and barter remain unresolved. FR-14/A16 are retired; proposals require approval. See the [analysis diagrams](docs/uml/marketplace-lifecycle.md) for the approved flow.
+2. [Living client requirements (Vietnamese), v1.7](docs/product/client-requirements.md): confirmed decisions and remaining questions. Shared items coordinate availability across listings; buyers have no general hold quota. S11/C28–C40 records client approval relayed by the user: registration OTP, hold reminder, cancellation consent, admin response, rating edits/appeals, restriction authority/overlap, annual profile update and listing lifecycle. These policies remain unimplemented. FR-19 giveaway-cap parameters (A20), listing renewal details (A10), exact sanctions and other listed details remain OPEN. Barter is explicitly deferred to an extension; FR-14/A16 are retired. See the [analysis diagrams](docs/uml/marketplace-lifecycle.md) for the approved flow.
 3. [Accepted stack ADR](docs/architecture/ADR-001-stack.md): exact versions and tooling rollout.
 4. [Eight-week plan](docs/planning/development-plan.md): backlog, ownership, OOAD and tests.
 5. [Contributing](CONTRIBUTING.md) and [AI workflow](docs/onboarding/ai-workflow.md).

@@ -8,8 +8,9 @@ Ngày: 28/09/2026. Liên quan: [FR-10–12, A08](client-requirements.md). Chủ 
 - Hủy gây tranh chấp và không đến hẹn đều là trường hợp báo cáo. Bỏ mức −20 cố định trước đây; không có ngưỡng hủy sát giờ tự động.
 - Mức phạt điểm theo hành vi **chưa quyết định**, kể cả không đến hẹn. Tạm thời không tăng nặng riêng do tái phạm. Việc tái khóa sau vi phạm mới theo ngưỡng A09 vẫn giữ.
 - Điểm đánh giá đã duyệt và xử phạt báo cáo được áp dụng riêng cho cùng sự việc; báo cáo trùng không nhân khoản phạt. Không dùng việc có hai khoản điểm để đếm thành hai lần vi phạm.
-- Điểm đánh giá FR-10 và ngưỡng khóa FR-12 không bị hoãn theo bảng phạt. S1 còn quy định khóa vĩnh viễn khi xác định gian lận tài chính; tiêu chuẩn xác định và thẩm quyền vẫn mở tại A08.
-- Trường hợp khác/đặc biệt nghiêm trọng chuyển admin hoặc đội quản lý xem xét; chưa mặc định quyền tự chọn bất kỳ số điểm hoặc mọi kiểm duyệt viên đều có quyền khóa vĩnh viễn.
+- Điểm đánh giá FR-10 và ngưỡng khóa FR-12 không bị hoãn theo bảng phạt. S1 còn quy định khóa vĩnh viễn khi xác định gian lận tài chính; tiêu chuẩn xác định còn mở tại A08, thẩm quyền khóa vĩnh viễn đã chốt theo S11/C35.
+- S11/C35, phê duyệt khách hàng do người dùng chuyển tiếp ngày 05/10/2026: kiểm duyệt viên xác minh/đề nghị; quản trị viên cấp cao quyết định khóa vĩnh viễn/ngoại lệ; người khác xét khiếu nại khi có thể. Bảng hành vi–mức phạt phải được duyệt riêng, chưa có con số mới được duyệt.
+- S11/C36: cùng sự việc xét khóa một lần; vi phạm mới trong đợt khóa dùng mốc kết thúc muộn hơn, khóa vĩnh viễn ưu tiên. Khóa vĩnh viễn vẫn xem lịch sử/khiếu nại, admin hỗ trợ giao dịch dở. Cách phối hợp hai tác động điểm trước một quyết định khóa còn mở.
 
 ## Tham khảo nền tảng — không phải nguồn phê duyệt nghiệp vụ
 
@@ -42,4 +43,4 @@ Các trang dưới được đọc trong đợt phân tích ngày 28/09/2026. Kh
 
 Ví dụ đã hoàn tất giao dịch nhưng hàng sai mô tả: admin duyệt đánh giá 1 sao tạo −5; báo cáo được xác minh có thể tạo thêm −P **khi P được duyệt trong bảng phạt**. Tổng là −5−P, một sự việc. Đảo đánh giá chỉ hoàn 5; đảo quyết định báo cáo chỉ hoàn P; nếu cả hai sai thì đảo cả hai. Ví dụ này không xác định P.
 
-Quyền từng cấp, khung cho trường hợp ngoài bảng, thời hạn khiếu nại và việc phối hợp hai tác động điểm với một quyết định khóa vẫn phải chốt tại A08/A09.
+Ma trận quyền chi tiết, khung ngoại lệ, mức phạt, thủ tục khiếu nại xử phạt và cách phối hợp hai tác động điểm với một quyết định khóa vẫn cần chốt tại A08/A09. Hạn 7 ngày/kênh ứng dụng đã duyệt tại C34 dành cho khiếu nại đánh giá; không tự áp cho mọi hình thức xử phạt.

@@ -159,10 +159,12 @@ paths:
         Availability HELD if any item is held, SOLD if any item is sold (SOLD wins). No private seller details.
         Optional q matches title/description, categoryId is exact category, maxPriceVnd is inclusive, and courseCode
         is exact stored text without cross-school equivalence (A15). Radius/coordinates are deferred.
+        S11/C38 confirms temporarily unavailable listings still count toward quota while public; listings unavailable
+        because an item was sold are archived without inventing a completed trade for the related listing.
       x-implementation-status: planned
       x-policy-gates:
       - 'A11: geographic search is deferred'
-      - 'A14: unavailable listing display/quota classification'
+      - 'A14: lifecycle mapping and private historical revision display'
       parameters:
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/size'
@@ -255,9 +257,11 @@ paths:
       summary: Create a new draft revision; never overwrite agreed content
       description: Deny if this listing is held or completed. A different listing holding a shared item does not
         prohibit this edit. Do not edit inventory records or allocations through this endpoint.
+        Draft creation differs from submission for review; S11/C38 requires temporary hiding at submission.
+        Held/sold inventory records cannot be edited even through another listing.
       x-implementation-status: planned
       x-policy-gates:
-      - 'A14: old published revision visibility while editing'
+      - 'A14: private historical revision display and rejected-edit lifecycle'
       parameters:
       - name: listingId
         in: path
@@ -300,6 +304,8 @@ paths:
       summary: Submit current draft for moderation
       description: Owner only. Validate one or more own physical items, 1-5 own listing photos, price and category.
         Submitted revision content becomes immutable; changes create a new revision.
+        S11/C38 confirms temporarily hide the listing when submitting an edited revision; do not mutate accepted
+        snapshots or release allocations. Publication of the edited content requires moderation and quota checks.
       x-implementation-status: planned
       x-policy-gates: []
       parameters:
@@ -388,9 +394,11 @@ paths:
       summary: Review a specific listing revision
       description: Authorized listing reviewer only. Approval and publication quota check occur atomically under
         seller guard. 5 open/held below 120; 10 from 120. Score drop preserves existing publications.
+        S11/C38 confirms count temporarily unavailable listings while still public; archive listings missing sold items.
+      x-implementation-status: planned
       x-implementation-status: implemented
       x-policy-gates:
-      - 'A14: classification of unavailable related listings'
+      - 'A14: rejected-edit and archival lifecycle details'
       parameters:
       - name: listingId
         in: path
@@ -637,7 +645,8 @@ paths:
       summary: Buyer requests whole listing; no hold yet
       description: Buyer requests whole listing; no hold yet
       x-implementation-status: planned
-      x-policy-gates: []
+      x-policy-gates:
+      - 'A20: giveaway weekly receipt limit parameters/check stage pending; no general buyer hold quota'
       parameters:
       - $ref: '#/components/parameters/Csrf'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -708,10 +717,12 @@ paths:
       - Reservations
       summary: Seller atomically holds listing and all shared items
       description: Lock guards in documented order, recheck approved revision and item set, snapshot price/content/items,
-        allocate ALL items and create unique trade in one transaction. Conflict rolls back everything. No buyer
-        quota; no expiry timestamp.
+        allocate ALL items and create unique trade in one transaction. Conflict rolls back everything. No general
+        buyer hold quota; no expiry timestamp. Giveaway weekly receipt policy is pending A20; its check/count stage
+        is not selected by this contract.
       x-implementation-status: planned
-      x-policy-gates: []
+      x-policy-gates:
+      - 'A20: giveaway weekly receipt limit parameters/check stage pending; no general buyer hold quota'
       parameters:
       - name: reservationId
         in: path
@@ -797,7 +808,8 @@ paths:
       summary: Either participant cancels before handover report
       description: Only before evidence-backed handover. Record actor/reason, release allocations atomically and
         notify peer. Reopening requires separate publication/permission/quota checks. After handover return 409;
-        mutual/admin cancellation is a deferred contract (A06).
+        mutual/admin cancellation is a deferred contract (A06). S11/C33 settles consent by the other party
+        entering a separate cancellation code, but this pre-handover endpoint does not implement that flow.
       x-implementation-status: planned
       x-policy-gates: []
       parameters:
@@ -922,6 +934,8 @@ paths:
       summary: Seller reports handover with protected photos
       description: Require seller-owned HANDOVER image assets. First report fixes reviewDueAt = handoverReportedAt
         +24h; repeats/reissue cannot move it. Never complete from silence.
+        S11/C33 confirms handover photos need not show faces and are visible only to authorized viewers.
+        Admin response is due within 3 working days; clock origin/calendar and final-resolution SLA remain A06.
       x-implementation-status: planned
       x-policy-gates:
       - 'A06/A12: evidence validation/access policy'
@@ -965,14 +979,19 @@ paths:
       tags:
       - Trades
       summary: Buyer obtains or reissues completion challenge
-      description: 'Only authenticated buyer after handover. Require configured issuance/attempt rate limits before
-        enabling. Six digits, 10 minutes, five failures, keyed verifier, one use. Reissue invalidates old code;
-        no change to handover deadline. Cache-Control: no-store. This operation increments trade version. Lost issuance
+      description: 'Only authenticated buyer after handover. S9/C26 limits per buyer + trade: at least 60 seconds
+        between successful issues, at most 3 successful issues including initial issuance and 10 failed checks
+        in the rolling 15 minutes (now-15m, now]. Reissue never resets the shared failure count; device/session
+        changes do not reset it. At 3 issues deny issuance; at 10 failures deny issuance and checking. Blocked
+        requests add no events. Events age out individually; no automatic issue when throttling ends.
+        Six digits, 10 minutes, five failures per code, keyed verifier, one use. Invalidate at expiry or the fifth
+        failed attempt; never auto-generate a replacement. Buyer may request a fresh code with a new 10-minute
+        lifetime and zero failures; invalidate the old code and issue the new one atomically. Old code cannot revive.
+        No trade lock/cancellation or change to handover deadline. Cache-Control: no-store. This operation increments trade version. Lost issuance
         response requires a fresh version and a rate-limited reissue; stale retries return 409. Plaintext codes
         are never stored in command receipts.'
       x-implementation-status: planned
-      x-policy-gates:
-      - 'A06: issuance/attempt rate-limit windows'
+      x-policy-gates: []
       parameters:
       - name: tradeId
         in: path
@@ -1019,11 +1038,16 @@ paths:
       - Trades
       summary: Buyer confirms completion with own action-bound challenge
       description: Same terminal transaction boundary as future evidence-backed admin completion. Verify buyer/code,
-        increment bad attempts durably; mark items SOLD, reservation/trade COMPLETED and rating deadline +15 days
-        exactly once.
+        reject expired/invalidated/consumed or five-failure codes even before any background invalidation job.
+        Per buyer + trade reject checking when 10 failures already occurred in the rolling 15 minutes (now-15m, now].
+        Blocked requests add no failure. Failed checks increment the shared timestamped failure history and the
+        code counter durably; reissue/device/session changes never reset the shared count. Invalidate on the fifth
+        code failure. At 3 successful issues in the same window only issuance is blocked; an otherwise valid code
+        may still confirm. Limits must be checked atomically under concurrent requests, without locking/cancelling the trade.
+        On valid confirmation mark items SOLD, reservation/trade COMPLETED and rating deadline +15 days exactly once.
       x-implementation-status: planned
       x-policy-gates:
-      - 'A06: issuance/attempt rate-limit windows'
+      - 'A20: giveaway weekly receipt limit parameters/check stage pending; sale completion unaffected'
       parameters:
       - name: tradeId
         in: path
@@ -1066,7 +1090,9 @@ paths:
       summary: Buyer submits one rating within 15 days after completion
       description: Serialize with deadline job using trade guard and unique outcome row. 5 stars +2, 4 stars 0;
         1-3 pending admin review before any negative effect. Pending/rejected submissions exclude no-rating +1.
-        Public review display/appeals deferred.
+        S11/C34 confirms only accepted reviews may be public. Editing within the original 15-day period before a
+        review decision requires renewed review; edit and in-app appeal endpoints are deferred contracts.
+        Appeal period is 7 days, with its clock origin still A07; do not invent it in this submission endpoint.
       x-implementation-status: planned
       x-policy-gates: []
       parameters:
@@ -2299,7 +2325,8 @@ components:
           type: string
           format: date-time
       x-java-type: com.campus.trade.api.TradeDtos$RatingView
-      description: Submission acknowledgement to buyer; public pending/rejected rating visibility is not decided.
+      description: Submission acknowledgement to buyer; pending/rejected/removed ratings are not public under
+        S11/C34. Public accepted-review read, edit and appeal contracts are deferred; edit does not create a second rating.
     ListingVerdict:
       type: string
       enum:

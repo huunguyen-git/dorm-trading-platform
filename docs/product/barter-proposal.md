@@ -1,6 +1,6 @@
 # Phương án quản lý đổi vật lấy vật
 
-Ngày: 28/09/2026. Liên quan: [A17](client-requirements.md). **Trạng thái: ĐỀ XUẤT CHƯA DUYỆT.** Trưởng nhóm yêu cầu tư vấn cách quản lý; chưa có quyết định bổ sung đổi đồ vào phạm vi, chưa tạo FR/UC triển khai hoặc thay đổi API/schema.
+Ngày soạn: 28/09/2026; cập nhật: 05/10/2026. Liên quan: [A17, S11/C39](client-requirements.md). **Phạm vi đã chốt: hoãn đổi đồ sang bản mở rộng.** Khách hàng chấp thuận nguyên tắc có điều kiện: nếu triển khai thì giữ đồng thời đồ vật của hai bên, chỉ hoàn tất khi đủ hai xác nhận hoặc admin quyết định. Chưa phê duyệt triển khai trong bản hiện tại, chưa tạo FR/UC hoặc API/schema đổi đồ. Các chi tiết khác dưới đây vẫn là đề xuất cần chốt cho bản mở rộng.
 
 ## Phương án đề nghị
 
@@ -31,4 +31,4 @@ Hai giao dịch độc lập có thể khiến An giao bàn và giao dịch đó
 | Báo cáo | Đếm là một lần đổi, không phải hai lần bán/cho tặng; thống kê đồ vật mỗi chiều thế nào? |
 | Công sức | M2: loại tin và tập đồ vật; M3: giữ cả hai phía; M4: hai xác nhận; M5: tranh chấp; M1: quyền và sổ điểm. Cần ước lượng lại trước khi thêm vào kế hoạch. |
 
-Khuyến nghị cho nhóm năm người: hoàn thiện bán và cho tặng đã chốt; lưu phương án đổi đồ làm lựa chọn mở rộng để duyệt riêng. Việc ghi nhận đề xuất này không khẳng định các sàn khác cho phép hoặc cấm đổi vật lấy vật.
+S11/C39 chốt nhóm hoàn thiện bán/cho tặng và hoãn đổi đồ sang bản mở rộng. Nguyên tắc giữ đồng thời hai bên và đủ hai xác nhận hoặc admin quyết định đã chấp thuận có điều kiện; lịch triển khai và các chi tiết khác trong phương án này cần duyệt riêng. Không suy ra các sàn khác cho phép hoặc cấm đổi vật lấy vật.
