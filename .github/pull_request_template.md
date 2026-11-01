@@ -1,4 +1,4 @@
-## Bối cảnh & Mục tiêu (P1-CI-INFRA)
+## Bối cảnh & Mục tiêu
 <!-- Nêu rõ thực hiện chức năng gì, nhằm đạt mục tiêu gì -->
 
 ---
