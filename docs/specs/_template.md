@@ -20,4 +20,6 @@ Ghi tiền điều kiện, thao tác, kết quả và hậu điều kiện. Vớ
 
 ## Bàn giao
 
-Liệt kê mốc commit theo đầu ra, quyết định còn mở và người xử lý. Khi kết thúc, ghi commit/PR, bằng chứng, phần còn thiếu và task tiếp nhận.
+- Kết quả đã kiểm chứng và cách người dùng xem hoặc thử.
+- Liên kết đến các tài liệu đã cập nhật, kèm thay đổi chính.
+- Phần chưa kiểm chứng hoặc còn thiếu, bước tiếp theo và người tiếp nhận.

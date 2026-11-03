@@ -4,12 +4,12 @@
 
 Trong tin nhắn đầu tiên gửi người dùng ở mỗi phiên làm việc mới của repo, agent hiển thị nguyên văn bốn bước dưới đây, rồi tiếp tục xử lý yêu cầu đã nhận. Chỉ hiển thị một lần mỗi phiên, trừ khi người dùng muốn xem lại.
 
-1. **Giao việc.** Nêu mã task và kết quả bạn muốn kiểm tra. Ví dụ: “Làm P0-01 để hai ứng dụng dùng chung xác thực”.
-2. **Kiểm tra phạm vi.** Trước khi sửa, xem agent định đổi file nào và sẽ kiểm tra kết quả bằng cách nào.
-3. **Kiểm tra từng mốc.** Yêu cầu agent đưa mã commit, lệnh đã chạy, kết quả và phần còn thiếu.
-4. **Nhận bàn giao.** Gõ `/wrap` để xem trạng thái trong roadmap và bước tiếp theo. Chỉ xác nhận hoàn thành sau khi đối chiếu kết quả với yêu cầu.
+1. **Nêu điều bạn muốn làm được.** Ví dụ “Là người bán, tôi muốn hủy giữ chỗ trước khi báo đã giao.”
+2. **Chốt thế nào là đạt.** Agent nêu một ví dụ về kết quả mong đợi. Bạn có thể sửa nếu agent hiểu sai.
+3. **Xem kết quả.** Agent tự kiểm tra, chỉ bạn cách xem hoặc thử kết quả và nói rõ phần chưa kiểm chứng.
+4. **Nhận bàn giao.** Agent cập nhật tài liệu liên quan, gửi đường dẫn và nêu việc còn lại. Bạn có thể gõ `/wrap` để nhận bàn giao giữa chừng.
 
-Mỗi lượt làm việc bắt đầu từ một mã task trong [roadmap](docs/02-roadmap-todo.md). Đọc [ngữ cảnh sản phẩm](docs/00-context.md) để xác định actor và UC, rồi đọc phần liên quan trong [kiến trúc](docs/01-architecture.md). Với việc chuẩn bị quy trình ngoài 30 task, ghi rõ đó là đầu ra hỗ trợ trong mục bàn giao.
+Agent tự đối chiếu yêu cầu với mã task trong [roadmap](docs/02-roadmap-todo.md). Đọc [ngữ cảnh sản phẩm](docs/00-context.md) để xác định actor và UC, rồi đọc phần liên quan trong [kiến trúc](docs/01-architecture.md). Với việc chuẩn bị quy trình ngoài 30 task, ghi rõ đó là đầu ra hỗ trợ trong mục bàn giao.
 
 ## Nhận việc
 
@@ -45,5 +45,6 @@ Trước mỗi commit, stage đúng file hoặc hunk của task, xem `git diff -
 ## Hoàn thành và chuyển phiên
 
 - Đối chiếu đủ đầu ra của task trên từng nền tảng, chạy các phép kiểm tra của [kiến trúc](docs/01-architecture.md) phù hợp với diff. Ghi tên test hoặc lệnh, kết quả thực tế, bước chưa chạy và lý do.
-- Chuyển task sang **Chờ review** khi đã bàn giao. Đánh dấu **Hoàn thành** sau khi tiêu chí đạt và kết quả review được ghi nhận. Gắn PR, commit đã tồn tại hoặc đường dẫn spec chứa bằng chứng vào roadmap. Cập nhật kiến trúc khi đổi module, lệnh chuẩn, hợp đồng dùng chung hay cách triển khai.
-- Khi nhận `/wrap`, `/done` hoặc `sync docs`, đối chiếu diff, đồng bộ tài liệu bị ảnh hưởng và bàn giao theo mẫu **task · trạng thái · bằng chứng · việc tiếp theo · người nhận**. Nếu dừng giữa task, ghi đúng bước còn thiếu. Tài liệu đã thay thế có thể lưu ở `docs/archive/` và trỏ tới bản hiện hành. Khi nhận việc, đọc bản hiện hành.
+- Trước mỗi lần bàn giao, cập nhật trạng thái và kết quả vào roadmap. Đối chiếu thay đổi thực tế với từng tài liệu liên quan: sửa ngữ cảnh và đặc tả khi đổi nghiệp vụ, sửa kiến trúc và hướng dẫn sử dụng khi đổi cách hệ thống hoạt động, ghi quyết định kỹ thuật cùng lý do khi có lựa chọn mới. Kiểm tra các liên kết và ví dụ còn đúng.
+- Chuyển task sang **Chờ review** khi đã bàn giao. Đánh dấu **Hoàn thành** sau khi tiêu chí đạt, tài liệu liên quan đã đồng bộ và kết quả review được ghi nhận.
+- Khi kết thúc hoặc nhận `/wrap`, `/done`, `sync docs`, trả lời ngắn theo mẫu **kết quả · cách xem/thử · tài liệu đã cập nhật · việc còn lại**. Nêu rõ phần chưa kiểm chứng. Mã commit và lệnh đã chạy dành cho người cần tra cứu kỹ thuật, chỉ đưa vào tin nhắn khi được hỏi.

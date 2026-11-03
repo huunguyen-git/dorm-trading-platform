@@ -2,7 +2,7 @@
 
 Mốc ban đầu lấy từ workbook Nhóm 14. Ngày trong bảng là hạn kế hoạch năm 2026. Workbook ghi P0-01 đang thực hiện, 29 task còn lại chưa thực hiện. Dấu — ở cột phụ trách là ô chưa được phân công trong nguồn. Khi làm tiếp, cập nhật trạng thái trong repo và gắn bằng chứng ở đúng dòng task.
 
-Dùng các trạng thái **Chưa thực hiện → Đang thực hiện → Chờ review → Hoàn thành**. Nếu bị chặn, ghi phụ thuộc, người cần xử lý và điều kiện để tiếp tục. Cột bàn giao nhận mã commit/PR cùng kết quả kiểm tra, hoặc đường dẫn tới spec có kết quả chi tiết.
+Dùng các trạng thái **Chưa thực hiện → Đang thực hiện → Chờ review → Hoàn thành**. Nếu bị chặn, ghi phụ thuộc, người cần xử lý và điều kiện để tiếp tục. Ở cột bàn giao, ghi kết quả đã kiểm chứng và liên kết tài liệu liên quan để người nhận có thể xem hoặc thử.
 
 ## PHASE 0 Khởi tạo nền tảng · 24/10/2026 – 31/10/2026
 
@@ -71,7 +71,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
-- [x] **Quy trình agent** · Đã có hướng dẫn nhận task, phân vùng sửa, nghiệm thu, chia commit và bàn giao giữa các phiên. Agent hiển thị [bốn bước giao việc và kiểm tra](../AGENTS.md#hướng-dẫn-đầu-phiên) trong tin nhắn đầu phiên.
+- [x] **Quy trình agent** · Agent hiển thị [bốn bước giao việc và nhận kết quả](../AGENTS.md#hướng-dẫn-đầu-phiên) trong tin nhắn đầu phiên. [Mẫu bàn giao](specs/_template.md#bàn-giao) ghi cách thử kết quả, tài liệu đã cập nhật và phần còn thiếu.
 
 - **P0-01** · Theo sheet `Phase 0 - Khoi tao`, dòng 12, bước tiếp theo là dựng monorepo gồm `backend/`, `mobile/`, `admin-web/`, `infra/` và `docs/`. Backend Modular Monolith dùng JWT để xác thực và phân quyền theo vai trò (RBAC) cho cả mobile và web quản trị.
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.
