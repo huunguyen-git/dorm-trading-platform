@@ -21,5 +21,5 @@ Ghi tiền điều kiện, thao tác, kết quả và hậu điều kiện. Vớ
 ## Bàn giao
 
 - Kết quả đã kiểm chứng và cách người dùng xem hoặc thử.
-- Liên kết đến các tài liệu đã cập nhật, kèm thay đổi chính.
+- File đầu ra và tài liệu bàn giao: mỗi file ghi **tạo mới** hoặc **cập nhật**, đường dẫn thật và mục cần xem. Gắn liên kết đến dòng task hoặc mục bàn giao trong roadmap.
 - Phần chưa kiểm chứng hoặc còn thiếu, bước tiếp theo và người tiếp nhận.

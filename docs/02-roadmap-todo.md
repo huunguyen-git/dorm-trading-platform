@@ -71,7 +71,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
-- [x] **Quy trình agent** · Agent hiển thị [bốn bước giao việc và nhận kết quả](../AGENTS.md#hướng-dẫn-đầu-phiên) trong tin nhắn đầu phiên. [Mẫu bàn giao](specs/_template.md#bàn-giao) ghi cách thử kết quả, tài liệu đã cập nhật và phần còn thiếu.
+- [x] **Quy trình agent** · Bước 4 trong [hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) liệt kê file cần mở và nội dung cần kiểm tra theo loại task. [Mẫu bàn giao](specs/_template.md#bàn-giao) yêu cầu ghi đường dẫn thật, phân biệt file tạo mới và file cập nhật, chỉ rõ mục cần xem.
 
 - **P0-01** · Theo sheet `Phase 0 - Khoi tao`, dòng 12, bước tiếp theo là dựng monorepo gồm `backend/`, `mobile/`, `admin-web/`, `infra/` và `docs/`. Backend Modular Monolith dùng JWT để xác thực và phân quyền theo vai trò (RBAC) cho cả mobile và web quản trị.
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.

@@ -7,14 +7,18 @@ Trong tin nhắn đầu tiên gửi người dùng ở mỗi phiên làm việc 
 1. **Nêu điều bạn muốn làm được.** Ví dụ “Là người bán, tôi muốn hủy giữ chỗ trước khi báo đã giao.”
 2. **Chốt thế nào là đạt.** Agent nêu một ví dụ về kết quả mong đợi. Bạn có thể sửa nếu agent hiểu sai.
 3. **Xem kết quả.** Agent tự kiểm tra, chỉ bạn cách xem hoặc thử kết quả và nói rõ phần chưa kiểm chứng.
-4. **Nhận bàn giao.** Agent cập nhật tài liệu liên quan, gửi đường dẫn và nêu việc còn lại. Bạn có thể gõ `/wrap` để nhận bàn giao giữa chừng.
+4. **Kiểm tra file bàn giao.** Mở file theo đường dẫn agent gửi (gõ `/wrap` nếu cần bàn giao giữa chừng).
+   - **Mọi task:** Mở `docs/02-roadmap-todo.md`, tìm đúng task, xem trạng thái, kết quả và việc còn lại. Mở thử các file đầu ra đã hẹn ở bước 2.
+   - **Task thay đổi nhiều tầng** (ví dụ cả app và API): Kiểm tra agent đã tạo hoặc cập nhật `docs/specs/<task>.md`. Đọc tiêu chí đạt, kết quả thử và phần chưa kiểm chứng.
+   - **Khi đổi nghiệp vụ hoặc kiến trúc:** Xem quy tắc, vai trò mới trong `docs/00-context.md`; xem module, kết nối hoặc cách chạy mới trong `docs/01-architecture.md`, tùy phần thay đổi.
+   - **Khi có quyết định kỹ thuật mới:** Kiểm tra có `docs/decisions/<task>-<chu-de>.md` ghi lựa chọn, lý do và tác động.
 
 Agent tự đối chiếu yêu cầu với mã task trong [roadmap](docs/02-roadmap-todo.md). Đọc [ngữ cảnh sản phẩm](docs/00-context.md) để xác định actor và UC, rồi đọc phần liên quan trong [kiến trúc](docs/01-architecture.md). Với việc chuẩn bị quy trình ngoài 30 task, ghi rõ đó là đầu ra hỗ trợ trong mục bàn giao.
 
 ## Nhận việc
 
 1. Chạy `git status -sb` và `git log -3 --oneline`. Kiểm tra branch, file đang sửa và bản kế hoạch cục bộ. Bảo toàn thay đổi của thành viên khác. Dùng nhánh ngắn hạn dựa trên trunk của nhóm cho task mới.
-2. Đọc dòng task, UC, hạn, người phụ trách và đầu ra đã bàn giao. Ghi mục tiêu, phạm vi file, phụ thuộc và phép kiểm tra vào spec hoặc kế hoạch hiện có. Với thay đổi nhiều tầng, dùng [mẫu spec](docs/specs/_template.md) tại `docs/specs/<task>.md`. Task hạ tầng dùng tiêu chí chạy lại được thay cho mã UC.
+2. Đọc dòng task, UC, hạn, người phụ trách và đầu ra đã bàn giao. Khi nêu tiêu chí đạt, chỉ rõ file đầu ra người dùng sẽ nhận nếu có. Ghi mục tiêu, phạm vi file, phụ thuộc và phép kiểm tra vào spec hoặc kế hoạch hiện có. Với thay đổi nhiều tầng, dùng [mẫu spec](docs/specs/_template.md) tại `docs/specs/<task>.md`. Task hạ tầng dùng tiêu chí chạy lại được thay cho mã UC.
 3. Đánh dấu **Đang thực hiện** khi bắt đầu. Nếu thiếu quyết định làm thay đổi hợp đồng hoặc hành vi người dùng, ghi câu hỏi và người giải quyết. Tiếp tục phần độc lập. Khi chọn phiên bản hoặc đổi ranh giới module, lưu lý do, tác động và phương án đã cân nhắc trong `docs/decisions/<task>-<chu-de>.md`.
 
 ## Phân việc và bàn giao
@@ -45,6 +49,6 @@ Trước mỗi commit, stage đúng file hoặc hunk của task, xem `git diff -
 ## Hoàn thành và chuyển phiên
 
 - Đối chiếu đủ đầu ra của task trên từng nền tảng, chạy các phép kiểm tra của [kiến trúc](docs/01-architecture.md) phù hợp với diff. Ghi tên test hoặc lệnh, kết quả thực tế, bước chưa chạy và lý do.
-- Trước mỗi lần bàn giao, cập nhật trạng thái và kết quả vào roadmap. Đối chiếu thay đổi thực tế với từng tài liệu liên quan: sửa ngữ cảnh và đặc tả khi đổi nghiệp vụ, sửa kiến trúc và hướng dẫn sử dụng khi đổi cách hệ thống hoạt động, ghi quyết định kỹ thuật cùng lý do khi có lựa chọn mới. Kiểm tra các liên kết và ví dụ còn đúng.
+- Trước mỗi lần bàn giao, cập nhật dòng task trong roadmap (hoặc mục “Bàn giao hiện tại” cho việc hỗ trợ ngoài 30 task). Đối chiếu với danh sách ở bước 4 và sửa cả hướng dẫn sử dụng nếu thao tác đã đổi. Gửi đường dẫn thật cho từng file đầu ra và tài liệu liên quan, ghi **tạo mới** hoặc **cập nhật** và chỉ rõ mục người dùng cần xem. Nếu còn thiếu file đã hẹn, ghi vào việc còn lại.
 - Chuyển task sang **Chờ review** khi đã bàn giao. Đánh dấu **Hoàn thành** sau khi tiêu chí đạt, tài liệu liên quan đã đồng bộ và kết quả review được ghi nhận.
 - Khi kết thúc hoặc nhận `/wrap`, `/done`, `sync docs`, trả lời ngắn theo mẫu **kết quả · cách xem/thử · tài liệu đã cập nhật · việc còn lại**. Nêu rõ phần chưa kiểm chứng. Mã commit và lệnh đã chạy dành cho người cần tra cứu kỹ thuật, chỉ đưa vào tin nhắn khi được hỏi.
