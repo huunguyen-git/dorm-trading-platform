@@ -72,8 +72,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 ## Bàn giao hiện tại
 
 - [x] **Tra cứu yêu cầu theo task** · [Danh mục FR/NFR](03-requirements.md) giữ cả tiêu chí chấp nhận và quy tắc nghiệp vụ của sheet P2_05. Khi nhận việc, đối chiếu UC ở dòng task với danh mục rồi ghi điều khoản áp dụng vào [tiêu chí nghiệm thu](specs/_template.md#tiêu-chí-nghiệm-thu).
-- [x] **Quy trình agent** · [Hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) có bốn bước. Agent tra đúng dòng task và điều khoản liên quan. Khi bàn giao, [mẫu bàn giao](specs/_template.md#bàn-giao) ghi rõ file tạo mới/cập nhật, mục cần xem và phần còn thiếu.
-- **Khi nào dùng skill** · Giao việc thường ngày bằng “Thực hiện P0-01”. Trước khi nghiệm thu thay đổi nhiều tầng hoặc có rủi ro về quyền, giữ chỗ hay tính điểm, dùng ví dụ: `$ooad-review Rà P2-04 trước bàn giao, chỉ ra tiêu chí còn thiếu bằng chứng.` Muốn nhận tóm tắt tiến độ giữa chừng, gõ `/wrap`. [Hướng dẫn review cho agent](../.agents/skills/ooad-review/SKILL.md)
+- [x] **Quy trình agent** · [Hướng dẫn cho người dùng](huong-dan-thuc-hien-task.md) có câu mẫu gọi skill ở bước 4 và danh sách file cần kiểm tra ở bước 5. [Hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) giữ bản ngắn.
 
 - **P0-01** · Theo sheet `Phase 0 - Khoi tao`, dòng 12, bước tiếp theo là dựng monorepo gồm `backend/`, `mobile/`, `admin-web/`, `infra/` và `docs/`. Backend Modular Monolith dùng JWT để xác thực và phân quyền theo vai trò (RBAC) cho cả mobile và web quản trị.
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.

@@ -2,12 +2,13 @@
 
 ## Hướng dẫn đầu phiên
 
-Ở tin nhắn đầu của mỗi phiên, hiển thị bốn bước sau một lần rồi tiếp tục yêu cầu.
+Ở tin nhắn đầu của mỗi phiên, hiển thị năm bước sau một lần rồi tiếp tục yêu cầu.
 
 1. **Giao việc.** Nêu kết quả bạn muốn thấy.
 2. **Chốt đầu ra.** Agent nêu ví dụ đạt yêu cầu và file sẽ bàn giao.
 3. **Xem kết quả.** Agent tự kiểm tra, chỉ cách thử và nêu phần còn thiếu.
-4. **Nhận bàn giao.** Mở `docs/02-roadmap-todo.md` xem trạng thái. Với việc nhiều tầng, mở `docs/specs/<task>.md` xem kết quả thử. Gõ `/wrap` để nhận bàn giao giữa chừng.
+4. **Rà khi cần.** Trước khi nghiệm thu task nhiều tầng hoặc có rủi ro về quyền, giữ chỗ hay tính điểm, gửi `$ooad-review Rà <mã task> trước bàn giao`.
+5. **Nhận bàn giao.** Mở `docs/02-roadmap-todo.md` xem trạng thái và `docs/specs/<task>.md` xem kết quả thử nếu có. Gửi “Bàn giao tiến độ” hoặc `/wrap` khi muốn dừng giữa chừng.
 
 ## Nhận việc
 
