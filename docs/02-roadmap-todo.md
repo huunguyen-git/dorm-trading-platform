@@ -71,6 +71,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
+- [x] **Tra cứu yêu cầu theo task** · [Danh mục FR/NFR](03-requirements.md) giữ cả tiêu chí chấp nhận và quy tắc nghiệp vụ của sheet P2_05. Khi nhận việc, đối chiếu UC ở dòng task với danh mục rồi ghi điều khoản áp dụng vào [tiêu chí nghiệm thu](specs/_template.md#tiêu-chí-nghiệm-thu).
 - [x] **Quy trình agent** · Bước 4 trong [hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) liệt kê file cần mở và nội dung cần kiểm tra theo loại task. [Mẫu bàn giao](specs/_template.md#bàn-giao) yêu cầu ghi đường dẫn thật, phân biệt file tạo mới và file cập nhật, chỉ rõ mục cần xem.
 
 - **P0-01** · Theo sheet `Phase 0 - Khoi tao`, dòng 12, bước tiếp theo là dựng monorepo gồm `backend/`, `mobile/`, `admin-web/`, `infra/` và `docs/`. Backend Modular Monolith dùng JWT để xác thực và phân quyền theo vai trò (RBAC) cho cả mobile và web quản trị.

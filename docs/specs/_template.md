@@ -13,10 +13,12 @@ Ghi tiền điều kiện, thao tác, kết quả và hậu điều kiện. Vớ
 
 ## Tiêu chí nghiệm thu
 
-| Tình huống theo UC hoặc kế hoạch | Kết quả mong đợi | Lệnh/test và kết quả thực tế |
-|---|---|---|
-| Luồng chính | | |
-| Ngoại lệ hoặc thiếu quyền | | |
+Lấy UC theo dòng task trong roadmap và chọn điều khoản từ [danh mục yêu cầu](../03-requirements.md). Với quy tắc nghiệp vụ, dẫn mã FR/NFR gốc. Ghi lý do khi không áp dụng và nêu rõ điểm còn chờ xác nhận.
+
+| UC và actor hoặc mục tiêu hạ tầng | Mã yêu cầu và điều khoản áp dụng | Tình huống và kết quả mong đợi | Kết quả thực tế |
+|---|---|---|---|
+| | | Luồng chính | |
+| | | Ngoại lệ hoặc trường hợp biên | |
 
 ## Bàn giao
 

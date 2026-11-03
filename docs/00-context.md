@@ -10,6 +10,8 @@ Sinh viên dùng app để đưa đồ từ kho cá nhân lên sàn, thương l�
 
 ## Tra cứu yêu cầu
 
+- **FR, NFR và điều kiện nghiệp vụ** tra trong [danh mục yêu cầu](03-requirements.md). Mỗi mục giữ nguồn, độ ưu tiên, trạng thái và tiêu chí chấp nhận của sheet `P2_05_DacTaYeuCau`.
+
 - **Phạm vi, phân công và hạn** lấy từ các sheet Phase 0–4 trong `Ke_Hoach_Du_An_Nhom14.xlsx`. Mỗi mã Pn-nn là một đầu ra để nhóm bàn giao. Sheet Seminar là kế hoạch thuyết trình riêng.
 - **Hành vi và ngoại lệ** lấy từ *Mô hình Use case – Nhóm 14 (1)*, bản 3.0 ngày 21/10/2026. UC-1 trong Word và UC-01 trong workbook cùng chỉ một ca sử dụng. Khi viết spec, đọc cả luồng thay thế và hậu điều kiện của UC tương ứng.
 - **Lựa chọn công nghệ** lấy từ bảng stack nhóm cung cấp. Những phiên bản còn mở được ghi trong [kiến trúc](01-architecture.md). Nếu hai nguồn mâu thuẫn, ghi rõ hai đoạn liên quan trong spec và giao người phụ trách task xác nhận trước khi triển khai phần phụ thuộc.
