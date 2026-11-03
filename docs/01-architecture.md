@@ -11,13 +11,13 @@ flowchart LR
     B --> S["SMTP / OTP"]
 ```
 
-`infra/` chứa cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo kế hoạch P0-01, backend đóng gói thành một JAR, chia module bằng Java package. Các miền nghiệp vụ trong workbook gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị). Chỉ thêm package khi có task sử dụng.
+`infra/` chứa cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo workbook, P0-01 dựng backend Modular Monolith. Nhóm sẽ chọn cách tổ chức bằng Maven multi-module hoặc Java package khi triển khai. Các miền nghiệp vụ trong workbook gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị).
 
 ## Mốc chốt công nghệ
 
 | Task | Công cụ theo bảng stack | Việc cần ghi nhận khi triển khai |
 |---|---|---|
-| P0-01 | Temurin JDK 21 LTS, Spring Boot, Maven Wrapper | Bảng cho phép dòng 3.5.x hoặc 4.x. Kế hoạch P0-01 đề xuất 4.0.8. Xác minh dependency và build trước khi khóa phiên bản trong POM. Commit cả wrapper Unix, Windows và `.mvn/wrapper/`. |
+| P0-01 | Temurin JDK 21 LTS, Spring Boot, Maven Wrapper | Chọn Spring Boot 3.5.x hoặc 4.x theo khả năng tương thích của các dependency. Kiểm tra build trước khi khóa phiên bản trong POM. Commit cả wrapper Unix, Windows và `.mvn/wrapper/`. |
 | P0-02 | Node 24 LTS, npm, TypeScript, React/Vite, React Native/Expo | Kiểm tra tương thích rồi khóa Expo SDK và commit `package-lock.json` cho từng app. Ghi script dev, test và build trong manifest của app. |
 | P0-03 | PostgreSQL, Flyway, Docker Compose | Chọn một major PostgreSQL và dùng cùng major trong Compose và Testcontainers. Tạo migration có phiên bản, kiểm tra cả DB mới và DB từ bản trước. |
 | P0-04 | GitHub Actions trên Ubuntu do GitHub cung cấp | Giữ JDK/Node đồng nhất với local. Backend dùng Spotless, JUnit 5, Mockito. Tách integration test REST Assured/Testcontainers. Hai client dùng ESLint và Prettier. Web dùng Vitest + React Testing Library, mobile dùng Jest + React Native Testing Library. |
