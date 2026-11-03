@@ -1,5 +1,14 @@
 # Làm việc trong repo Nhóm 14
 
+## Hướng dẫn đầu phiên
+
+Trong tin nhắn đầu tiên gửi người dùng ở mỗi phiên làm việc mới của repo, agent hiển thị nguyên văn bốn bước dưới đây, rồi tiếp tục xử lý yêu cầu đã nhận. Chỉ hiển thị một lần mỗi phiên, trừ khi người dùng muốn xem lại.
+
+1. **Giao việc.** Nêu mã task và kết quả bạn muốn kiểm tra. Ví dụ: “Làm P0-01 để hai ứng dụng dùng chung xác thực”.
+2. **Kiểm tra phạm vi.** Trước khi sửa, xem agent định đổi file nào và sẽ kiểm tra kết quả bằng cách nào.
+3. **Kiểm tra từng mốc.** Yêu cầu agent đưa mã commit, lệnh đã chạy, kết quả và phần còn thiếu.
+4. **Nhận bàn giao.** Gõ `/wrap` để xem trạng thái trong roadmap và bước tiếp theo. Chỉ xác nhận hoàn thành sau khi đối chiếu kết quả với yêu cầu.
+
 Mỗi lượt làm việc bắt đầu từ một mã task trong [roadmap](docs/02-roadmap-todo.md). Đọc [ngữ cảnh sản phẩm](docs/00-context.md) để xác định actor và UC, rồi đọc phần liên quan trong [kiến trúc](docs/01-architecture.md). Với việc chuẩn bị quy trình ngoài 30 task, ghi rõ đó là đầu ra hỗ trợ trong mục bàn giao.
 
 ## Nhận việc
