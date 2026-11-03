@@ -71,6 +71,8 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
+- [x] **Quy trình agent** · Đã có hướng dẫn nhận task, phân vùng sửa, nghiệm thu, chia commit và bàn giao giữa các phiên. Dùng [AGENTS.md](../AGENTS.md) làm điểm bắt đầu.
+
 - **P0-01** · Bước kế tiếp là dựng khung monorepo và kiểm tra xác thực JWT/RBAC trên backend. Trên máy làm việc hiện có bản kế hoạch tại `docs/planning/P0-01.md`. Các tiêu chí đầu tiên là build bằng Maven Wrapper, gọi health và phân biệt token không hợp lệ (401) với token thiếu quyền (403).
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.
 - Khi đóng task, cập nhật dòng tương ứng và chuyển mục bàn giao sang task phụ thuộc. Phần tài liệu quy trình chỉ đóng góp một phần cho P0-05. P0-05 còn yêu cầu ADR, C4 và quy trình phân phối bản mobile.
