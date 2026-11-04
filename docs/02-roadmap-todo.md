@@ -13,7 +13,7 @@ Nghiệm thu Phase 0 bằng một bản clone chạy được hai client với A
 | P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Đang thực hiện | — |
 | P0-02 | Khởi tạo Mobile, Web quản trị & UI Kit | Nguyễn Bảo Việt | 28/10 | Chưa thực hiện | — |
 | P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Chưa thực hiện | — |
-| P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Chưa thực hiện | — |
+| P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Đang thực hiện | — |
 | P0-05 | Tài liệu Kiến trúc & Quy chuẩn Git | Tô Thành Nguyên | 31/10 | Chưa thực hiện | — |
 | P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Chưa thực hiện | — |
 
