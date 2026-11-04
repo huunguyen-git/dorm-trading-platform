@@ -100,7 +100,7 @@ jobs:
   required:
     name: required
     runs-on: ubuntu-24.04
-    needs: [repository, workflow-lint]
+    needs: [repository, workflow-lint, backend]
     if: ${{ always() }}
     timeout-minutes: 5
     steps:
