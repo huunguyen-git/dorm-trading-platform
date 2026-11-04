@@ -52,7 +52,6 @@ class ApiSecurityTest {
         var body = response.getBody();
         assertThat(body.path("status").asText()).isEqualTo("UP");
         assertThat(body.path("service").asText()).isEqualTo("dorm-trading-backend");
-        assertThat(body.path("database").asText()).isEqualTo("DISCONNECTED");
         assertThat(Instant.parse(body.path("timestamp").asText())).isBeforeOrEqualTo(Instant.now());
     }
 

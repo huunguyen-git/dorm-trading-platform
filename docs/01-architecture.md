@@ -11,7 +11,7 @@ flowchart LR
     B --> S["SMTP / OTP"]
 ```
 
-`infra/` chứa cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo workbook, P0-01 dựng backend Modular Monolith. Backend dùng một Maven module, tổ chức mã theo [quyết định P0-01](decisions/P0-01-khung-backend.md). Các miền nghiệp vụ trong workbook gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị).
+P0-02 tạo `mobile/` và `admin-web/`. P0-03 tạo `infra/` cho cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo workbook, P0-01 dựng backend Modular Monolith. Backend dùng một Maven module, tổ chức mã theo [quyết định P0-01](decisions/P0-01-khung-backend.md). Các miền nghiệp vụ trong workbook gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị).
 
 ## Mốc chốt công nghệ
 
@@ -44,4 +44,4 @@ $env:JWT_SECRET = [Convert]::ToBase64String($key)
 .\mvnw.cmd spring-boot:run
 ```
 
-Trên Ubuntu, dùng `export JWT_SECRET="$(openssl rand -base64 32)"` rồi chạy `./mvnw spring-boot:run`. Mở [health trên máy local](http://localhost:8082/api/v1/health). Khi chạy riêng backend, JSON có `status` bằng `UP` và `database` bằng `DISCONNECTED`. Dùng `SERVER_PORT` để đổi cổng. Web Vite ở origin `http://localhost:5173` được phép gọi API. Đặt `CORS_ALLOWED_ORIGINS` thành danh sách origin phân tách bằng dấu phẩy khi chạy web ở địa chỉ khác. Client di động dùng địa chỉ backend mà thiết bị truy cập được, ví dụ `http://10.0.2.2:8082` trên Android Emulator.
+Trên Ubuntu, dùng `export JWT_SECRET="$(openssl rand -base64 32)"` rồi chạy `./mvnw spring-boot:run`. Mở [health trên máy local](http://localhost:8082/api/v1/health). API trả HTTP 200 và JSON gồm `status` bằng `UP`, `service` bằng `dorm-trading-backend` và `timestamp`. Dùng `SERVER_PORT` để đổi cổng. Web Vite ở origin `http://localhost:5173` được phép gọi API. Đặt `CORS_ALLOWED_ORIGINS` thành danh sách origin phân tách bằng dấu phẩy khi chạy web ở địa chỉ khác. Client di động dùng địa chỉ backend mà thiết bị truy cập được, ví dụ `http://10.0.2.2:8082` trên Android Emulator.
