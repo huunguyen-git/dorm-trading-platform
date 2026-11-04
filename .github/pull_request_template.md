@@ -10,6 +10,7 @@ Describe the core problem and concise summary of changes:
 ## Verification
 - [ ] Ran relevant local checks (state exact command & output)
 - [ ] Checked changed whitespace (`git diff --check` / `.editorconfig`)
+- [ ] Verified backend build & test locally if applicable (`.\mvnw.cmd test` / `./mvnw test`)
 - [ ] Checked commit message format (`type(scope): <mã task> <kết quả>`)
 - [ ] Required CI checks passed (`CI / required`)
 
