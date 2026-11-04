@@ -10,7 +10,7 @@ Nghiệm thu Phase 0 bằng một bản clone chạy được hai client với A
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Đang thực hiện | — |
+| P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Chờ review | [Kết quả P0-01](specs/P0-01.md#tiêu-chí-nghiệm-thu) · Windows và Ubuntu build đạt, 4 test HTTP đạt ở mỗi môi trường. |
 | P0-02 | Khởi tạo Mobile, Web quản trị & UI Kit | Nguyễn Bảo Việt | 28/10 | Chưa thực hiện | — |
 | P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Chưa thực hiện | — |
 | P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Chưa thực hiện | — |
@@ -74,6 +74,6 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 - [x] **Tra cứu yêu cầu theo task** · [Danh mục FR/NFR](03-requirements.md) giữ cả tiêu chí chấp nhận và quy tắc nghiệp vụ của sheet P2_05. Khi nhận việc, đối chiếu UC ở dòng task với danh mục rồi ghi điều khoản áp dụng vào [tiêu chí nghiệm thu](specs/_template.md#tiêu-chí-nghiệm-thu).
 - [x] **Quy trình agent** · [Hướng dẫn cho người dùng](huong-dan-thuc-hien-task.md) có câu mẫu gọi skill ở bước 4 và danh sách file cần kiểm tra ở bước 5. [Hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) giữ bản ngắn.
 
-- **P0-01** · Theo sheet `Phase 0 - Khoi tao`, dòng 12, bước tiếp theo là dựng monorepo gồm `backend/`, `mobile/`, `admin-web/`, `infra/` và `docs/`. Backend Modular Monolith dùng JWT để xác thực và phân quyền theo vai trò (RBAC) cho cả mobile và web quản trị.
+- **P0-01 → P0-02, P0-03, P0-04** · Bàn giao [API health và hướng dẫn chạy](01-architecture.md#chạy-backend-p0-01), [quy ước JWT và phần cần ghép với DB](decisions/P0-01-khung-backend.md), Temurin 21 và Maven Wrapper. P0-03 kiểm tra lại trường database với PostgreSQL sau khi tích hợp.
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.
 - Khi đóng task, cập nhật dòng tương ứng và chuyển mục bàn giao sang task phụ thuộc. Phần tài liệu quy trình chỉ đóng góp một phần cho P0-05. P0-05 còn yêu cầu ADR, C4 và quy trình phân phối bản mobile.
