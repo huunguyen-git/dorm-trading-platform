@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repository:
+    name: repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whitespace errors
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1 HEAD
+          else
+            echo "Initial commit; skipping whitespace diff check."
+          fi
+
+      - name: Validate commit message format
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python3 scripts/ci/check_commit_format.py "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            python3 scripts/ci/check_commit_format.py HEAD~1..HEAD
+          else
+            echo "Initial commit; skipping commit message format check."
+          fi
