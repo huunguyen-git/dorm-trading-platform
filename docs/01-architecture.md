@@ -20,7 +20,7 @@ P0-02 tạo `mobile/` và `admin-web/`. P0-03 tạo `infra/` cho cấu hình d�
 | P0-01 | Temurin JDK 21 LTS, Spring Boot, Maven Wrapper | Spring Boot 3.5.14 và Maven 3.9.16. Xem [POM](../backend/pom.xml) và [cấu hình wrapper](../backend/.mvn/wrapper/maven-wrapper.properties). |
 | P0-02 | Node 24 LTS, npm, TypeScript, React/Vite, React Native/Expo | Kiểm tra tương thích rồi khóa Expo SDK và commit `package-lock.json` cho từng app. Ghi script dev, test và build trong manifest của app. |
 | P0-03 | PostgreSQL, Flyway, Docker Compose | Chọn một major PostgreSQL và dùng cùng major trong Compose và Testcontainers. Tạo migration có phiên bản, kiểm tra cả DB mới và DB từ bản trước. |
-| P0-04 | GitHub Actions trên Ubuntu do GitHub cung cấp | Giữ JDK/Node đồng nhất với local. Backend dùng Spotless, JUnit 5, Mockito. Tách integration test REST Assured/Testcontainers. Hai client dùng ESLint và Prettier. Web dùng Vitest + React Testing Library, mobile dùng Jest + React Native Testing Library. |
+| P0-04 | GitHub Actions trên Ubuntu 24.04 do GitHub cung cấp | Đã thiết lập CI pipeline gồm: `repository` (whitespace, commit convention), `workflow-lint` (actionlint) và `backend` (Temurin 21, cache Maven, clean verify, upload Surefire artifact). Cổng hợp nhất `required` xuất Step Summary làm điều kiện merge. Xem [spec P0-04](specs/P0-04.md). |
 
 ## Kiểm tra theo phần thay đổi
 
