@@ -64,3 +64,40 @@ jobs:
             --volume "$GITHUB_WORKSPACE:/repo:ro" \
             --workdir /repo \
             rhysd/actionlint:1.7.12 -color
+
+  required:
+    name: required
+    runs-on: ubuntu-24.04
+    needs: [repository, workflow-lint]
+    if: ${{ always() }}
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate mandatory CI checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          results = json.loads(os.environ.get('RESULTS', '{}'))
+          failures = {job: data.get('result') for job, data in results.items()
+                      if data.get('result') != 'success'}
+
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_file:
+              with open(summary_file, 'a', encoding='utf-8') as f:
+                  f.write("### Mandatory CI Status Gate Results\n\n")
+                  f.write("| Job | Result | Status |\n")
+                  f.write("| --- | --- | :---: |\n")
+                  for job, data in results.items():
+                      res = data.get('result', 'unknown')
+                      badge = "✅ PASS" if res == 'success' else "❌ FAIL"
+                      f.write(f"| `{job}` | `{res}` | {badge} |\n")
+
+          if failures:
+              print(f"Required checks failed: {failures}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"All {len(results)} required checks passed: {', '.join(results.keys())}")
+          PY
