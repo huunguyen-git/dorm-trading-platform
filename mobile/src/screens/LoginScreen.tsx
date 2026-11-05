@@ -3,6 +3,7 @@ import { Button, SafeAreaView, Text, TextInput } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { Nav } from '../navigation';
 import { login } from '../auth/login';
+import { colors, space, text } from '../theme';
 
 export default function LoginScreen() {
   const navigation = useNavigation<Nav>();
@@ -17,11 +18,11 @@ export default function LoginScreen() {
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
-  return <SafeAreaView style={{ flex: 1, padding: 20, gap: 12 }}>
-    <Text style={{ fontSize: 24, fontWeight: '700' }}>Đăng nhập</Text>
+  return <SafeAreaView style={{ flex: 1, padding: space.xl, gap: space.md }}>
+    <Text style={text.title}>Đăng nhập</Text>
     <TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="Email" />
     <TextInput accessibilityLabel="Mật khẩu" value={password} onChangeText={setPassword} placeholder="Mật khẩu" secureTextEntry />
-    {error ? <Text accessibilityRole="alert">{error}</Text> : null}
+    {error ? <Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text> : null}
     <Button title={busy ? 'Đang đăng nhập…' : 'Đăng nhập'} onPress={() => void submit()} disabled={busy || !email || !password} />
   </SafeAreaView>;
 }
