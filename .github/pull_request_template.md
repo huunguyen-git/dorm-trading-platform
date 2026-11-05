@@ -1,19 +1,17 @@
-<!-- Issue/PR/Task liên quan -->
+## Task / Scope
+- Task ID: P0-XX
+- Related Actor / UC / Requirement:
+- Impacted Scope: (e.g., backend, admin-web, mobile, docs, ci)
 
-## Bối cảnh & Mục tiêu
-<!-- Nêu rõ thực hiện chức năng gì, nhằm đạt mục tiêu gì -->
+## Changes
+Describe the core problem and concise summary of changes:
+-
 
----
+## Verification
+- [ ] Ran relevant local checks (state exact command & output)
+- [ ] Checked changed whitespace (`git diff --check` / `.editorconfig`)
+- [ ] Verified backend build & test locally if applicable (`.\mvnw.cmd test` / `./mvnw test`)
+- [ ] Required CI checks passed (`CI / required`)
 
-## Những thay đổi đã thực hiện
-<!-- Nêu rõ các chỉnh sửa đã thực hiện, các file đã sửa đổi, các tính năng đã thay đổi, ... -->
-
----
-
-## Bằng chứng kiểm thử thực tế
-<!-- Đưa ra bằng chứng thực tế (source code, documents, ...) -->
-
----
-
-## Hướng dẫn cho Reviewers
-<!-- Hướng dẫn chi tiết những gì cần làm để kiểm chứng những gì đã làm -->
+## Dependencies & Risks
+- Blockers, limitations, or downstream handoff to other tasks:

@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repository:
+    name: repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whitespace errors
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1 HEAD
+          else
+            echo "Initial commit; skipping whitespace diff check."
+          fi
+
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: |
+          docker run --rm --read-only \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            --workdir /repo \
+            rhysd/actionlint:1.7.12 -color
+
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Grant execute permission for Maven wrapper
+        run: chmod +x backend/mvnw
+
+      - name: Build and verify backend with Maven
+        working-directory: backend
+        run: ./mvnw --batch-mode --no-transfer-progress clean verify
+
+      - name: Upload Surefire test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-surefire-reports
+          path: backend/target/surefire-reports/
+          if-no-files-found: ignore
+
+  required:
+    name: required
+    runs-on: ubuntu-latest
+    needs: [repository, workflow-lint, backend]
+    if: ${{ always() }}
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate mandatory CI checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          results = json.loads(os.environ.get('RESULTS', '{}'))
+          failures = {job: data.get('result') for job, data in results.items()
+                      if data.get('result') != 'success'}
+
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_file:
+              with open(summary_file, 'a', encoding='utf-8') as f:
+                  f.write("### Mandatory CI Status Gate Results\n\n")
+                  f.write("| Job | Result | Status |\n")
+                  f.write("| --- | --- | :---: |\n")
+                  for job, data in results.items():
+                      res = data.get('result', 'unknown')
+                      badge = "✅ PASS" if res == 'success' else "❌ FAIL"
+                      f.write(f"| `{job}` | `{res}` | {badge} |\n")
+
+          if failures:
+              print(f"Required checks failed: {failures}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"All {len(results)} required checks passed: {', '.join(results.keys())}")
+          PY
