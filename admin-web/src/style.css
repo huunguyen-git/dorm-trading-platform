@@ -1,0 +1,44 @@
+:root {
+  font-family: system-ui, sans-serif;
+  --color-ink: #222a27;
+  --color-ink-soft: #3a4740;
+  --color-muted: #6b716d;
+  --color-brand: #a7442e;
+  --color-danger: #a12d24;
+  --color-line: #e3e4df;
+  --color-surface: #fff;
+  --color-canvas: #f5f4ef;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 40px;
+  --radius: 10px;
+  --radius-sm: 6px;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; }
+.sidebar { background: var(--color-ink); color: white; padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-6); }
+.brand { font-size: 18px; }
+.sidebar nav, .sidebar footer { display: grid; gap: var(--space-2); }
+.sidebar nav a { color: white; padding: var(--space-3); border-radius: var(--radius); text-decoration: none; }
+.sidebar nav a.active { background: var(--color-ink-soft); }
+.sidebar footer { margin-top: auto; }
+.main-content { min-width: 0; }
+.page-content { max-width: 1000px; margin: auto; padding: var(--space-8); }
+.auth-page { min-height: 100vh; display: grid; place-items: center; padding: var(--space-4); }
+.panel { width: min(100%, 420px); display: grid; gap: var(--space-4); padding: var(--space-6); background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius); }
+.auth-form label { display: grid; gap: var(--space-2); }
+.auth-form input { padding: var(--space-3); border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
+.button { padding: var(--space-3); border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: white; color: var(--color-ink); }
+.button-primary { background: var(--color-brand); color: white; border-color: var(--color-brand); }
+.error { color: var(--color-danger); }
+.data-view { overflow: auto; padding: var(--space-4); background: white; border: 1px solid var(--color-line); border-radius: var(--radius); }
+@media (max-width: 680px) { .app-shell { grid-template-columns: 1fr; } .sidebar { padding: var(--space-4); } .page-content { padding: var(--space-4); } }

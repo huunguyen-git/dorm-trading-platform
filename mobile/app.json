@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Dorm Trading",
+    "slug": "dorm-trading",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-secure-store"],
+    "ios": { "supportsTablet": true },
+    "android": { "package": "com.dormtrading.app" }
+  }
+}
