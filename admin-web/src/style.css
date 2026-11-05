@@ -1,7 +1,5 @@
 :root {
   font-family: system-ui, sans-serif;
-  color: #222a27;
-  background: #f5f4ef;
   --color-ink: #222a27;
   --color-ink-soft: #3a4740;
   --color-muted: #6b716d;
@@ -18,6 +16,8 @@
   --space-8: 40px;
   --radius: 10px;
   --radius-sm: 6px;
+  color: var(--color-ink);
+  background: var(--color-canvas);
 }
 
 * { box-sizing: border-box; }
