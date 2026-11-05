@@ -1,15 +1,16 @@
 import { useSession } from '../auth/session';
 import { tokenStore } from '../auth/tokenStore';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const baseUrl = () => process.env.EXPO_PUBLIC_API_URL;
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!BASE_URL) {
+  const origin = baseUrl();
+  if (!origin) {
     throw new Error('EXPO_PUBLIC_API_URL is required');
   }
 
   const token = await tokenStore.get();
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(`${origin}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',

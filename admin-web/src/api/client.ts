@@ -1,4 +1,4 @@
-const baseUrl = import.meta.env.VITE_API_URL;
+const baseUrl = () => import.meta.env.VITE_API_URL;
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -8,9 +8,10 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!baseUrl) throw new Error('VITE_API_URL is required');
+  const origin = baseUrl();
+  if (!origin) throw new Error('VITE_API_URL is required');
   const token = sessionStorage.getItem('session_token');
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(`${origin}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
