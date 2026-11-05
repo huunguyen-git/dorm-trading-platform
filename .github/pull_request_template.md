@@ -1,3 +1,5 @@
+<!-- Issue/PR/Task liên quan -->
+
 ## Bối cảnh & Mục tiêu
 <!-- Nêu rõ thực hiện chức năng gì, nhằm đạt mục tiêu gì -->
 
