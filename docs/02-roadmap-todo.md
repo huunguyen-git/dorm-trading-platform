@@ -12,7 +12,7 @@ Nghiệm thu Phase 0 bằng một bản clone chạy được hai client với A
 |---|---|---|---|---|---|
 | P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Chờ review | [Kết quả P0-01](specs/P0-01.md#tiêu-chí-nghiệm-thu) · Windows và Ubuntu build đạt, 4 test HTTP đạt ở mỗi môi trường. |
 | P0-02 | Khởi tạo Mobile, Web quản trị & UI Kit | Nguyễn Bảo Việt | 28/10 | Chờ review | [docs/specs/P0-02.md](specs/P0-02.md) |
-| P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Chưa thực hiện | — |
+| P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Chờ review | [Kết quả P0-03](specs/P0-03.md#tiêu-chí-nghiệm-thu) · Docker Compose 3 dịch vụ, Flyway 15 bảng & 7 danh mục, 7/7 test đạt trên Java 21. |
 | P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Chờ review | [docs/specs/P0-04.md](specs/P0-04.md) |
 | P0-05 | Tài liệu Kiến trúc & Quy chuẩn Git | Tô Thành Nguyên | 31/10 | Chưa thực hiện | — |
 | P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Chưa thực hiện | — |

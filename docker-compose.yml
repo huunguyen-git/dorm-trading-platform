@@ -1,0 +1,85 @@
+name: dorm-trading-platform
+
+services:
+  # ============================================================================
+  # 1. Cơ sở dữ liệu chính: PostgreSQL 16
+  # Cổng máy host mặc định là 5432 (có thể ghi đè qua POSTGRES_PORT trong .env)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: dorm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dorm_trading}
+      POSTGRES_USER: ${POSTGRES_USER:-dorm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dorm_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dorm_user} -d ${POSTGRES_DB:-dorm_trading}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dorm-network
+
+  # ============================================================================
+  # 2. Máy chủ gửi/nhận email giả lập: Maildev (Test OTP Đăng ký, Quên mật khẩu)
+  # ============================================================================
+  maildev:
+    image: maildev/maildev:2.1.0
+    container_name: dorm-maildev
+    restart: unless-stopped
+    ports:
+      - "${MAILDEV_WEB_PORT:-1080}:1080" # Web UI xem email OTP (http://localhost:1080)
+      - "${MAILDEV_SMTP_PORT:-1025}:1025" # Cổng SMTP backend gửi mail
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:1080/healthz || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - dorm-network
+
+  # ============================================================================
+  # 3. Lưu trữ tệp Object Storage: MinIO (S3-compatible)
+  # ============================================================================
+  minio:
+    image: ghcr.io/coollabsio/minio:latest
+    container_name: dorm-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dorm_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dorm_minio_password123}
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"       # S3 API Endpoint cho Backend
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Web Console Quản trị (http://localhost:9001)
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9000/minio/health/live || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dorm-network
+
+networks:
+  dorm-network:
+    driver: bridge
+    name: dorm-platform-network
+
+volumes:
+  postgres_data:
+    name: dorm_postgres_data
+  minio_data:
+    name: dorm_minio_data
