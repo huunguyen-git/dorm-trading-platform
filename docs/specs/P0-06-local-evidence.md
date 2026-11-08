@@ -43,3 +43,11 @@
 ## Phần còn lại
 
 Đã chốt lựa chọn và triển khai tài liệu/CI. Tiếp tục chạy PR mẫu cả ca đạt/lỗi, xác nhận check bắt buộc của main, thu xác nhận trên 5 máy và rà P0-06. Dòng thành viên trong [spec P0-06](P0-06.md) vẫn giữ chưa xác nhận. Dịch vụ smoke local và tiến trình backend/web do agent tạo đã được dừng sau lượt baseline, không xóa volume hoặc dữ liệu dự án khác.
+
+## Sau triển khai CI và cấu hình repo
+
+- Actionlint 1.7.12 đạt với workflow mới. Trích nguyên script gate mới và danh sách `needs`, thử all-success cùng failure/cancelled/skipped cho từng job trong năm job: **16/16** lượt đạt, có summary. JSON local tại `.local/P0-06/expanded-gate-results.json`.
+- [PR nháp #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) dùng làm PR mẫu. [Run ca lỗi](https://github.com/huunguyen-git/dorm-trading-platform/actions/runs/42490012592), revision `9241913`, có một test web cố ý sai: **admin-web=failure**, **required=failure**; repository/workflow-lint/backend/mobile đều success. Log gate ghi `Required checks failed: {'admin-web': 'failure'}`. Test thử được xóa trong commit phục hồi, không thuộc đầu ra cuối.
+- Run đầu bị lượt push ca lỗi hủy theo concurrency; gate của run bị hủy cũng không xanh. Không dùng run bị hủy làm bằng chứng baseline đạt trên GitHub.
+- Đã cập nhật rồi đọc lại [ruleset main](https://github.com/huunguyen-git/dorm-trading-platform/rules/23882149): active, check `required` gắn app GitHub Actions 15368, bật strict/up-to-date; giữ toàn bộ rule PR/approve/squash/chống xóa/force-push và không thêm bypass. API rule áp dụng thực tế cho main trả đúng cấu hình này.
+- Run phục hồi và báo cáo Surefire sẽ được bổ sung sau khi kết thúc. Chưa merge PR.
