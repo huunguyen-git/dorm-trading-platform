@@ -15,7 +15,7 @@ Nghiệm thu Phase 0 bằng một bản clone chạy được hai client với A
 | P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Hoàn thành | Chốt hoàn thành nền tảng ngày 08/11 theo quyết định của người dùng. 7/7 test Java 21, DB mới và nâng V1 → V2 đạt; [tồn đọng được chuyển tiếp](specs/P0-03.md#tồn-đọng-chuyển-tiếp-08112026). |
 | P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Hoàn thành | [Chốt phạm vi CI 08/11](specs/P0-04.md#chốt-phạm-vi-08112026): workflow, actionlint, backend và logic required đạt. Bật bảo vệ main và mở rộng CI client là việc tiếp nối. |
 | P0-05 | Tài liệu Kiến trúc & Quy chuẩn Git | Tô Thành Nguyên | 31/10 | Chưa thực hiện | — |
-| P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Đang thực hiện | [Spec và kế hoạch](specs/P0-06.md) · Đã chốt quy ước, đồng bộ tài liệu và thêm CI hai client; [baseline local](specs/P0-06-local-evidence.md) đạt. Đang thu bằng chứng PR/CI; còn xác nhận 5 máy và mobile runtime. |
+| P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Đang thực hiện | [PR nháp #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) · CI phục hồi 6/6 job, ca lỗi client kéo gate lỗi, check main đã bật. [Spec và kết quả tự rà](specs/P0-06.md) · Còn xác nhận 5 máy, UI/API qua môi trường client và review độc lập. |
 
 ## PHASE 1 Định danh & kho cá nhân · 01/11/2026 – 14/11/2026
 

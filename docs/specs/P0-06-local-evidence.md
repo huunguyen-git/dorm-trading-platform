@@ -42,7 +42,7 @@
 
 ## Phần còn lại
 
-Đã chốt lựa chọn và triển khai tài liệu/CI. Tiếp tục chạy PR mẫu cả ca đạt/lỗi, xác nhận check bắt buộc của main, thu xác nhận trên 5 máy và rà P0-06. Dòng thành viên trong [spec P0-06](P0-06.md) vẫn giữ chưa xác nhận. Dịch vụ smoke local và tiến trình backend/web do agent tạo đã được dừng sau lượt baseline, không xóa volume hoặc dữ liệu dự án khác.
+Đã chốt lựa chọn, triển khai tài liệu/CI, chạy PR mẫu đạt/lỗi và xác nhận check main như phần dưới. Còn xác nhận trên 5 máy, UI/API từ môi trường client và một người khác review/approve PR. Dòng thành viên trong [spec P0-06](P0-06.md) vẫn giữ chưa xác nhận. Dịch vụ smoke local và tiến trình backend/web do agent tạo đã được dừng sau lượt baseline, không xóa volume hoặc dữ liệu dự án khác.
 
 ## Sau triển khai CI và cấu hình repo
 
@@ -50,4 +50,7 @@
 - [PR nháp #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) dùng làm PR mẫu. [Run ca lỗi](https://github.com/huunguyen-git/dorm-trading-platform/actions/runs/42490012592), revision `9241913`, có một test web cố ý sai: **admin-web=failure**, **required=failure**; repository/workflow-lint/backend/mobile đều success. Log gate ghi `Required checks failed: {'admin-web': 'failure'}`. Test thử được xóa trong commit phục hồi, không thuộc đầu ra cuối.
 - Run đầu bị lượt push ca lỗi hủy theo concurrency; gate của run bị hủy cũng không xanh. Không dùng run bị hủy làm bằng chứng baseline đạt trên GitHub.
 - Đã cập nhật rồi đọc lại [ruleset main](https://github.com/huunguyen-git/dorm-trading-platform/rules/23882149): active, check `required` gắn app GitHub Actions 15368, bật strict/up-to-date; giữ toàn bộ rule PR/approve/squash/chống xóa/force-push và không thêm bypass. API rule áp dụng thực tế cho main trả đúng cấu hình này.
-- Run phục hồi và báo cáo Surefire sẽ được bổ sung sau khi kết thúc. Chưa merge PR.
+- [Run phục hồi 42490190801](https://github.com/huunguyen-git/dorm-trading-platform/actions/runs/42490190801), revision `b080e053b73036a33fccf9c6a71cae81b2da8647`: **6/6 job success**. [Job required/Step Summary](https://github.com/huunguyen-git/dorm-trading-platform/actions/runs/42490190801/job/128760841890) gom đủ năm job thành phần. Web và mobile thực hiện đủ lint/test/build hoặc export trên Node 24.
+- [Surefire artifact của run phục hồi](https://github.com/huunguyen-git/dorm-trading-platform/actions/runs/42490190801/artifacts/13621465854) còn hiệu lực lúc kiểm tra; đã tải về `.local/P0-06/ci-42490190801/` và cộng thuộc tính XML: **7 tests, 0 failures, 0 errors, 0 skipped**. Không commit XML có metadata máy chạy; dùng artifact CI làm bằng chứng gốc.
+- Các cảnh báo Actions còn tồn tại từ workflow nền: setup-java v4 deprecated và action cũ chuyển runtime Node 20 sang 24. Không làm run thất bại; chưa nâng các action nền ngoài phạm vi đã chốt. Các PR Dependabot vẫn để chủ CI xử lý.
+- Kết quả tự rà `ooad-review` ghi tại [spec](P0-06.md#rà-trước-bàn-giao-theo-ooad-review--08112026); chưa thay approve của thành viên khác. Chưa merge PR. Run trên HEAD sau các commit chỉ cập nhật tài liệu cần được kiểm tra riêng trước bàn giao.
