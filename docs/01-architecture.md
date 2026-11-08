@@ -19,14 +19,14 @@ P0-02 tạo `mobile/` và `admin-web/`. P0-03 tạo `infra/` cho cấu hình d�
 |---|---|---|
 | P0-01 | Temurin JDK 21 LTS, Spring Boot, Maven Wrapper | Spring Boot 3.5.14 và Maven 3.9.16. Xem [POM](../backend/pom.xml) và [cấu hình wrapper](../backend/.mvn/wrapper/maven-wrapper.properties). |
 | P0-02 | Node 24 LTS, npm, TypeScript, React/Vite, React Native/Expo | Đã chốt: `mobile/` dùng Expo SDK 53, React Native 0.79.5, React 19.0.0, TypeScript 5.8.3; `admin-web/` dùng React 18.3.1, Vite 6.3.5, React Router 6.30.1, Vitest. Hai app giữ `package-lock.json` kiểu 3 và script `start`/`dev`, `lint` (`tsc --noEmit`), `test`, `build`. Xem [spec P0-02](specs/P0-02.md). |
-| P0-03 | PostgreSQL, Flyway, Docker Compose | Chọn một major PostgreSQL và dùng cùng major trong Compose và Testcontainers. Tạo migration có phiên bản, kiểm tra cả DB mới và DB từ bản trước. |
-| P0-04 | GitHub Actions trên Ubuntu do GitHub cung cấp | Đã thiết lập CI pipeline gồm: `repository` (kiểm tra khoảng trắng), `workflow-lint` (actionlint) và `backend` (Temurin 21, cache Maven, clean verify 4 test bảo mật, upload Surefire artifact). Cổng hợp nhất `required` xuất Step Summary làm điều kiện merge. Xem [spec P0-04](specs/P0-04.md). |
+| P0-03 | PostgreSQL, Flyway, Docker Compose | PostgreSQL 16 trong Compose và Testcontainers. Giữ V1/V2, migration tiếp theo dùng V3/V4… do đầu mối điều phối; kiểm tra DB mới và nâng từ bản trước. |
+| P0-04 / P0-06 | GitHub Actions trên Ubuntu do GitHub cung cấp | CI nền P0-04 được P0-06 mở rộng: `repository`, `workflow-lint`, `backend` (Temurin 21, clean verify hiện có 7 test, Surefire artifact), `admin-web` và `mobile` (Node 24, lint/test/build hoặc export Android). `required` gom đủ năm job và xuất Step Summary. Xem [spec P0-06](specs/P0-06.md) và [quyết định](decisions/P0-06-quy-uoc-va-ci.md). |
 
 ## Kiểm tra theo phần thay đổi
 
 - **Backend** · Chạy trong `backend/` lệnh `.\mvnw.cmd clean verify` trên Windows hoặc `./mvnw clean verify` trên Ubuntu. Đối chiếu test với tiêu chí của task. Khi đã cấu hình profile integration test, ghi rõ lệnh kích hoạt và yêu cầu Docker.
 - **Mobile và web** · Từ đúng thư mục app có lockfile, chạy `npm ci`, sau đó `npm run` để xem script thật. Chạy lint, test và build tương ứng với nền tảng. Với thay đổi quyền camera hoặc URL kết nối, thử trên giả lập hoặc thiết bị theo tiêu chí task.
-- **Hạ tầng và liên ứng dụng** · Tại P0-03, kiểm tra cấu hình Compose, chạy migration và thử cả hai client gọi cùng API. Tại P0-06, lưu kết quả PR mẫu và xác nhận local của 5 thành viên. P4-02 nghiệm thu xuyên ứng dụng bằng Maestro và Playwright.
+- **Hạ tầng và liên ứng dụng** · Tại P0-03, kiểm tra cấu hình Compose, chạy migration và thử cả hai client gọi cùng API. Tại P0-06, dùng [checklist](conventions/P0-06-checklist.md), lưu kết quả PR mẫu và xác nhận local của 5 thành viên. P4-02 nghiệm thu xuyên ứng dụng bằng Maestro và Playwright.
 - **Tài liệu** · Kiểm tra mã task/UC, liên kết tương đối và `git diff --cached --check`. Nếu dự án chưa có manifest hoặc job tương ứng, ghi chính xác phép kiểm tra còn chờ.
 
 ## Chạy backend P0-01
