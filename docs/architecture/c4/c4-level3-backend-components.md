@@ -1,6 +1,6 @@
 # C4 mức 3 – Module bên trong Backend API
 
-Mỗi module là một Maven module với gói `com.campus.<module>` ([ADR-001](../adr/ADR-001-modular-monolith-maven-multi-module.md)). Mũi tên là phụ thuộc được phép; không có vòng.
+Các component là module logic mục tiêu trong **một Maven module**, gốc package `com.dormtrading` theo [quyết định P0-06](../../decisions/P0-06-quy-uoc-va-ci.md). Hiện có sáu package miền và `common`; `shared`, `notification`, `media` là mục tiêu tổ chức, chưa phải package/module đã tạo. Mũi tên là phụ thuộc nghiệp vụ cho phép, không khẳng định các luồng đã triển khai.
 
 ```mermaid
 C4Component
@@ -47,16 +47,16 @@ C4Component
 ## Cấu trúc bên trong một module
 
 ```text
-backend/<module>/src/main/java/com/campus/<module>/
+backend/src/main/java/com/dormtrading/<mien>/
 ├── api/            REST controller + DTO request/response (chỉ lớp này được expose ra HTTP)
 ├── application/    Application service: giao dịch, kiểm quyền, điều phối; API công khai cho module khác
 ├── domain/         Entity, value object, quy tắc nghiệp vụ, domain event
 └── infrastructure/ JPA repository, adapter SMTP/storage, scheduler
-backend/<module>/src/main/resources/db/migration/   Flyway migration của module (V<ngày>_<module>__...)
-backend/<module>/src/test/java/...                  Unit test domain + integration test Testcontainers
+backend/src/main/resources/db/migration/   Flyway V1/V2; tiếp theo V3__<mo_ta>.sql
+backend/src/test/java/com/dormtrading/      Unit test + integration test Testcontainers
 ```
 
-Quy tắc kiểm tra tự động (đề xuất cho P0-04, dùng ArchUnit): lớp trong `domain` không import Spring Web/JPA; gói `api` không được tham chiếu từ module khác; chỉ `application` được gọi chéo module.
+Các tầng trong cây trên là quy ước cho nghiệp vụ mới, không phải tất cả package đã có ở scaffold. Ranh giới cần review: gói `api` không được tham chiếu từ miền khác; chỉ service/DTO công khai được gọi chéo miền. ArchUnit là hướng mở rộng chưa triển khai; CI P0-06 chưa kiểm tra tự động ranh giới này.
 
 ## Giao dịch và khóa quan trọng
 

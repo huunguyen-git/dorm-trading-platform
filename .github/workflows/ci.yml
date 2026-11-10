@@ -86,10 +86,73 @@ jobs:
           path: backend/target/surefire-reports/
           if-no-files-found: ignore
 
+  admin-web:
+    name: admin-web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: admin-web
+    env:
+      VITE_API_URL: http://localhost:8082/api/v1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+      - name: Check TypeScript
+        run: npm run lint
+      - name: Test admin web
+        run: npm test
+      - name: Build admin web
+        run: npm run build
+
+  mobile:
+    name: mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: 'true'
+      EXPO_PUBLIC_API_URL: http://localhost:8082/api/v1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+      - name: Check TypeScript
+        run: npm run lint
+      - name: Test mobile
+        run: npm test
+      - name: Export Android bundle
+        run: npm run build
+
   required:
     name: required
     runs-on: ubuntu-latest
-    needs: [repository, workflow-lint, backend]
+    needs: [repository, workflow-lint, backend, admin-web, mobile]
     if: ${{ always() }}
     timeout-minutes: 5
     steps:
