@@ -10,12 +10,12 @@ Nghiệm thu Phase 0 bằng một bản clone chạy được hai client với A
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Chờ review | [Kết quả P0-01](specs/P0-01.md#tiêu-chí-nghiệm-thu) · Windows và Ubuntu build đạt, 4 test HTTP đạt ở mỗi môi trường. |
+| P0-01 | Khởi tạo Monorepo & Khung Backend | Nguyễn Hữu Nguyên | 28/10 | Hoàn thành | [Kết quả P0-01](specs/P0-01.md#tiêu-chí-nghiệm-thu) · Windows và Ubuntu build đạt, 4 test HTTP đạt ở mỗi môi trường. |
 | P0-02 | Khởi tạo Mobile, Web quản trị & UI Kit | Nguyễn Bảo Việt | 28/10 | Hoàn thành | [PR #4 đã merge](https://github.com/huunguyen-git/dorm-trading-platform/pull/4) · [Chốt phạm vi khởi tạo 08/11](specs/P0-02.md#chốt-phạm-vi-08112026): hai client build đạt, mỗi client 5/5 test; tích hợp API thật thuộc Phase 1. |
 | P0-03 | Cấu hình Docker, DB & Testcontainers | Nguyễn Quốc Nguyên | 29/10 | Hoàn thành | Chốt hoàn thành nền tảng ngày 08/11 theo quyết định của người dùng. 7/7 test Java 21, DB mới và nâng V1 → V2 đạt; [tồn đọng được chuyển tiếp](specs/P0-03.md#tồn-đọng-chuyển-tiếp-08112026). |
 | P0-04 | Thiết lập CI Pipeline & Code Quality | Lê Vũ Hoàng Nguyên | 30/10 | Hoàn thành | [Chốt phạm vi CI 08/11](specs/P0-04.md#chốt-phạm-vi-08112026): workflow, actionlint, backend và logic required đạt. Bật bảo vệ main và mở rộng CI client là việc tiếp nối. |
-| P0-05 | Tài liệu Kiến trúc & Quy chuẩn Git | Tô Thành Nguyên | 31/10 | Chưa thực hiện | — |
-| P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Đang thực hiện | [PR nháp #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) · CI phục hồi 6/6 job, ca lỗi client kéo gate lỗi, check main đã bật. [Spec và kết quả tự rà](specs/P0-06.md) · Còn xác nhận 5 máy, UI/API qua môi trường client và review độc lập. |
+| P0-05 | Tài liệu Kiến trúc & Quy chuẩn Git | Tô Thành Nguyên | 31/10 | Hoàn thành | [Chốt Phase 0 ngày 13/11](#chốt-phase-0--13112026) · ADR, C4 và hướng dẫn phân phối mobile đã có trong repo. |
+| P0-06 | Thống nhất Quy ước & Chạy thử Pipeline | Tất cả | 31/10 | Hoàn thành | [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) · CI phục hồi 6/6 job, ca lỗi client kéo gate lỗi, check main đã bật. [Spec và kết quả tự rà](specs/P0-06.md) · Đóng theo chỉ định ngày 13/11; phần bằng chứng còn thiếu được giữ tại mục chốt Phase 0. |
 
 ## PHASE 1 Định danh & kho cá nhân · 01/11/2026 – 14/11/2026
 
@@ -23,7 +23,7 @@ Nghiệm thu bằng tài khoản đăng ký từ mobile được duyệt trên w
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu (UC-01, 03, 04, 07, 08) | Nguyễn Hữu Nguyên | 08/11 | Chưa thực hiện | Ưu tiên đầu tiên: hợp đồng xác thực dùng chung và bỏ khóa JWT fallback; [phân công chi tiết](#phân-công-phase-1--08112026). |
+| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu (UC-01, 03, 04, 07, 08) | Nguyễn Hữu Nguyên | 08/11 | Chờ review | [Triển khai và bằng chứng 13/11](specs/P1-01.md#kết-quả-kiểm-chứng-cuối--13112026) · Backend24/24, web8/8, mobile6/6 và build đạt; SMTP thật bản cuối đạt. [GUI và checklist](specs/P1-01-gui-checklist.md) đã bổ sung; browser fixture desktop/mobile đạt. Còn review độc lập, thiết bị và chạy lại live UI sau outbox. |
 | P1-02 | Hồ sơ cá nhân & Duyệt kích hoạt (UC-02, 05, 06) | Nguyễn Bảo Việt | 14/11 | Chưa thực hiện | Hồ sơ mobile, duyệt kích hoạt trên web và API tương ứng; ghép với P1-01. |
 | P1-03 | Quản lý Kho hàng cá nhân (UC-09) | Nguyễn Quốc Nguyên | 12/11 | Chưa thực hiện | API và màn kho cá nhân; đầu mối migration và tồn đọng hạ tầng P0-03. |
 | P1-04 | Tra cứu & Sửa hồ sơ Người dùng (UC-11, UC-12) | Lê Vũ Hoàng Nguyên | 12/11 | Chưa thực hiện | API và trang web quản lý hồ sơ người dùng; làm trước P1-05. |
@@ -48,7 +48,7 @@ Phối hợp và thứ tự ghép:
 - **API và danh tính dùng chung:** Nguyễn Hữu Nguyên là đầu mối `SecurityConfig`, JWT, DTO phiên và mô hình tài khoản dùng chung. Các chủ task tự viết API của mình, thống nhất hợp đồng trước khi ghép; `seller` trong scaffold không phải quyền hệ thống cuối cùng.
 - **Migration:** Nguyễn Quốc Nguyên điều phối số phiên bản và thay đổi schema cho toàn Phase 1. Mỗi task nêu yêu cầu bảng/cột/ràng buộc trước khi thêm migration; dùng migration mới, không sửa V1/V2 đã merge. Rà riêng nhu cầu OTP đăng ký/reset vì bảng OTP hiện tại gắn giao dịch bàn giao.
 - **Client:** Nguyễn Bảo Việt điều phối UI Kit, điều hướng và lớp API dùng chung. Hữu Nguyên sửa vùng auth; Bảo Việt sửa vùng hồ sơ/duyệt; Quốc Nguyên sửa vùng kho; Hoàng Nguyên sửa vùng người dùng/khóa; Thành Nguyên sửa vùng kiểm duyệt viên/thang phạt. Thay đổi file chung phải thống nhất với đầu mối, không ghi đè phần task khác.
-- **CI:** Phần tiếp nối P0-04 được triển khai cùng P0-06 theo chấp thuận của người dùng: [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) thêm hai client trên Node 24 vào `required`. Ruleset main đã bật check `required` của GitHub Actions; PR còn nháp trong lúc thu bằng chứng. Lê Vũ Hoàng Nguyên tiếp tục giữ đầu mối CI.
+- **CI:** Phần tiếp nối P0-04 được triển khai cùng P0-06 theo chấp thuận của người dùng: [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) thêm hai client trên Node 24 vào `required`. Ruleset main đã bật check `required` của GitHub Actions; PR đã có commit merge trong lịch sử local; xem chốt Phase 0 ngày 13/11. Lê Vũ Hoàng Nguyên tiếp tục giữ đầu mối CI.
 - **Thứ tự:** chốt hợp đồng P1-01 trước; P1-02/03/04/06 có thể dựng phần riêng với dữ liệu giả theo hợp đồng. Ghép P1-02 với đăng ký và kích hoạt; Hoàng Nguyên hoàn thành P1-04 trước khi ghép P1-05. Cuối phase thử mobile đăng ký → xác minh → web duyệt → đăng nhập → kho, cùng một ca bị từ chối quyền trên web/API.
 - **Review và trạng thái:** Quốc Nguyên review P1-01; Hữu Nguyên review P1-02 đến P1-06. Khi bắt đầu, từng chủ task chuyển **Đang thực hiện**, tạo `docs/specs/P1-xx.md` theo mẫu và đọc đặc tả UC gốc (chưa có trong repo). Mỗi PR chỉ sửa vùng task; Hữu Nguyên điều phối cập nhật roadmap. Chỉ chuyển **Chờ review** khi có bằng chứng client/API thật cho luồng đã triển khai.
 
@@ -99,6 +99,16 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 - **P0-01 → P0-02, P0-03, P0-04, P1-01** · Xem [hướng dẫn tích hợp theo task](specs/P0-01.md#hướng-dẫn-tích-hợp) để khởi tạo hai client, ghép phần DB vào backend, cấu hình CI và triển khai cấp token.
 - **P0-02 → Phase 1** · [PR #4 đã merge](https://github.com/huunguyen-git/dorm-trading-platform/pull/4), task **Hoàn thành** trong phạm vi khởi tạo. Nhận hai client, UI Kit, lockfile và 5 test mỗi app; P1-01/P1-02 tiếp tục tích hợp xác thực/hồ sơ với API thật. Xem [chốt phạm vi](specs/P0-02.md#chốt-phạm-vi-08112026).
 - **P0-02 → P0-04** · Giao phiên bản Expo SDK, lockfile và các lệnh kiểm tra của hai client cho người viết CI. P0-03 bàn giao phiên bản PostgreSQL và cách khởi động dịch vụ phụ trợ cho bộ integration test.
-- **P0-03 → Phase 1** · Task **Hoàn thành** theo quyết định ngày 08/11. [Handoff tồn đọng](specs/P0-03.md#tồn-đọng-chuyển-tiếp-08112026) ghi rõ khóa JWT cố định, healthcheck báo thành công giả, thiếu CHECK trạng thái và mô tả seed chưa khớp. Hữu Nguyên nhận phần khóa JWT tại P1-01; Quốc Nguyên nhận hạ tầng/schema và phối hợp Thành Nguyên về seed. Việc chốt task không đồng nghĩa các vấn đề đã được sửa.
-- **P0-04 → P0-06** · Task **Hoàn thành** trong phạm vi CI nền. Phần tiếp nối được triển khai tại [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17): thêm job client Node 24; ruleset main đã yêu cầu `required` của GitHub Actions. Kết quả chạy và phần chưa đạt nằm tại [spec P0-06](specs/P0-06.md); chưa coi PR nháp là đã merge.
-- Khi đóng task, cập nhật dòng tương ứng và chuyển mục bàn giao sang task phụ thuộc. Phần tài liệu quy trình chỉ đóng góp một phần cho P0-05. P0-05 còn yêu cầu ADR, C4 và quy trình phân phối bản mobile.
+- **P0-03 → Phase 1** · Task **Hoàn thành** theo quyết định ngày 08/11. [Handoff tồn đọng](specs/P0-03.md#tồn-đọng-chuyển-tiếp-08112026) ghi rõ khóa JWT cố định, healthcheck báo thành công giả, thiếu CHECK trạng thái và mô tả seed chưa khớp. P1-01 đã bỏ khóa JWT fallback; Quốc Nguyên nhận hạ tầng/schema và phối hợp Thành Nguyên về seed. Việc chốt task không đồng nghĩa các vấn đề đã được sửa.
+- **P0-04 → P0-06** · Task **Hoàn thành** trong phạm vi CI nền. Phần tiếp nối được triển khai tại [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17): thêm job client Node 24; ruleset main đã yêu cầu `required` của GitHub Actions. Kết quả chạy và phần chưa đạt nằm tại [spec P0-06](specs/P0-06.md); commit merge PR #17 đã có trong lịch sử local; phần thiếu bằng chứng xem mục chốt Phase 0.
+- P0-05 đã có ADR, C4, quy ước Git và hướng dẫn phân phối mobile trong `docs/architecture/` và `docs/conventions/`; đóng theo chỉ định ngày 13/11. Mâu thuẫn hợp đồng xác thực được đưa vào mốc 1 của P1-01.
+
+### Chốt Phase 0 · 13/11/2026
+
+Theo yêu cầu người dùng, **P0-01 đến P0-06 đều Hoàn thành**. Đây là quyết định cập nhật trạng thái; không thay các kết quả thử còn thiếu thành Đạt. Các spec ngày 08/11 giữ bằng chứng lịch sử; mục này và ghi chú bổ sung trong spec là trạng thái mới nhất.
+
+- P0-01: giữ bằng chứng build/test đã có; phiên này không bổ sung lượt review độc lập.
+- P0-02/03/04: giữ phạm vi đã chốt và tồn đọng chuyển tiếp. P1-01 đã bỏ khóa JWT fallback; Quốc Nguyên giữ đầu mối healthcheck/schema và phối hợp Thành Nguyên về seed.
+- P0-05: hiện có [ADR](architecture/adr/README.md), [C4](architecture/c4/c4-level1-system-context.md), [quy ước Git](conventions/git-conventions.md), [phân phối mobile](architecture/mobile-build-and-distribution.md). P1-01 xử lý xung đột ADR-003 với security/client hiện tại; chưa có kết quả chạy phân phối mobile mới trong phiên này.
+- P0-06: lịch sử local có commit merge PR #17. Giữ nguyên bằng chứng CI đã ghi; không xác minh lại trạng thái GitHub trong phiên này. Xác nhận 5 máy, UI mobile/kết nối API từ môi trường client và review độc lập vẫn chưa được bổ sung. Toàn nhóm tiếp tục thu xác nhận theo [checklist](conventions/P0-06-checklist.md); phần tích hợp auth thật chuyển P1-01/P1-02, E2E toàn hệ thống thuộc P4-02.
+- **P1-01 → P1-02/03/05/06**: [API, migration và kết quả](specs/P1-01.md) đã bàn giao, Chờ review. Dùng MEMBER/MODERATOR/SENIOR_ADMIN; JWT không fallback; phiên thu hồi tức thời. P1-02 nhận email_verified/profile_approved và kích hoạt điểm100 một lần; P1-03 nhận userId; P1-05 tiếp nối quyền khóa; P1-06 dùng prefix quản trị đúng quyền. Bằng chứng live UI trước outbox và giới hạn chạy lại được ghi rõ trong spec.

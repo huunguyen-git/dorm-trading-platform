@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, SafeAreaView, Text, TextInput } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { Nav } from '../navigation';
+import { useSession } from '../auth/session';
 import { useListings } from '../listings/store';
 import { colors, space, text } from '../theme';
 
@@ -12,7 +13,9 @@ export default function CreateListingScreen() {
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [error, setError] = useState('');
+  const allowed = useSession((state) => state.user?.roles.includes('MEMBER'));
   const submit = async () => {
+    if (!allowed) { setError('Tài khoản chưa được phép đăng tin.'); return; }
     const amount = Number(price);
     if (!title.trim() || !description.trim() || !Number.isFinite(amount) || amount <= 0) {
       setError('Nhập tiêu đề, mô tả và giá hợp lệ.');

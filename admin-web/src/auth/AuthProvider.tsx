@@ -20,7 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) { setUser(await auth.login(email, password)); }
   async function logout() {
-    try { await auth.logout(); } finally { setUser(null); }
+    await auth.logout(); setUser(null);
   }
 
   return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;

@@ -189,3 +189,7 @@ Thao tác lặp lại hoặc gửi lại yêu cầu không được hoàn tất 
 
 - **Tiêu chí chấp nhận** · Không gán số người dùng đồng thời hoặc thời gian phản hồi khi chưa được phê duyệt.
 - **Nguồn** · SH-01, SH-02, SH-04 · **Ưu tiên** · Nên có · **Trạng thái** · Đã duyệt · **Dòng** · 26
+
+## Quyết định bổ sung của dự án · 13/11/2026
+
+[Chính sách P1-01 đã được người dùng duyệt](decisions/P1-01-hop-dong-xac-thuc.md) bổ sung OTP đăng ký/reset, mật khẩu và thu hồi phiên cho FR-01/NFR-01. Người chờ duyệt được tự quản lý hồ sơ và xem mặt hàng công khai; chỉ khi đủ xác minh email và duyệt hồ sơ mới được giao dịch. Đăng xuất chỉ phiên hiện tại. Các ngưỡng xác thực là quyết định riêng của dự án, không sửa dữ liệu nguồn FR/NFR hoặc lấy ngưỡng OTP bàn giao FR-09. Xem quyết định để biết toàn bộ giá trị/phạm vi và [spec P1-01](specs/P1-01.md) để xem kết quả triển khai, giới hạn kiểm chứng.

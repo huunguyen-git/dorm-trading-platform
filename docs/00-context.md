@@ -20,7 +20,7 @@ Sinh viên dùng app để đưa đồ từ kho cá nhân lên sàn, thương l�
 
 | Ca sử dụng | Điều cần chứng minh |
 |---|---|
-| UC-01 → UC-02 | Xác minh email và quyết định duyệt hồ sơ là hai bước riêng. Kiểm tra quyền truy cập khi tài khoản còn chờ duyệt. |
+| UC-01 → UC-02 | Xác minh email và quyết định duyệt hồ sơ là hai bước riêng. Tài khoản chờ duyệt được tự quản lý hồ sơ và xem mặt hàng công khai; chưa được đăng bán, nhắn tin, giữ chỗ hoặc giao dịch theo quyết định P1-01 ngày 13/11. |
 | UC-22 → UC-23 | Hai người có thể cùng yêu cầu. Khi chấp nhận, giữ tin và tất cả đồ vật thành phần trong cùng giao dịch dữ liệu. Thử hai yêu cầu đồng thời cho các tin có chung đồ vật. |
 | UC-24 → UC-29 | UC-26 bắt đầu giao. UC-27 ghi nhận đã giao kèm ảnh rồi người mua nhập mã hoàn tất. Trước khi báo đã giao dùng UC-24 để hủy giữ chỗ. Sau mốc đó dùng UC-28. UC-29 xử lý quá hạn hoặc tranh chấp. |
 | UC-30 → UC-34 | Gắn đánh giá với giao dịch đã hoàn tất. Tách quyền người mua viết đánh giá, người bán khiếu nại và kiểm duyệt viên ra quyết định. Kiểm tra tác động lên lịch sử điểm. |

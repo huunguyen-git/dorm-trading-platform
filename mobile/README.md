@@ -34,5 +34,16 @@ npm run build    # expo export --platform android, kết quả ở dist/
 - `src/api/client.ts` gắn bearer token, xử lý 401 và lỗi HTTP.
 - `src/auth/` phiên đăng nhập và lưu token bằng `expo-secure-store`.
 - `src/listings/store.ts` danh sách tin và tạo tin.
-- `src/navigation/AppNavigator.tsx` 5 màn hình.
+- `src/navigation/AppNavigator.tsx` các màn hình và luồng auth.
 - `src/theme.ts` token giao diện dùng chung cho các màn.
+
+
+## Xác thực P1-01
+
+Màn đăng nhập có đăng ký, gửi lại xác minh email và quên mật khẩu. OTP email6 số/5 phút; mật khẩu15–128 ký tự. Người chờ duyệt xem tin công khai và sửa họ tên trong Hồ sơ; duyệt đầy đủ thuộc P1-02. Access/refresh token lưu SecureStore; đăng xuất chỉ thiết bị này. Đổi mật khẩu giữ phiên hiện tại, thu hồi các phiên khác; reset yêu cầu đăng nhập lại.
+
+[Live test](e2e/auth.live.tsx) chạy UI React Native test renderer với API/SMTP thật, nhưng SecureStore và transport được thay cho môi trường Node; không thay kiểm tra thiết bị. Xem [spec](../docs/specs/P1-01.md) để chạy với dịch vụ thử riêng. Không đưa khóa JWT vào EXPO_PUBLIC_*.
+
+## Kiểm thử GUI P1-01
+
+Giao diện xác thực đã có nhãn, trạng thái xử lý/lỗi/thành công và các bước OTP/mật khẩu. Xem [checklist GUI](../docs/specs/P1-01-gui-checklist.md) để mở từng luồng, phân biệt test fixture với API thật và phần cần thử trên thiết bị.

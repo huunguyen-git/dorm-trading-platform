@@ -4,7 +4,7 @@ import { tokenStore } from '../auth/tokenStore';
 import { useSession } from '../auth/session';
 
 jest.mock('../auth/tokenStore', () => ({
-  tokenStore: { save: jest.fn(), get: jest.fn(), clear: jest.fn() },
+  tokenStore: { save: jest.fn(), get: jest.fn(), clear: jest.fn(), getRefresh: jest.fn(), saveRefresh: jest.fn() },
 }));
 
 const store = tokenStore as jest.Mocked<typeof tokenStore>;
