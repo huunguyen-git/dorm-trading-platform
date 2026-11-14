@@ -45,3 +45,12 @@ $env:JWT_SECRET = [Convert]::ToBase64String($key)
 ```
 
 Trên Ubuntu, dùng `export JWT_SECRET="$(openssl rand -base64 32)"` rồi chạy `./mvnw spring-boot:run`. Mở [health trên máy local](http://localhost:8082/api/v1/health). API trả HTTP 200 và JSON gồm `status` bằng `UP`, `service` bằng `dorm-trading-backend` và `timestamp`. Dùng `SERVER_PORT` để đổi cổng. Web Vite ở origin `http://localhost:5173` được phép gọi API. Đặt `CORS_ALLOWED_ORIGINS` thành danh sách origin phân tách bằng dấu phẩy khi chạy web ở địa chỉ khác. Client di động dùng địa chỉ backend mà thiết bị truy cập được, ví dụ `http://10.0.2.2:8082` trên Android Emulator.
+
+
+## Hiện trạng xác thực P1-01 · 13/11/2026
+
+Backend có auth API chung cho mobile/web, PostgreSQL session/challenge/outbox ở V3/V4; JWT không còn khóa fallback. Xem [hợp đồng và kiểm chứng](specs/P1-01.md), [quyết định](decisions/P1-01-hop-dong-xac-thuc.md). ApiSecurityTest nay dùng PostgreSQL Testcontainers vì kiểm quyền phải đọc phiên thật; hướng dẫn P0-01 chạy test không DB ở trên là lịch sử nền.
+
+Mobile lưu access/refresh trong SecureStore; web access trong bộ nhớ và refresh cookie HttpOnly/Secure/SameSite=Strict. Môi trường triển khai cần HTTPS và web/API cùng site; localhost là môi trường thử, không giảm Secure cho production. CORS chỉ cho origin cụ thể, credentials=true và expose WWW-Authenticate. Health chuẩn /api/v1/health. SMTP OTP gửi qua outbox mã hóa, có retry trong hạn mã; không in OTP/token/mật khẩu vào log.
+
+Vai trò MEMBER/MODERATOR/SENIOR_ADMIN, scope client và trạng thái tài khoản kiểm tại API. Các API quản trị mới dùng /admin/** hoặc /admin/senior/** đúng quyền; prefix này thay quy tắc ADMIN nền. Điểm100 và kích hoạt hồ sơ còn do P1-02; quyền tài khoản khóa chi tiết còn P1-05.

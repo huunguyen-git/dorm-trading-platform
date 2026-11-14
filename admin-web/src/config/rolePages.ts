@@ -12,7 +12,7 @@ export const rolePages: Record<Role, { path: string; label: string }[]> = {
     { path: 'listings', label: 'Tin đăng' },
     { path: 'reports', label: 'Báo cáo' },
   ],
-  seller: [
+  member: [
     { path: 'overview', label: 'Tổng quan' },
     { path: 'my-listings', label: 'Tin đăng của tôi' },
   ],
