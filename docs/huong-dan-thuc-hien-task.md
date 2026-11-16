@@ -25,6 +25,6 @@ Gửi “Bàn giao tiến độ hiện tại” hoặc gửi `/wrap` như một 
 |---|---|
 | [Roadmap](02-roadmap-todo.md) và các file đầu ra đã hẹn | Đúng dòng task, trạng thái, kết quả và việc còn lại. Mở thử đầu ra bằng đường dẫn agent gửi. |
 | `docs/specs/<mã-task>.md` với task nhiều tầng | Mục **Tiêu chí nghiệm thu** ghi UC, điều khoản FR/NFR, kết quả thực tế và phần chưa kiểm chứng sau review. |
-| Tài liệu bị ảnh hưởng | Nếu đổi nghiệp vụ, kiểm tra [ngữ cảnh](00-context.md) và [yêu cầu](03-requirements.md). Nếu đổi cách hệ thống hoạt động, kiểm tra [kiến trúc](01-architecture.md). Nếu có quyết định kỹ thuật mới, mở bản ghi tương ứng trong `docs/decisions/`. |
+| Tài liệu bị ảnh hưởng | Nếu đổi nghiệp vụ, kiểm tra [ngữ cảnh](00-context.md), [đặc tả Use Case](use-cases/README.md) và [yêu cầu](03-requirements.md). Nếu đổi cách hệ thống hoạt động, kiểm tra [kiến trúc](01-architecture.md). Nếu có quyết định kỹ thuật mới, mở bản ghi tương ứng trong `docs/decisions/`. |
 
 Task đủ đầu ra chuyển sang **Chờ review**. Chỉ ghi **Hoàn thành** khi tiêu chí đã đạt, tài liệu đã đồng bộ và kết quả review đã được ghi nhận.
