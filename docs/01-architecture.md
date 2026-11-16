@@ -11,7 +11,7 @@ flowchart LR
     B --> S["SMTP / OTP"]
 ```
 
-P0-02 tạo `mobile/` và `admin-web/`. P0-03 tạo `infra/` cho cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo workbook, P0-01 dựng backend Modular Monolith. Backend dùng một Maven module, tổ chức mã theo [quyết định P0-01](decisions/P0-01-khung-backend.md). Các miền nghiệp vụ trong workbook gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị).
+P0-02 tạo `mobile/` và `admin-web/`. P0-03 tạo `infra/` cho cấu hình dịch vụ dùng chung. `docs/` chứa quy trình, kế hoạch, spec và quyết định kỹ thuật. Theo kế hoạch kiến trúc, P0-01 dựng backend Modular Monolith. Backend dùng một Maven module, tổ chức mã theo [quyết định P0-01](decisions/P0-01-khung-backend.md). Các miền nghiệp vụ cốt lõi gồm `iam` (tài khoản và quyền), `catalog` (kho và tin), `chat` (thương lượng), `order` (giữ chỗ và bàn giao), `review` (đánh giá và uy tín), `gov` (kiểm duyệt và quản trị).
 
 ## Mốc chốt công nghệ
 
