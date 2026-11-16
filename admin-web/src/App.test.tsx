@@ -5,7 +5,7 @@ import App from './App';
 import { api } from './api/client';
 
 vi.mock('./api/client', () => ({
-  api: vi.fn(),
+  api: vi.fn(), setAccessToken: vi.fn(),
   ApiError: class ApiError extends Error { status = 404; },
 }));
 
@@ -22,9 +22,9 @@ beforeEach(() => {
 
 describe('role-based session', () => {
   it('hydrates role from API and denies routes outside role', async () => {
-    request.mockResolvedValueOnce({ id: '1', name: 'Test user', role: 'seller' } as never);
+    request.mockResolvedValueOnce({ id: '1', name: 'Test user', role: 'member' } as never);
     render(<MemoryRouter initialEntries={['/reports']}><App /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Tổng quan')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Tài khoản không có quyền quản trị.')).toBeInTheDocument());
     expect(request).not.toHaveBeenCalledWith('/reports');
   });
 

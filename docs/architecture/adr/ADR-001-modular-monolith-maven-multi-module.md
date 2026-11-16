@@ -1,6 +1,6 @@
 # ADR-001: Backend modular monolith, Maven multi-module theo bounded context
 
-Trạng thái: Chấp nhận
+Trạng thái: **Thay thế một phần bởi [quyết định P0-06](../../decisions/P0-06-quy-uoc-va-ci.md)** ngày 08/11/2026 về cấu trúc Maven, stack, migration và phạm vi CI. Nội dung bên dưới được giữ để truy lịch sử; không dùng làm hướng dẫn nâng cấp hiện tại.
 Ngày: 2026-10-28
 Người quyết định: Tô Thành Nguyên (P0-05); Liên quan: Nguyễn Hữu Nguyên (P0-01, dựng khung), Nguyễn Quốc Nguyên (P0-03, DB)
 

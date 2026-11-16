@@ -6,9 +6,10 @@ ADR ghi lại một quyết định kiến trúc quan trọng, bối cảnh và 
 
 | Mã | Tiêu đề | Trạng thái | Ngày |
 | --- | --- | --- | --- |
-| [ADR-001](ADR-001-modular-monolith-maven-multi-module.md) | Backend modular monolith, Maven multi-module theo bounded context | Chấp nhận | 2026-10-28 |
+| [ADR-001](ADR-001-modular-monolith-maven-multi-module.md) | Backend modular monolith, Maven multi-module theo bounded context | Thay thế một phần bởi P0-06; giữ lịch sử | 2026-10-28 |
 | [ADR-002](ADR-002-shared-backend-api-for-mobile-and-admin-web.md) | Một Backend API dùng chung cho mobile và web quản trị | Chấp nhận | 2026-10-28 |
 | [ADR-003](ADR-003-jwt-rbac-role-boundaries.md) | Xác thực JWT và phân quyền RBAC theo ranh giới vai trò | Chấp nhận | 2026-10-28 |
+| [P0-06](../../decisions/P0-06-quy-uoc-va-ci.md) | Một Maven module, stack hiện tại, migration số tăng và CI đủ hai client | Chấp nhận theo người dùng | 2026-11-08 |
 
 Dự kiến: ADR-004 phiên bản Expo và cách phân phối bản mobile (chờ P0-02, P4-01); ADR-005 chiến lược storage ảnh (MinIO hay volume) (chờ P0-03).
 

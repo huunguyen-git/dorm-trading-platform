@@ -24,7 +24,7 @@ ci/P0-04-github-actions
 
 ## 3. Conventional Commits
 
-Định dạng: `<type>(<scope>): <mô tả ngắn>` ở thì mệnh lệnh, tiếng Anh, không chấm cuối, tối đa 72 ký tự.
+Định dạng: `<type>(<scope>): <mã-task> <mô tả ngắn>` ở thì mệnh lệnh, tiếng Anh, không chấm cuối, tối đa 72 ký tự. Mã task nằm ngay trong tiêu đề theo AGENTS.md để truy vết khi squash.
 
 | type | Dùng cho |
 | --- | --- |
@@ -50,16 +50,16 @@ ci/P0-04-github-actions
 Ví dụ:
 
 ```text
-feat(order): lock shared items when accepting a reservation
-fix(mobile): refresh access token when app returns from background
-docs(adr): add ADR-003 JWT and RBAC role boundaries
-ci: add CodeQL and Semgrep workflows
+feat(order): P2-04 lock shared items when accepting a reservation
+fix(mobile): P1-01 refresh token when app returns from background
+docs(adr): P0-05 document JWT and RBAC role boundaries
+ci(infra): P0-06 verify both clients in the required gate
 ```
 
 Thay đổi phá vỡ tương thích (hợp đồng API, schema): thêm `!` sau scope và footer `BREAKING CHANGE:` mô tả cách chuyển đổi.
 
 ```text
-feat(api)!: rename listing status PUBLISHED to PUBLIC
+feat(api)!: P2-01 rename listing status PUBLISHED to PUBLIC
 
 BREAKING CHANGE: mobile and admin-web must map the new status value.
 ```
@@ -71,7 +71,7 @@ Thân commit (tùy chọn): giải thích *vì sao*, không lặp lại diff. Fo
 - Tiêu đề theo Conventional Commits; mô tả gồm: mục tiêu, UC/FR liên quan, cách đã kiểm tra (lệnh và kết quả thật), hạn chế còn lại, ảnh màn hình nếu có UI.
 - Một PR một việc; không trộn refactor lớn với tính năng.
 - Thay đổi hợp đồng API, schema, dependency hoặc CI phải gắn người sở hữu module bị ảnh hưởng làm reviewer.
-- Người duyệt kiểm tra: đúng ranh giới module ([ADR-001](../architecture/adr/ADR-001-modular-monolith-maven-multi-module.md)), có kiểm thử cho trường hợp biên, không có secret, tài liệu/ADR đã cập nhật khi hành vi đổi.
+- Người duyệt kiểm tra: đúng ranh giới package miền ([quyết định P0-06](../decisions/P0-06-quy-uoc-va-ci.md)), có kiểm thử cho trường hợp biên, không có secret, tài liệu/ADR đã cập nhật khi hành vi đổi.
 - Tác giả tự merge sau khi đủ điều kiện; không merge PR của người khác trừ khi được nhờ.
 
 ## 5. Không được commit
@@ -89,7 +89,7 @@ git switch main && git pull --ff-only
 git switch -c feat/P1-03-personal-inventory
 # ... làm việc, chạy kiểm tra ...
 git add <file đã xem lại>
-git commit -m "feat(catalog): add personal inventory CRUD endpoints"
+git commit -m "feat(catalog): P1-03 add personal inventory CRUD endpoints"
 git fetch origin && git rebase origin/main
 git push -u origin feat/P1-03-personal-inventory
 # mở PR trên GitHub với tiêu đề trùng thông điệp commit

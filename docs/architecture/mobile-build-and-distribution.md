@@ -1,6 +1,6 @@
 # Quy trình đóng gói và phân phối bản mobile
 
-Trạng thái: khởi tạo Phase 0 (P0-05). Phiên bản Expo SDK và tài khoản ký do P0-02 (Nguyễn Bảo Việt) chốt; đóng gói phát hành do P4-01 thực hiện. Các mục đánh dấu **[chờ chốt]** chưa phải quyết định.
+Trạng thái: khởi tạo Phase 0 (P0-05), đồng bộ P0-06 ngày 08/11/2026. P0-02 đã chốt Expo SDK 53; tài khoản ký và đóng gói phát hành thuộc P4-01. Các mục đánh dấu **[chờ chốt]** chưa phải quyết định.
 
 ## 1. Mục tiêu
 
@@ -13,7 +13,7 @@ Trạng thái: khởi tạo Phase 0 (P0-05). Phiên bản Expo SDK và tài kho�
 | Loại | Dùng khi | Cách tạo | Ký |
 | --- | --- | --- | --- |
 | Phát triển (Expo Go hoặc development build) | Hằng ngày, Phase 0–3 | `npx expo start`, quét QR hoặc mở trên giả lập | Không |
-| Kiểm tra CI | Mỗi PR | `npx expo export` (bundle JS) + `npx expo prebuild --platform android` để chắc chắn cấu hình native hợp lệ; không chạy Gradle đầy đủ ở mỗi PR để tiết kiệm phút CI | Không |
+| Kiểm tra CI | Mỗi PR | Node 24, `npm ci`, `npm run lint`, `npm test`, `npm run build` (export Android). Chưa chạy prebuild/Gradle; bundle đạt chưa chứng minh cấu hình native hoặc UI trên thiết bị | Không |
 | Phát hành nội bộ (APK) | Nghiệm thu, demo, Phase 4 | Workflow thủ công `mobile-release` trên GitHub Actions: `expo prebuild` rồi `./gradlew assembleRelease`, hoặc EAS Build hồ sơ `preview` **[chờ chốt: local Gradle hay EAS]** | Keystore của nhóm |
 
 iOS: chỉ chạy trên giả lập và Expo Go; không làm bản cài iOS vì cần tài khoản Apple Developer trả phí **[chờ chốt nếu nhóm có tài khoản]**.
@@ -24,10 +24,10 @@ App đọc địa chỉ backend từ biến `EXPO_PUBLIC_API_URL` (Expo chỉ nh
 
 | Môi trường | Giá trị | Ghi chú |
 | --- | --- | --- |
-| Giả lập Android | `http://10.0.2.2:8080` | Địa chỉ máy chủ nhìn từ giả lập Android |
-| Giả lập iOS | `http://localhost:8080` | |
-| Thiết bị thật | `http://<IP LAN máy dev>:8080` | Cùng Wi-Fi; backend phải lắng nghe `0.0.0.0` và cho phép cleartext khi local |
-| Staging / Prod | `https://api.<domain>` | Bắt buộc HTTPS; cấu hình trong hồ sơ phát hành |
+| Giả lập Android chuẩn | `http://10.0.2.2:8082/api/v1` | Địa chỉ máy chủ nhìn từ Android Emulator; LDPlayer dùng IP LAN |
+| Giả lập iOS | `http://localhost:8082/api/v1` | Chạy trên máy hỗ trợ iOS Simulator |
+| Thiết bị thật / LDPlayer | `http://<IP LAN máy dev>:8082/api/v1` | Cùng mạng; kiểm tra đường mạng và cổng backend trước khi mở app |
+| Staging / Prod | `https://api.<domain>/api/v1` | Bắt buộc HTTPS; cấu hình trong hồ sơ phát hành |
 
 File `mobile/.env.example` liệt kê biến; `.env` không commit. Với thiết bị thật, P0-03 cung cấp hướng dẫn mở cổng/firewall.
 

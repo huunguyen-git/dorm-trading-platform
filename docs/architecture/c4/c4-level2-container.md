@@ -13,7 +13,7 @@ C4Container
         Container(mobile, "Ứng dụng mobile", "React Native + Expo (TypeScript)", "Tài khoản, kho, tin, tìm kiếm, chat, giữ chỗ, bàn giao, đánh giá, báo cáo. Lưu token trong SecureStore")
         Container(adminWeb, "Web quản trị", "React + Vite (TypeScript), SPA", "Duyệt kích hoạt, duyệt tin, báo cáo, khiếu nại, tranh chấp, thang phạt, kiểm duyệt viên, thống kê")
         Container(api, "Backend API", "Java 21, Spring Boot, modular monolith", "REST /api/v1, JWT + RBAC, toàn bộ quy tắc nghiệp vụ, scheduler nội bộ")
-        ContainerDb(db, "Cơ sở dữ liệu", "PostgreSQL 17", "Dữ liệu nghiệp vụ, Flyway migration, khóa hàng cho giữ chỗ")
+        ContainerDb(db, "Cơ sở dữ liệu", "PostgreSQL 16", "Dữ liệu nghiệp vụ, Flyway migration, khóa hàng cho giữ chỗ")
         Container(files, "Kho file", "Object storage (MinIO khi local) / volume", "Ảnh tin, ảnh thẻ, ảnh bàn giao, bằng chứng; tên file UUID")
     }
 

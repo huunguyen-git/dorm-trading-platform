@@ -9,3 +9,8 @@ Spring Security xác minh chữ ký HS256 bằng khóa ngẫu nhiên tối thi�
 Dành `/api/v1/admin/**` cho quyền `ADMIN` (quản trị viên cấp cao). Quyền của kiểm duyệt viên đối với từng thao tác sẽ xác định theo UC tương ứng. Health công khai. Các route còn lại mặc định yêu cầu token hợp lệ, các task nghiệp vụ bổ sung kiểm tra quyền thao tác và quyền trên từng tài nguyên. Route thử quyền quản trị chỉ có trong tập test.
 
 Xem [bàn giao tích hợp cho từng task](../specs/P0-01.md#hướng-dẫn-tích-hợp).
+
+
+## Phần được thay thế tại P1-01 · 13/11/2026
+
+[Quyết định P1-01](P1-01-hop-dong-xac-thuc.md) thay tên quyền ADMIN bằng SENIOR_ADMIN và phân biệt /admin/** cho MODERATOR/SENIOR_ADMIN, /admin/senior/** chỉ SENIOR_ADMIN. Phiên/token và quyền hiện tại kiểm qua DB; ApiSecurityTest nay cần Testcontainers. Giữ HS256, khóa riêng tối thiểu32 byte Base64 và health /api/v1/health. Không dùng mô tả khung P0-01 như bằng chứng đã triển khai nghiệp vụ auth; xem spec P1-01.

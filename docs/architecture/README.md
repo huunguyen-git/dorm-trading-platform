@@ -1,6 +1,6 @@
 # Kiến trúc hệ thống
 
-Trạng thái: bản khởi tạo Phase 0 (P0-05). Cập nhật khi có ADR mới được chấp nhận.
+Trạng thái: kiến trúc mục tiêu P0-05, đồng bộ cấu trúc/stack/CI theo [quyết định P0-06](../decisions/P0-06-quy-uoc-va-ci.md) ngày 08/11/2026. Bảng nghiệp vụ và vai trò bên dưới là mục tiêu, chưa phải toàn bộ chức năng đã triển khai. Hiện trạng scaffold và tồn đọng xem các spec P0-01 đến P0-04.
 
 ## 1. Tổng quan
 
@@ -17,7 +17,7 @@ Sơ đồ chi tiết: [C4 mức 1 – Ngữ cảnh](c4/c4-level1-system-context.
 
 ## 2. Module backend và ranh giới
 
-Backend chia theo bounded context, mỗi module là một Maven module (xem [ADR-001](adr/ADR-001-modular-monolith-maven-multi-module.md)):
+Backend hiện có **một Maven module**, chia miền bằng package dưới `com.dormtrading`: `iam`, `catalog`, `chat`, `order`, `review`, `gov` và `common`. Dùng Temurin 21, Spring Boot 3.5.14, Maven Wrapper 3.9.16 và PostgreSQL 16. Bảng sau mô tả các module logic mục tiêu, không phải các Maven module đã tạo; `shared`, `notification`, `media` chưa được tách thành package riêng theo bảng. Xem [quyết định P0-06](../decisions/P0-06-quy-uoc-va-ci.md), thay thế phần tương ứng của ADR-001.
 
 | Module | Trách nhiệm | UC chính | Sở hữu dữ liệu |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ Quy tắc phụ thuộc:
 
 - Module chỉ gọi module khác qua **application service hoặc DTO công khai** của module đó, không truy cập entity hay repository của nhau.
 - Hướng phụ thuộc cho phép: `order → catalog, iam`; `review → order, iam`; `gov → catalog, iam, order, review`; `chat → catalog, iam`; mọi module → `shared`, `notification`, `media`. Không có vòng phụ thuộc. Khi cần phản hồi ngược (ví dụ `review` cập nhật điểm cho `iam`) dùng sự kiện nội bộ (Spring application event) trong cùng giao dịch.
-- Mỗi module tự sở hữu migration Flyway của bảng mình; không sửa migration đã merge.
+- Chủ task sở hữu SQL/test của miền mình; Nguyễn Quốc Nguyên điều phối phiên bản Flyway số tăng V3, V4… tại `backend/src/main/resources/db/migration/`. Giữ V1/V2; không sửa migration đã merge. Ranh giới package được review; chưa có ArchUnit trong CI.
 
 ## 3. Ranh giới vai trò
 
@@ -61,8 +61,8 @@ Thực thi bằng JWT + RBAC theo [ADR-003](adr/ADR-003-jwt-rbac-role-boundaries
 
 | Môi trường | Backend | DB / Mail / Storage | Mobile | Web quản trị |
 | --- | --- | --- | --- | --- |
-| Local | `mvnw spring-boot:run` | Docker Compose (P0-03) | Expo trên giả lập/thiết bị thật, API qua LAN | Vite dev server, proxy `/api` |
-| CI | GitHub Actions kiểm tra và đóng gói (P0-04) | Testcontainers | Lint, test, đóng gói kiểm tra | Lint, test, đóng gói |
+| Local | Maven Wrapper, cổng 8082, `/api/v1` | Docker Compose (P0-03), PostgreSQL 16 | Expo SDK 53, `EXPO_PUBLIC_API_URL` qua LAN/giả lập | Vite cổng 5173, `VITE_API_URL` gọi trực tiếp backend có CORS |
+| CI | GitHub Actions, Temurin 21, clean verify | PostgreSQL 16 qua Testcontainers | Node 24, TypeScript, Jest, export Android | Node 24, TypeScript, Vitest, Vite build |
 | Staging / Prod | Docker image trên GHCR, Compose + Nginx/Traefik (P4-01) | Compose prod, volume bền | Bản cài APK nội bộ ([quy trình](mobile-build-and-distribution.md)) | File tĩnh phục vụ qua Nginx |
 
 ## 6. Tài liệu liên quan

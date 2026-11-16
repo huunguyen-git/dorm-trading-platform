@@ -4,6 +4,10 @@ Trạng thái: Chấp nhận (thay thế quyết định session cookie trong AD
 Ngày: 2026-10-28
 Người quyết định: Tô Thành Nguyên (P0-05); Liên quan: Nguyễn Hữu Nguyên (P0-01, Spring Security), Nguyễn Bảo Việt (P0-02, lưu token trên mobile)
 
+## Cập nhật ngày 13/11/2026
+
+**Được thay thế một phần** bởi [quyết định P1-01 đã được người dùng duyệt](../../decisions/P1-01-hop-dong-xac-thuc.md): logout chỉ phiên hiện tại; đổi mật khẩu giữ phiên hiện tại bằng token mới và thu hồi phiên khác; reset thu hồi tất cả, đăng nhập lại. Phiên/token thu hồi bị từ chối từ request tiếp theo, không chờ access hết hạn. Người chờ duyệt được quản lý hồ sơ mình và xem mặt hàng công khai. Các phát biểu khác tương ứng bên dưới được giữ làm lịch sử, không dùng làm hợp đồng hiện hành. Chính sách OTP/mật khẩu và lựa chọn triển khai xem quyết định P1-01; bằng chứng ở spec P1-01.
+
 ## Bối cảnh
 
 Quyết định cũ dùng session cookie cùng origin phù hợp với một SPA web. Phạm vi mới có ứng dụng mobile native, nơi cookie và CSRF không tự nhiên; kế hoạch Phase 0 (P0-01) ghi rõ "JWT Security và RBAC dùng chung cho mobile và web quản trị". Vai trò hệ thống: Người đăng ký, Thành viên, Kiểm duyệt viên, Quản trị viên cấp cao (xem [ranh giới vai trò](../README.md#3-ranh-giới-vai-trò)). Yêu cầu: NFR-01 hạn chế truy cập dữ liệu định danh; FR-03 kiểm duyệt viên và quản trị viên có nhiệm vụ phân biệt; FR-12 tài khoản bị khóa không được thao tác.
