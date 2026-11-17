@@ -45,6 +45,7 @@ class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                                 "/api/v1/auth/otp/resend", "/api/v1/auth/otp/verify", "/api/v1/auth/password/reset").permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()
+                        .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/admin/senior/**").hasRole("SENIOR_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("MODERATOR")
                         .requestMatchers("/api/v1/**").hasRole("MEMBER")

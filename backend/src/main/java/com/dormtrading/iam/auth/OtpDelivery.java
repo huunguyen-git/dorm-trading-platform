@@ -53,7 +53,11 @@ public class OtpDelivery {
                 cipher.updateAAD(row.get("challenge_id").toString().getBytes(StandardCharsets.US_ASCII));
                 String body=new String(cipher.doFinal(Base64.getDecoder().decode(parts[1])),StandardCharsets.UTF_8);
                 var message=new SimpleMailMessage(); message.setFrom(from); message.setTo(row.get("email").toString());
-                message.setSubject("REGISTER".equals(row.get("purpose")) ? "Xác minh đăng ký Dorm Trading" : "Đặt lại mật khẩu Dorm Trading");
+                message.setSubject(switch (row.get("purpose").toString()) {
+                    case "REGISTER" -> "Xác minh đăng ký Dorm Trading";
+                    case "CHANGE_EMAIL" -> "Xác minh email mới Dorm Trading";
+                    default -> "Đặt lại mật khẩu Dorm Trading";
+                });
                 message.setText(body); mail.send(message);
                 db.update("update auth_otp_delivery set sent=true,payload='' where challenge_id=?",row.get("challenge_id"));
             } catch(GeneralSecurityException | org.springframework.mail.MailException e) {
