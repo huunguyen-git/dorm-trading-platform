@@ -8,6 +8,7 @@ import LoginScreen from '../screens/LoginScreen';
 import ListingScreen from '../screens/ListingScreen';
 import CreateListingScreen from '../screens/CreateListingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator<RootStack>();
 
@@ -21,6 +22,7 @@ export default function AppNavigator() {
       <Stack.Screen name="Listing" component={ListingScreen} options={{ title: 'Chi tiết tin' }} />
       <Stack.Screen name="CreateListing" component={CreateListingScreen} options={{ title: 'Đăng tin' }} />
       <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Cài đặt tài khoản' }} />
     </Stack.Navigator>
   </NavigationContainer>;
 }

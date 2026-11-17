@@ -6,7 +6,19 @@ import { api } from './src/api/client';
 import { useSession, type User } from './src/auth/session';
 import { useListings } from './src/listings/store';
 
-jest.mock('./src/api/client', () => ({ api: jest.fn(async () => []) }));
+jest.mock('./src/api/client', () => ({ api: jest.fn(async () => []), apiUrl: (path: string) => path, upload: jest.fn(async () => undefined) }));
+
+const profile = {
+  id: '1', name: 'Pending', studentId: 'pending', email: 'pending@uni.edu.vn', phone: null,
+  school: null, campus: null, major: null, cohort: null, studyStatus: null, reputation: 100,
+  emailVerified: true, profileApproved: false, profileStatus: 'CHO_DUYET' as const, rejectReason: null,
+  pendingUpdate: false, hasStudentCard: false, accountStatus: 'CHO_KICH_HOAT',
+};
+
+function routes(handlers: Record<string, unknown>) {
+  jest.mocked(api).mockImplementation(((path: string) =>
+    Promise.resolve(path in handlers ? handlers[path] : [])) as never);
+}
 
 beforeEach(() => {
   useSession.setState({
@@ -28,12 +40,47 @@ test('shows empty listing state', async () => {
 });
 
 test('pending account can browse and open profile but cannot publish', async () => {
+  routes({ '/profile/me': profile });
   useSession.setState({ token: 'pending', user: { id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: [], emailVerified: true, profileApproved: false, accountStatus: 'CHO_KICH_HOAT' }, loading: false });
   render(<App />);
   expect(await screen.findByText('Chưa có tin đăng.')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Đăng tin' }).props.accessibilityState.disabled).toBe(true);
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
-  expect(await screen.findByText('Bạn có thể sửa hồ sơ và xem mặt hàng. Cần xác minh email và duyệt hồ sơ trước khi giao dịch.')).toBeTruthy();
+  expect(await screen.findByText('Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch.')).toBeTruthy();
+  expect(screen.getByText('Hồ sơ chờ duyệt')).toBeTruthy();
+});
+
+test('saving profile identity moves it to pending review', async () => {
+  routes({ '/profile/me': { ...profile, profileStatus: 'DA_DUYET', profileApproved: true, accountStatus: 'HOAT_DONG' } });
+  useSession.setState({ token: 'token', user: { id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: ['MEMBER'], emailVerified: true, profileApproved: true, accountStatus: 'HOAT_DONG' }, loading: false });
+  render(<App />);
+  fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
+  fireEvent.press(await screen.findByTestId('profile-edit'));
+  routes({ '/profile/me': profile });
+  fireEvent.press(screen.getByTestId('profile-save'));
+  expect(await screen.findByText('Đã lưu. Thông tin định danh đang chờ kiểm duyệt.')).toBeTruthy();
+  expect(screen.getByText('Hồ sơ chờ duyệt')).toBeTruthy();
+});
+
+test('changes email after verifying the OTP and reports a wrong code', async () => {
+  routes({ '/profile/me': { ...profile, profileApproved: true, profileStatus: 'DA_DUYET', accountStatus: 'HOAT_DONG' } });
+  useSession.setState({ token: 'token', user: { id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: ['MEMBER'], emailVerified: true, profileApproved: true, accountStatus: 'HOAT_DONG' }, loading: false });
+  render(<App />);
+  fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Cài đặt tài khoản' }));
+  fireEvent.changeText(await screen.findByTestId('settings-password'), 'mat khau hien tai');
+  fireEvent.changeText(screen.getByTestId('settings-email'), 'moi@uni.edu.vn');
+  jest.mocked(api).mockResolvedValueOnce({ challengeId: 'c1', expiresIn: 300, resendAfter: 60, message: 'Đã gửi mã tới email mới.' });
+  fireEvent.press(screen.getByTestId('settings-request'));
+  expect(await screen.findByText('Đã gửi mã tới email mới.')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('settings-otp'), '111111');
+  jest.mocked(api).mockRejectedValueOnce(new Error('Mã xác minh không đúng.'));
+  fireEvent.press(screen.getByTestId('settings-verify'));
+  expect(await screen.findByText('Mã xác minh không đúng.')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('settings-otp'), '123456');
+  jest.mocked(api).mockResolvedValueOnce(undefined);
+  fireEvent.press(screen.getByTestId('settings-verify'));
+  expect(await screen.findByText('Đã đổi email. Lần đăng nhập sau dùng email mới.')).toBeTruthy();
 });
 
 test('requires title, description and positive price before creating listing', async () => {
