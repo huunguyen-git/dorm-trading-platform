@@ -8,6 +8,7 @@ export type RootStack = {
   Listing: { listing: Listing };
   CreateListing: undefined;
   Profile: undefined;
+  Settings: undefined;
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;
