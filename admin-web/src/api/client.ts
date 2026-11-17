@@ -42,3 +42,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+/** Tải tệp nhị phân cần bearer token (ảnh thẻ). Trả null khi 404. */
+export async function attachment(path: string): Promise<Blob | null> {
+  const send = () => fetch(`${baseUrl()}${path}`, { credentials: 'include', headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
+  const sentToken = accessToken;
+  let response = await send();
+  if (response.status === 401) {
+    try { if (accessToken === sentToken) await refreshSession(); response = await send(); } catch { /* handled below */ }
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError(response.status, 'Không tải được tệp đính kèm.');
+  return response.blob();
+}

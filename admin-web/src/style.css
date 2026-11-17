@@ -106,6 +106,26 @@ input:disabled { background: var(--color-canvas); color: var(--color-muted); }
 .account-details dt { font-size: 12px; color: var(--color-muted); margin-bottom: 6px; }
 .account-details dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 hr { border: 0; border-top: 1px solid var(--color-line); margin: 24px 0; }
+.toolbar { display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 16px; }
+.toolbar .button { min-height: 40px; padding: 8px 16px; }
+.profile-list { list-style: none; margin: 0 0 24px; padding: 0; border: 1px solid var(--color-line); border-radius: var(--radius); background: var(--color-surface); overflow: hidden; }
+.profile-list li + li { border-top: 1px solid var(--color-line); }
+.profile-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 24px; text-decoration: none; color: inherit; }
+.profile-row:hover { background: #faf9f5; }
+.profile-row-main { display: grid; gap: 4px; min-width: 0; }
+.profile-row-main strong { font-size: 15px; }
+.profile-row-meta { font-size: 12px; color: var(--color-muted); overflow-wrap: anywhere; }
+.profile-row-side { display: grid; gap: 6px; justify-items: end; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+.pager { display: flex; gap: 12px; }
+.profile-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.profile-detail-grid .account-card { display: grid; gap: 12px; }
+.card-image { width: 100%; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: #f2ede4; }
+.card-link { display: grid; gap: 8px; text-decoration: none; }
+.reject-box { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: #faf9f5; }
+.reject-box label { display: grid; gap: 8px; font-size: 13px; font-weight: 600; }
+.reject-box textarea { font: inherit; padding: 12px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); resize: vertical; }
+.reject-box textarea[aria-invalid='true'] { border-color: var(--color-danger); }
+@media (max-width: 960px) { .profile-detail-grid { grid-template-columns: 1fr; } }
 @media (max-width: 960px) { .auth-intro { padding: 32px; } .auth-stage { padding: 32px; } .account-grid { grid-template-columns: 1fr; } }
 @media (max-width: 680px) {
   .auth-page { padding: 16px; } .auth-layout { grid-template-columns: 1fr; min-height: auto; border-radius: 12px; }
