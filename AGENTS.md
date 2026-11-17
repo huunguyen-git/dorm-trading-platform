@@ -14,7 +14,7 @@
 
 - Khi triển khai, xem `git status -sb`, `git log -3 --oneline`. Giữ thay đổi của thành viên khác. Task mới dùng nhánh ngắn hạn từ trunk.
 - Tìm theo mã hoặc tên việc trong [roadmap](docs/02-roadmap-todo.md) bằng `rg -n`. Đọc dòng task và ghi chú bàn giao khớp mã. Việc hỗ trợ ngoài 30 task ghi ở mục **Bàn giao hiện tại**. Câu hỏi chỉ cần tra cứu thì dừng ở phần đủ để trả lời.
-- Với nghiệp vụ, lấy UC từ task. Tìm actor/luồng trong [ngữ cảnh](docs/00-context.md) và đặc tả UC liên quan. Dùng bảng **Tra theo tác vụ** của [danh mục yêu cầu](docs/03-requirements.md), rồi đọc trọn **từng mục** FR/NFR liên quan, kể cả ghi chú và trạng thái. Với hạ tầng, tra mốc và phép kiểm tra tương ứng trong [kiến trúc](docs/01-architecture.md). Chỉ mở rộng sang mục khác khi có phụ thuộc hoặc thiếu căn cứ.
+- Với nghiệp vụ, lấy UC từ task. Tìm actor/luồng trong [ngữ cảnh](docs/00-context.md) và [đặc tả Use Case](docs/use-cases/README.md) liên quan. Dùng bảng **Tra theo tác vụ** của [danh mục yêu cầu](docs/03-requirements.md), rồi đọc trọn **từng mục** FR/NFR liên quan, kể cả ghi chú và trạng thái. Với hạ tầng, tra mốc và phép kiểm tra tương ứng trong [kiến trúc](docs/01-architecture.md). Chỉ mở rộng sang mục khác khi có phụ thuộc hoặc thiếu căn cứ.
 - Ghi **task → UC/actor hoặc mục tiêu hạ tầng → điều khoản → tình huống đạt** vào kế hoạch hiện có. Với thay đổi nhiều tầng, tạo hoặc cập nhật `docs/specs/<task>.md` theo [mẫu](docs/specs/_template.md). Ghi lý do nếu không áp dụng, ghi câu hỏi nếu thiếu hoặc mâu thuẫn. Giữ ngưỡng và trạng thái của nguồn.
 
 ## Thực hiện và bàn giao

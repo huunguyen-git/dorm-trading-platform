@@ -13,7 +13,7 @@ Ghi tiền điều kiện, thao tác, kết quả và hậu điều kiện. Vớ
 
 ## Tiêu chí nghiệm thu
 
-Lấy UC theo dòng task trong roadmap và chọn điều khoản từ [danh mục yêu cầu](../03-requirements.md). Với quy tắc nghiệp vụ, dẫn mã FR/NFR gốc. Ghi lý do khi không áp dụng và nêu rõ điểm còn chờ xác nhận.
+Lấy UC theo dòng task trong [roadmap](../02-roadmap-todo.md), đọc chi tiết tại [đặc tả Use Case](../use-cases/README.md) và chọn điều khoản từ [danh mục yêu cầu](../03-requirements.md). Với quy tắc nghiệp vụ, dẫn mã FR/NFR gốc. Ghi lý do khi không áp dụng và nêu rõ điểm còn chờ xác nhận.
 
 | UC và actor hoặc mục tiêu hạ tầng | Mã yêu cầu và điều khoản áp dụng | Tình huống và kết quả mong đợi | Kết quả thực tế |
 |---|---|---|---|

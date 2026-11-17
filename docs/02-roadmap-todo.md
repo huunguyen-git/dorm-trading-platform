@@ -1,6 +1,6 @@
 # Roadmap và bàn giao theo task
 
-Mốc ban đầu lấy từ workbook Nhóm 14. Ngày trong bảng là hạn kế hoạch năm 2026. Workbook ghi P0-01 đang thực hiện, 29 task còn lại chưa thực hiện. Dấu — ở cột phụ trách là ô chưa được phân công. Phân công Phase 1 bên dưới được cập nhật ngày 08/11/2026 theo yêu cầu chia việc của nhóm, không phải phân công từ workbook. Khi làm tiếp, cập nhật trạng thái trong repo và gắn bằng chứng ở đúng dòng task.
+Mốc ban đầu lấy từ kế hoạch dự án Nhóm 14. Ngày trong bảng là hạn kế hoạch năm 2026. Task P0-01 đến P0-06 đã hoàn thành; các task Phase 1–4 được theo dõi chi tiết bên dưới. Dấu — ở cột phụ trách là ô chưa được phân công. Phân công Phase 1 bên dưới được cập nhật ngày 08/11/2026 theo yêu cầu chia việc của nhóm. Khi làm tiếp, cập nhật trạng thái trong repo và gắn bằng chứng ở đúng dòng task.
 
 Dùng các trạng thái **Chưa thực hiện → Đang thực hiện → Chờ review → Hoàn thành**. Nếu bị chặn, ghi phụ thuộc, người cần xử lý và điều kiện để tiếp tục. Ở cột bàn giao, ghi kết quả đã kiểm chứng và liên kết tài liệu liên quan để người nhận có thể xem hoặc thử.
 
@@ -23,12 +23,12 @@ Nghiệm thu bằng tài khoản đăng ký từ mobile được duyệt trên w
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu (UC-01, 03, 04, 07, 08) | Nguyễn Hữu Nguyên | 08/11 | Chờ review | [Triển khai và bằng chứng 13/11](specs/P1-01.md#kết-quả-kiểm-chứng-cuối--13112026) · Backend24/24, web8/8, mobile6/6 và build đạt; SMTP thật bản cuối đạt. [GUI và checklist](specs/P1-01-gui-checklist.md) đã bổ sung; browser fixture desktop/mobile đạt. Còn review độc lập, thiết bị và chạy lại live UI sau outbox. |
-| P1-02 | Hồ sơ cá nhân & Duyệt kích hoạt (UC-02, 05, 06) | Nguyễn Bảo Việt | 14/11 | Chưa thực hiện | Hồ sơ mobile, duyệt kích hoạt trên web và API tương ứng; ghép với P1-01. |
-| P1-03 | Quản lý Kho hàng cá nhân (UC-09) | Nguyễn Quốc Nguyên | 12/11 | Chưa thực hiện | API và màn kho cá nhân; đầu mối migration và tồn đọng hạ tầng P0-03. |
-| P1-04 | Tra cứu & Sửa hồ sơ Người dùng (UC-11, UC-12) | Lê Vũ Hoàng Nguyên | 12/11 | Chưa thực hiện | API và trang web quản lý hồ sơ người dùng; làm trước P1-05. |
-| P1-05 | Khóa / Mở khóa Tài khoản & Điểm uy tín nền (UC-13, UC-14) | Lê Vũ Hoàng Nguyên | 14/11 | Chưa thực hiện | Tiếp nối màn quản lý người dùng P1-04; phối hợp P1-01/P1-02 về trạng thái tài khoản và điểm khởi tạo. |
-| P1-06 | Quản lý Kiểm duyệt viên & Thang phạt (UC-39, UC-40) | Tô Thành Nguyên | 14/11 | Chưa thực hiện | API và trang web dành cho quản trị viên cấp cao; chốt ranh giới quyền với P1-01. |
+| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu ([UC-01](use-cases/UC-01.md), [UC-03](use-cases/UC-03.md), [UC-04](use-cases/UC-04.md), [UC-07](use-cases/UC-07.md), [UC-08](use-cases/UC-08.md)) | Nguyễn Hữu Nguyên | 08/11 | Chờ review | [Triển khai và bằng chứng 13/11](specs/P1-01.md#kết-quả-kiểm-chứng-cuối--13112026) · Backend24/24, web8/8, mobile6/6 và build đạt; SMTP thật bản cuối đạt. [GUI và checklist](specs/P1-01-gui-checklist.md) đã bổ sung; browser fixture desktop/mobile đạt. Còn review độc lập, thiết bị và chạy lại live UI sau outbox. |
+| P1-02 | Hồ sơ cá nhân & Duyệt kích hoạt ([UC-02](use-cases/UC-02.md), [UC-05](use-cases/UC-05.md), [UC-06](use-cases/UC-06.md)) | Nguyễn Bảo Việt | 14/11 | Chưa thực hiện | Hồ sơ mobile, duyệt kích hoạt trên web và API tương ứng; ghép với P1-01. |
+| P1-03 | Quản lý Kho hàng cá nhân ([UC-09](use-cases/UC-09.md)) | Nguyễn Quốc Nguyên | 12/11 | Chưa thực hiện | API và màn kho cá nhân; đầu mối migration và tồn đọng hạ tầng P0-03. |
+| P1-04 | Tra cứu & Sửa hồ sơ Người dùng ([UC-11](use-cases/UC-11.md), [UC-12](use-cases/UC-12.md)) | Lê Vũ Hoàng Nguyên | 12/11 | Chưa thực hiện | API và trang web quản lý hồ sơ người dùng; làm trước P1-05. |
+| P1-05 | Khóa / Mở khóa Tài khoản & Điểm uy tín nền ([UC-13](use-cases/UC-13.md), [UC-14](use-cases/UC-14.md)) | Lê Vũ Hoàng Nguyên | 14/11 | Chưa thực hiện | Tiếp nối màn quản lý người dùng P1-04; phối hợp P1-01/P1-02 về trạng thái tài khoản và điểm khởi tạo. |
+| P1-06 | Quản lý Kiểm duyệt viên & Thang phạt ([UC-39](use-cases/UC-39.md), [UC-40](use-cases/UC-40.md)) | Tô Thành Nguyên | 14/11 | Chưa thực hiện | API và trang web dành cho quản trị viên cấp cao; chốt ranh giới quyền với P1-01. |
 
 ### Phân công Phase 1 · 08/11/2026
 
@@ -36,12 +36,12 @@ Mỗi người phụ trách chịu trách nhiệm cả API, giao diện tương 
 
 | Task → UC / actor | Điều khoản cần đọc | Vùng triển khai dự kiến và đầu ra | Tình huống cần chứng minh khi nghiệm thu |
 |---|---|---|---|
-| P1-01 → UC-01, 03, 04, 07, 08 · Người dùng | FR-01, FR-03, NFR-01; ADR P0-01 | Nguyễn Hữu Nguyên: package `iam.auth`, cấu hình security/JWT, luồng đăng ký/OTP/đăng nhập/mật khẩu trên mobile và nối phiên web. Chốt DTO, lỗi và ánh xạ quyền cho cả hai client; nhận sửa khóa fallback P0-03. | Email đúng miền được xác minh OTP; xác minh email và duyệt hồ sơ là hai điều kiện riêng. Đăng nhập/token hoạt động qua client và API thật; token sai/hết hạn bị từ chối, vai trò thiếu quyền nhận 403. Không tự đặt ngưỡng OTP đăng ký/reset từ quy tắc OTP bàn giao UC-27. |
-| P1-02 → UC-02, 05, 06 · Người dùng / Kiểm duyệt viên | FR-01–03, NFR-01 | Nguyễn Bảo Việt: package `iam.profile`, hồ sơ mobile, trang duyệt kích hoạt trên web, lưu/đọc ảnh thẻ có kiểm quyền. Dùng hợp đồng phiên của P1-01. | Đủ xác minh email và duyệt hồ sơ mới hoạt động; ảnh thẻ chỉ người có quyền đọc. Kích hoạt khởi tạo điểm 100 một lần; tốt nghiệp không tự khóa tài khoản. |
-| P1-03 → UC-09 · Người dùng | FR-04, NFR-01; NFR-02 cho thao tác chạm đồ vật đang giữ | Nguyễn Quốc Nguyên: package `catalog.inventory`, API, màn kho mobile, migration và integration test PostgreSQL. Phối hợp Hữu Nguyên về chủ sở hữu từ token. | Quản lý kho của mình; tài khoản khác không đọc/sửa tài nguyên riêng. Giữ một định danh cho mỗi đồ vật vật lý; đối chiếu giới hạn sửa/xóa theo trạng thái với UC-09 trước triển khai. Tin đăng và giữ chỗ đầy đủ thuộc Phase 2. |
-| P1-04 → UC-11, UC-12 · Kiểm duyệt viên | FR-03, NFR-01; đặc tả UC-11/12 | Lê Vũ Hoàng Nguyên: package `iam.management`, API tra cứu/sửa và trang người dùng trên web. Dùng DTO hồ sơ thống nhất với P1-02. | Kiểm duyệt viên tra cứu/sửa theo UC; thành viên gọi cùng API bị từ chối. Không lộ mật khẩu/hash hay dữ liệu định danh ngoài quyền. Kiểm tra tìm không thấy và đầu vào không hợp lệ. |
-| P1-05 → UC-13, UC-14 · Kiểm duyệt viên | FR-02, FR-03, FR-12, NFR-01 | Lê Vũ Hoàng Nguyên: package `iam.restriction`, chuyển trạng thái khóa/mở, điểm nền và thao tác web nối P1-04. Phối hợp Hữu Nguyên để trạng thái tài khoản được áp dụng khi truy cập API. | `30 < điểm ≤ 50`: khóa tạm 14 ngày; `điểm ≤ 30`: khóa vĩnh viễn có quyền khiếu nại. Hết khóa tạm giữ điểm, không khóa lại theo điểm cũ; tốt nghiệp không tự khóa. Không triển khai tính điểm đánh giá Phase 3 trong task này. |
-| P1-06 → UC-39, UC-40 · Quản trị viên cấp cao | FR-03, FR-12, NFR-01; đặc tả UC-39/40 | Tô Thành Nguyên: package `gov` và phần gán quyền phối hợp `iam`, API và trang web quản lý kiểm duyệt viên/thang phạt. Xác nhận mô tả seed với Quốc Nguyên. | Chỉ quản trị viên cấp cao được bổ nhiệm/thu hồi kiểm duyệt viên và quản lý thang phạt; thử cùng API bằng kiểm duyệt viên/thành viên. Quyền chi tiết A08 còn mở: đối chiếu UC và chốt trước khi thêm quyền. Không tự đặt mức phạt nghiệp vụ từ dữ liệu mẫu. |
+| P1-01 → [UC-01](use-cases/UC-01.md), [UC-03](use-cases/UC-03.md), [UC-04](use-cases/UC-04.md), [UC-07](use-cases/UC-07.md), [UC-08](use-cases/UC-08.md) · Người dùng | FR-01, FR-03, NFR-01; ADR P0-01 | Nguyễn Hữu Nguyên: package `iam.auth`, cấu hình security/JWT, luồng đăng ký/OTP/đăng nhập/mật khẩu trên mobile và nối phiên web. Chốt DTO, lỗi và ánh xạ quyền cho cả hai client; nhận sửa khóa fallback P0-03. | Email đúng miền được xác minh OTP; xác minh email và duyệt hồ sơ là hai điều kiện riêng. Đăng nhập/token hoạt động qua client và API thật; token sai/hết hạn bị từ chối, vai trò thiếu quyền nhận 403. Không tự đặt ngưỡng OTP đăng ký/reset từ quy tắc OTP bàn giao [UC-27](use-cases/UC-27.md). |
+| P1-02 → [UC-02](use-cases/UC-02.md), [UC-05](use-cases/UC-05.md), [UC-06](use-cases/UC-06.md) · Người dùng / Kiểm duyệt viên | FR-01–03, NFR-01 | Nguyễn Bảo Việt: package `iam.profile`, hồ sơ mobile, trang duyệt kích hoạt trên web, lưu/đọc ảnh thẻ có kiểm quyền. Dùng hợp đồng phiên của P1-01. | Đủ xác minh email và duyệt hồ sơ mới hoạt động; ảnh thẻ chỉ người có quyền đọc. Kích hoạt khởi tạo điểm 100 một lần; tốt nghiệp không tự khóa tài khoản. |
+| P1-03 → [UC-09](use-cases/UC-09.md) · Người dùng | FR-04, NFR-01; NFR-02 cho thao tác chạm đồ vật đang giữ | Nguyễn Quốc Nguyên: package `catalog.inventory`, API, màn kho mobile, migration và integration test PostgreSQL. Phối hợp Hữu Nguyên về chủ sở hữu từ token. | Quản lý kho của mình; tài khoản khác không đọc/sửa tài nguyên riêng. Giữ một định danh cho mỗi đồ vật vật lý; đối chiếu giới hạn sửa/xóa theo trạng thái với [UC-09](use-cases/UC-09.md) trước triển khai. Tin đăng và giữ chỗ đầy đủ thuộc Phase 2. |
+| P1-04 → [UC-11](use-cases/UC-11.md), [UC-12](use-cases/UC-12.md) · Kiểm duyệt viên | FR-03, NFR-01; đặc tả [UC-11](use-cases/UC-11.md)/[UC-12](use-cases/UC-12.md) | Lê Vũ Hoàng Nguyên: package `iam.management`, API tra cứu/sửa và trang người dùng trên web. Dùng DTO hồ sơ thống nhất với P1-02. | Kiểm duyệt viên tra cứu/sửa theo UC; thành viên gọi cùng API bị từ chối. Không lộ mật khẩu/hash hay dữ liệu định danh ngoài quyền. Kiểm tra tìm không thấy và đầu vào không hợp lệ. |
+| P1-05 → [UC-13](use-cases/UC-13.md), [UC-14](use-cases/UC-14.md) · Kiểm duyệt viên | FR-02, FR-03, FR-12, NFR-01 | Lê Vũ Hoàng Nguyên: package `iam.restriction`, chuyển trạng thái khóa/mở, điểm nền và thao tác web nối P1-04. Phối hợp Hữu Nguyên để trạng thái tài khoản được áp dụng khi truy cập API. | `30 < điểm ≤ 50`: khóa tạm 14 ngày; `điểm ≤ 30`: khóa vĩnh viễn có quyền khiếu nại. Hết khóa tạm giữ điểm, không khóa lại theo điểm cũ; tốt nghiệp không tự khóa. Không triển khai tính điểm đánh giá Phase 3 trong task này. |
+| P1-06 → [UC-39](use-cases/UC-39.md), [UC-40](use-cases/UC-40.md) · Quản trị viên cấp cao | FR-03, FR-12, NFR-01; đặc tả [UC-39](use-cases/UC-39.md)/[UC-40](use-cases/UC-40.md) | Tô Thành Nguyên: package `gov` và phần gán quyền phối hợp `iam`, API và trang web quản lý kiểm duyệt viên/thang phạt. Xác nhận mô tả seed với Quốc Nguyên. | Chỉ quản trị viên cấp cao được bổ nhiệm/thu hồi kiểm duyệt viên và quản lý thang phạt; thử cùng API bằng kiểm duyệt viên/thành viên. Quyền chi tiết A08 còn mở: đối chiếu UC và chốt trước khi thêm quyền. Không tự đặt mức phạt nghiệp vụ từ dữ liệu mẫu. |
 
 Phối hợp và thứ tự ghép:
 
@@ -50,7 +50,7 @@ Phối hợp và thứ tự ghép:
 - **Client:** Nguyễn Bảo Việt điều phối UI Kit, điều hướng và lớp API dùng chung. Hữu Nguyên sửa vùng auth; Bảo Việt sửa vùng hồ sơ/duyệt; Quốc Nguyên sửa vùng kho; Hoàng Nguyên sửa vùng người dùng/khóa; Thành Nguyên sửa vùng kiểm duyệt viên/thang phạt. Thay đổi file chung phải thống nhất với đầu mối, không ghi đè phần task khác.
 - **CI:** Phần tiếp nối P0-04 được triển khai cùng P0-06 theo chấp thuận của người dùng: [PR #17](https://github.com/huunguyen-git/dorm-trading-platform/pull/17) thêm hai client trên Node 24 vào `required`. Ruleset main đã bật check `required` của GitHub Actions; PR đã có commit merge trong lịch sử local; xem chốt Phase 0 ngày 13/11. Lê Vũ Hoàng Nguyên tiếp tục giữ đầu mối CI.
 - **Thứ tự:** chốt hợp đồng P1-01 trước; P1-02/03/04/06 có thể dựng phần riêng với dữ liệu giả theo hợp đồng. Ghép P1-02 với đăng ký và kích hoạt; Hoàng Nguyên hoàn thành P1-04 trước khi ghép P1-05. Cuối phase thử mobile đăng ký → xác minh → web duyệt → đăng nhập → kho, cùng một ca bị từ chối quyền trên web/API.
-- **Review và trạng thái:** Quốc Nguyên review P1-01; Hữu Nguyên review P1-02 đến P1-06. Khi bắt đầu, từng chủ task chuyển **Đang thực hiện**, tạo `docs/specs/P1-xx.md` theo mẫu và đọc đặc tả UC gốc (chưa có trong repo). Mỗi PR chỉ sửa vùng task; Hữu Nguyên điều phối cập nhật roadmap. Chỉ chuyển **Chờ review** khi có bằng chứng client/API thật cho luồng đã triển khai.
+- **Review và trạng thái:** Quốc Nguyên review P1-01; Hữu Nguyên review P1-02 đến P1-06. Khi bắt đầu, từng chủ task chuyển **Đang thực hiện**, tạo `docs/specs/P1-xx.md` theo mẫu và đọc [đặc tả Use Case](use-cases/README.md) trong repo. Mỗi PR chỉ sửa vùng task; Hữu Nguyên điều phối cập nhật roadmap. Chỉ chuyển **Chờ review** khi có bằng chứng client/API thật cho luồng đã triển khai.
 
 ## PHASE 2 Sàn giao dịch & giữ chỗ · 15/11/2026 – 28/11/2026
 
@@ -58,12 +58,12 @@ Nghiệm thu từ đồ vật trong kho tới tin đăng, thương lượng, gi�
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P2-01 | Đăng tin, Sửa tin & Rút/Xóa tin (UC-10, UC-17, UC-18) | — | 24/11 | Chưa thực hiện | — |
-| P2-02 | Tìm kiếm, Khám phá & Xem chi tiết tin (UC-19, UC-20) | — | 22/11 | Chưa thực hiện | — |
-| P2-03 | Nhắn tin & Thương lượng giá (UC-21) | — | 28/11 | Chưa thực hiện | — |
-| P2-04 | Yêu cầu, Chấp nhận & Hủy giữ chỗ (UC-22, UC-23, UC-24) | — | 28/11 | Chưa thực hiện | — |
-| P2-05 | Hẹn lịch giao dịch & Báo bắt đầu giao (UC-25, UC-26) | — | 28/11 | Chưa thực hiện | — |
-| P2-06 | Báo cáo Người dùng & Báo cáo Tin đăng (UC-35, UC-36) | — | 28/11 | Chưa thực hiện | — |
+| P2-01 | Đăng tin, Sửa tin & Rút/Xóa tin ([UC-10](use-cases/UC-10.md), [UC-17](use-cases/UC-17.md), [UC-18](use-cases/UC-18.md)) | — | 24/11 | Chưa thực hiện | — |
+| P2-02 | Tìm kiếm, Khám phá & Xem chi tiết tin ([UC-19](use-cases/UC-19.md), [UC-20](use-cases/UC-20.md)) | — | 22/11 | Chưa thực hiện | — |
+| P2-03 | Nhắn tin & Thương lượng giá ([UC-21](use-cases/UC-21.md)) | — | 28/11 | Chưa thực hiện | — |
+| P2-04 | Yêu cầu, Chấp nhận & Hủy giữ chỗ ([UC-22](use-cases/UC-22.md), [UC-23](use-cases/UC-23.md), [UC-24](use-cases/UC-24.md)) | — | 28/11 | Chưa thực hiện | — |
+| P2-05 | Hẹn lịch giao dịch & Báo bắt đầu giao ([UC-25](use-cases/UC-25.md), [UC-26](use-cases/UC-26.md)) | — | 28/11 | Chưa thực hiện | — |
+| P2-06 | Báo cáo Người dùng & Báo cáo Tin đăng ([UC-35](use-cases/UC-35.md), [UC-36](use-cases/UC-36.md)) | — | 28/11 | Chưa thực hiện | — |
 
 ## PHASE 3 Bàn giao & đánh giá · 29/11/2026 – 12/12/2026
 
@@ -71,12 +71,12 @@ Nghiệm thu từ báo giao qua xác nhận hoặc tranh chấp tới đánh gi�
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P3-01 | Xóa Tài khoản Cá nhân & Người dùng (UC-15, UC-16) | — | 06/12 | Chưa thực hiện | — |
-| P3-02 | Hoàn tất giao dịch & Yêu cầu hủy sau báo giao (UC-27, UC-28) | — | 08/12 | Chưa thực hiện | — |
-| P3-03 | Xử lý Giao dịch Quá hạn / Tranh chấp (UC-29) | — | 08/12 | Chưa thực hiện | — |
-| P3-04 | Đánh giá, Sửa & Xóa Đánh giá (UC-30, UC-31, UC-32) | — | 10/12 | Chưa thực hiện | — |
-| P3-05 | Khiếu nại & Kiểm duyệt Đánh giá (UC-33, UC-34) | — | 12/12 | Chưa thực hiện | — |
-| P3-06 | Kiểm duyệt Báo cáo & Xem Thống kê (UC-37, UC-38) | — | 12/12 | Chưa thực hiện | — |
+| P3-01 | Xóa Tài khoản Cá nhân & Người dùng ([UC-15](use-cases/UC-15.md), [UC-16](use-cases/UC-16.md)) | — | 06/12 | Chưa thực hiện | — |
+| P3-02 | Hoàn tất giao dịch & Yêu cầu hủy sau báo giao ([UC-27](use-cases/UC-27.md), [UC-28](use-cases/UC-28.md)) | — | 08/12 | Chưa thực hiện | — |
+| P3-03 | Xử lý Giao dịch Quá hạn / Tranh chấp ([UC-29](use-cases/UC-29.md)) | — | 08/12 | Chưa thực hiện | — |
+| P3-04 | Đánh giá, Sửa & Xóa Đánh giá ([UC-30](use-cases/UC-30.md), [UC-31](use-cases/UC-31.md), [UC-32](use-cases/UC-32.md)) | — | 10/12 | Chưa thực hiện | — |
+| P3-05 | Khiếu nại & Kiểm duyệt Đánh giá ([UC-33](use-cases/UC-33.md), [UC-34](use-cases/UC-34.md)) | — | 12/12 | Chưa thực hiện | — |
+| P3-06 | Kiểm duyệt Báo cáo & Xem Thống kê ([UC-37](use-cases/UC-37.md), [UC-38](use-cases/UC-38.md)) | — | 12/12 | Chưa thực hiện | — |
 
 ## PHASE 4 Kiểm thử & triển khai · 13/12/2026 – 19/12/2026
 
@@ -93,7 +93,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
-- [x] **Tra cứu yêu cầu theo task** · [Danh mục FR/NFR](03-requirements.md) giữ cả tiêu chí chấp nhận và quy tắc nghiệp vụ của sheet P2_05. Khi nhận việc, đối chiếu UC ở dòng task với danh mục rồi ghi điều khoản áp dụng vào [tiêu chí nghiệm thu](specs/_template.md#tiêu-chí-nghiệm-thu).
+- [x] **Tra cứu yêu cầu theo task** · [Danh mục FR/NFR](03-requirements.md) giữ cả tiêu chí chấp nhận và quy tắc nghiệp vụ. Khi nhận việc, đối chiếu UC ở dòng task với [đặc tả Use Case](use-cases/README.md) rồi ghi điều khoản áp dụng vào [tiêu chí nghiệm thu](specs/_template.md#tiêu-chí-nghiệm-thu).
 - [x] **Quy trình agent** · [Hướng dẫn cho người dùng](huong-dan-thuc-hien-task.md) có câu mẫu gọi skill ở bước 4 và danh sách file cần kiểm tra ở bước 5. [Hướng dẫn đầu phiên](../AGENTS.md#hướng-dẫn-đầu-phiên) giữ bản ngắn.
 
 - **P0-01 → P0-02, P0-03, P0-04, P1-01** · Xem [hướng dẫn tích hợp theo task](specs/P0-01.md#hướng-dẫn-tích-hợp) để khởi tạo hai client, ghép phần DB vào backend, cấu hình CI và triển khai cấp token.

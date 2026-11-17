@@ -1,23 +1,23 @@
 # Yêu cầu của sàn giao dịch đồ dùng sinh viên
 
-Nguồn của danh mục là sheet `P2_05_DacTaYeuCau` trong `Biểu mẫu OOAD_Nhóm 14 (1).xlsx`. Tiêu đề ngắn dùng để tra cứu. Số dòng dẫn về yêu cầu gốc.
+Tài liệu này tổng hợp toàn bộ các Yêu cầu chức năng (FR) và Yêu cầu phi chức năng (NFR) của hệ thống. Tiêu đề ngắn dùng để tra cứu nhanh.
 
-**Quy tắc nghiệp vụ (BR)** nằm trong phát biểu, tiêu chí chấp nhận và ghi chú của FR/NFR. Khi viện dẫn, dùng mã gốc và nêu điều kiện cụ thể, ví dụ “FR-08 · tối đa một giữ hiệu lực trên mỗi đồ vật”. Sheet không cấp mã BR hoặc mã UC.
+**Quy tắc nghiệp vụ (BR)** nằm trong phát biểu, tiêu chí chấp nhận và ghi chú của FR/NFR. Khi viện dẫn, dùng mã gốc và nêu điều kiện cụ thể, ví dụ “FR-08 · tối đa một giữ hiệu lực trên mỗi đồ vật”. Danh mục không cấp mã BR riêng; các quy tắc được xác định trực tiếp theo từng điều khoản.
 
 **Phạm vi và điểm còn mở.** FR-14 đã bị loại khỏi phạm vi. Một dòng có trạng thái “Đã duyệt” vẫn có thể chứa chi tiết cần xác nhận, như bán kính ở FR-06 hoặc SLA ở NFR-04.
 
 ## Tra theo tác vụ
 
-Bảng sau là gợi ý đối chiếu với [roadmap](02-roadmap-todo.md). Chọn điều khoản theo hành vi thật sự bị tác động. Rà thêm các NFR theo dữ liệu, tính đồng thời và thao tác gửi lại.
+Bảng sau là gợi ý đối chiếu với [roadmap](02-roadmap-todo.md) và [đặc tả Use Case](use-cases/README.md). Chọn điều khoản theo hành vi thật sự bị tác động. Rà thêm các NFR theo dữ liệu, tính đồng thời và thao tác gửi lại.
 
-| Tác vụ | UC để tra trong roadmap | Mã nên đọc trước |
+| Tác vụ | UC để tra cứu | Mã nên đọc trước |
 |---|---|---|
-| Tài khoản, hồ sơ, quyền | UC-01–08, UC-11–16, UC-39–40 tùy thao tác | FR-01–03, FR-12, NFR-01 |
-| Kho, tin, tìm kiếm | UC-09–10, UC-17–20 | FR-04–06, FR-13, NFR-02 |
-| Chat, giữ chỗ, hẹn giao | UC-21–26 | FR-07–08, NFR-01–02 |
-| Bàn giao, hủy sau báo giao, tranh chấp | UC-27–29 | FR-08–09, NFR-01, NFR-03 |
-| Đánh giá, khiếu nại, uy tín | UC-30–34 | FR-10, FR-12, NFR-01, NFR-03 |
-| Báo cáo vi phạm, thống kê | UC-35–38 | FR-11–12, FR-15–18, NFR-01 |
+| Tài khoản, hồ sơ, quyền | [UC-01](use-cases/UC-01.md)–[UC-08](use-cases/UC-08.md), [UC-11](use-cases/UC-11.md)–[UC-16](use-cases/UC-16.md), [UC-39](use-cases/UC-39.md)–[UC-40](use-cases/UC-40.md) | FR-01–03, FR-12, NFR-01 |
+| Kho, tin, tìm kiếm | [UC-09](use-cases/UC-09.md)–[UC-10](use-cases/UC-10.md), [UC-17](use-cases/UC-17.md)–[UC-20](use-cases/UC-20.md) | FR-04–06, FR-13, NFR-02 |
+| Chat, giữ chỗ, hẹn giao | [UC-21](use-cases/UC-21.md)–[UC-26](use-cases/UC-26.md) | FR-07–08, NFR-01–02 |
+| Bàn giao, hủy sau báo giao, tranh chấp | [UC-27](use-cases/UC-27.md)–[UC-29](use-cases/UC-29.md) | FR-08–09, NFR-01, NFR-03 |
+| Đánh giá, khiếu nại, uy tín | [UC-30](use-cases/UC-30.md)–[UC-34](use-cases/UC-34.md) | FR-10, FR-12, NFR-01, NFR-03 |
+| Báo cáo vi phạm, thống kê | [UC-35](use-cases/UC-35.md)–[UC-38](use-cases/UC-38.md) | FR-11–12, FR-15–18, NFR-01 |
 | Hạ tầng, kiểm thử tải | Theo luồng được kiểm thử nếu có | NFR-01–04 tùy tác động |
 
 ## Yêu cầu chức năng (FR)
