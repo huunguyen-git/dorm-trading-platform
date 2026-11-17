@@ -6,6 +6,8 @@ import LoginPage from '../auth/LoginPage';
 import type { User } from '../auth/session';
 import { rolePages } from '../config/rolePages';
 import RolePage from '../pages/RolePage';
+import PendingProfilesPage from '../profiles/PendingProfilesPage';
+import ProfileDetailPage from '../profiles/ProfileDetailPage';
 function ProtectedPage({ user, permission }: { user: User; permission: string }) {
   const allowed = rolePages[user.role].some((page) => page.path === permission);
   return allowed ? <RolePage permission={permission} role={user.role} /> : <Navigate to="/account" replace />;
@@ -33,7 +35,9 @@ export default function AppLayout() {
     <footer><span>{user.name}</span><small>{roleName}</small><button className="button" disabled={busy} onClick={() => void signOut()}>{busy ? 'Đang đăng xuất…' : 'Đăng xuất'}</button></footer>
   </aside><main className="main-content">{error && <p className="notice notice-error" role="alert">{error}</p>}<Routes>
     <Route path="/" element={<Navigate to="/account" replace />} /><Route path="/account" element={account} />
-    {pages.map((page) => <Route key={page.path} path={`/${page.path}`} element={<ProtectedPage user={user} permission={page.path} />} />)}
+    <Route path="/profiles" element={<PendingProfilesPage />} />
+    <Route path="/profiles/:id" element={<ProfileDetailPage />} />
+    {pages.filter((page) => page.path !== 'profiles').map((page) => <Route key={page.path} path={`/${page.path}`} element={<ProtectedPage user={user} permission={page.path} />} />)}
     <Route path="*" element={<Navigate to="/account" replace />} />
   </Routes></main></div>;
 }
