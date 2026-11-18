@@ -10,6 +10,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 @RestControllerAdvice
 public class AuthErrors {
+    @ExceptionHandler(AccountRestrictedFailure.class)
+    ResponseEntity<AccountRestrictedFailure.ErrorBody> restricted(AccountRestrictedFailure e) {
+        return ResponseEntity.status(e.status).body(e.toBody());
+    }
     @ExceptionHandler(AuthFailure.class)
     ResponseEntity<Map<String,String>> auth(AuthFailure e) {
         return ResponseEntity.status(e.status).body(Map.of("code",e.code,"message",e.getMessage()));

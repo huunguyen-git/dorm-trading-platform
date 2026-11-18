@@ -74,7 +74,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        currentTime.set(Instant.parse("2026-11-18T12:00:00Z"));
+        currentTime.set(Instant.now());
         when(clock.instant()).thenAnswer(inv -> currentTime.get());
         doAnswer(inv -> {
             var msg = (SimpleMailMessage) inv.getArgument(0);
@@ -378,5 +378,173 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .statusCode(200)
                 .body("accountStatus", equalTo("HOAT_DONG"))
                 .body("reputationScore", equalTo(50));
+    }
+
+    @Test
+    @DisplayName("UC-03 3.2 & FR-12: Mobile cho phép đăng nhập/refresh/me/logout ở chế độ giới hạn kèm restriction; chặn profile/ROLE_MEMBER bằng 403 ACCOUNT_RESTRICTED và tự mở sau 14 ngày")
+    void mobileRestrictedLoginAndMidSessionLockEnforceLimitedSessionAndStructured403() {
+        var moderator = createAccount(true, "KIEM_DUYET_VIEN");
+        var member = createAccount(true, null);
+        String modToken = loginAdminWeb(moderator);
+
+        // Active mobile session before lock
+        var activeMobile = loginMobileSession(member);
+        assertThat(activeMobile.user().restriction()).isNull();
+        assertThat(activeMobile.user().roles()).containsExactly("MEMBER");
+
+        // Mid-session temporary lock via penalty (-50 -> score 50, 14-day KHOA_TAM_THOI)
+        reputationLedger.applyPenaltyScale(
+                member.id(),
+                "TP_GIA_MAO_THONG_TIN",
+                "Vi phạm dẫn tới khóa tạm 14 ngày",
+                "MIDLOCK:" + member.id(),
+                moderator.id()
+        );
+
+        // 1) Existing mobile Bearer token immediately loses ROLE_MEMBER -> 403 ACCOUNT_RESTRICTED with restriction payload
+        var blockedWrite = given().auth().oauth2(activeMobile.token())
+                .post("/api/v1/restriction-probe/member-write");
+        assertThat(blockedWrite.statusCode()).isEqualTo(403);
+        assertThat(blockedWrite.jsonPath().getString("code")).isEqualTo("ACCOUNT_RESTRICTED");
+        assertThat(blockedWrite.jsonPath().getString("restriction.accountStatus")).isEqualTo("BI_KHOA");
+        assertThat(blockedWrite.jsonPath().getString("restriction.lockType")).isEqualTo("KHOA_TAM_THOI");
+        assertThat(blockedWrite.jsonPath().getBoolean("restriction.appealable")).isFalse();
+        assertThat(blockedWrite.jsonPath().getInt("restriction.reputationScore")).isEqualTo(50);
+
+        // 2) PATCH /api/v1/auth/profile also returns 403 ACCOUNT_RESTRICTED
+        given().auth().oauth2(activeMobile.token())
+                .contentType("application/json")
+                .body(Map.of("name", "Tên Mới Khi Đang Khóa"))
+                .patch("/api/v1/auth/profile")
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"))
+                .body("restriction.lockType", equalTo("KHOA_TAM_THOI"));
+
+        // 3) UC-03 3.2: Mobile GET /auth/me, POST /auth/refresh, POST /auth/login, POST /auth/logout work with roles=[] and restriction details
+        var meWhileLocked = given().auth().oauth2(activeMobile.token()).get("/api/v1/auth/me");
+        assertThat(meWhileLocked.statusCode()).isEqualTo(200);
+        assertThat(meWhileLocked.jsonPath().getString("accountStatus")).isEqualTo("BI_KHOA");
+        assertThat(meWhileLocked.jsonPath().getList("roles")).isEmpty();
+        assertThat(meWhileLocked.jsonPath().getString("restriction.lockType")).isEqualTo("KHOA_TAM_THOI");
+
+        var refreshedMobile = given().contentType("application/json")
+                .body(Map.of("client", "mobile", "refreshToken", activeMobile.refreshToken()))
+                .post("/api/v1/auth/refresh");
+        assertThat(refreshedMobile.statusCode()).isEqualTo(200);
+        assertThat(refreshedMobile.jsonPath().getList("user.roles")).isEmpty();
+        assertThat(refreshedMobile.jsonPath().getString("user.restriction.lockType")).isEqualTo("KHOA_TAM_THOI");
+
+        var freshMobileLogin = given().contentType("application/json")
+                .body(Map.of("email", member.email(), "password", PASSWORD, "client", "mobile"))
+                .post("/api/v1/auth/login");
+        assertThat(freshMobileLogin.statusCode()).isEqualTo(200);
+        assertThat(freshMobileLogin.jsonPath().getList("user.roles")).isEmpty();
+        assertThat(freshMobileLogin.jsonPath().getInt("user.restriction.reputationScore")).isEqualTo(50);
+        String limitedToken = freshMobileLogin.jsonPath().getString("token");
+
+        given().auth().oauth2(limitedToken).post("/api/v1/auth/logout").then().statusCode(204);
+
+        // 4) Advance Clock 14 days + 1s: mobile login lazily unlocks keeping score = 50 and restores MEMBER role!
+        currentTime.set(currentTime.get().plus(Duration.ofDays(14).plusSeconds(1)));
+        var loginAfterExpiry = given().contentType("application/json")
+                .body(Map.of("email", member.email(), "password", PASSWORD, "client", "mobile"))
+                .post("/api/v1/auth/login");
+        assertThat(loginAfterExpiry.statusCode()).isEqualTo(200);
+        assertThat(loginAfterExpiry.jsonPath().getString("user.accountStatus")).isEqualTo("HOAT_DONG");
+        assertThat(loginAfterExpiry.jsonPath().getList("user.roles", String.class)).containsExactly("MEMBER");
+        assertThat((Object) loginAfterExpiry.jsonPath().get("user.restriction")).isNull();
+
+        String restoredToken = loginAfterExpiry.jsonPath().getString("token");
+        given().auth().oauth2(restoredToken)
+                .post("/api/v1/restriction-probe/member-write")
+                .then()
+                .statusCode(200);
+
+        // Score remains 50 in DB without re-locking
+        assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, member.id()))
+                .isEqualTo(50);
+    }
+
+    @Test
+    @DisplayName("UC-03 3.3 & Admin-web restriction: Admin-web trả 403 ACCOUNT_RESTRICTED khi BI_KHOA; tài khoản VO_HIEU_HOA trả 401 INVALID_CREDENTIALS")
+    void adminWebRestrictedAndDeletedAccountsFollowUc03Rules() {
+        var senior = createAccount(true, "QUAN_TRI_VIEN_CAP_CAO");
+        var modTarget = createAccount(true, "KIEM_DUYET_VIEN");
+        var deletedAccount = createAccount(true, null);
+
+        String seniorToken = loginAdminWeb(senior);
+
+        // Log in modTarget on admin-web via HTTP to capture refresh cookie + access token
+        var modWebLogin = given()
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(modWebLogin.statusCode()).isEqualTo(200);
+        String modWebToken = modWebLogin.jsonPath().getString("token");
+        String refreshCookie = modWebLogin.getCookie("dorm_refresh");
+
+        // Senior admin permanently locks modTarget
+        given().auth().oauth2(seniorToken)
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("lockType", "PERMANENT", "reason", "Vi phạm quy chế kiểm duyệt"))
+                .post("/api/v1/admin/users/" + modTarget.id() + "/lock")
+                .then()
+                .statusCode(200);
+
+        // 1) Admin-web Bearer token immediately gets 403 ACCOUNT_RESTRICTED with appealable=true
+        given().auth().oauth2(modWebToken)
+                .get("/api/v1/admin/users")
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"))
+                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"))
+                .body("restriction.appealable", equalTo(true));
+
+        // 2) Admin-web refresh returns 403 ACCOUNT_RESTRICTED before generic revoked 401
+        given().header("Origin", ALLOWED_ORIGIN)
+                .cookie("dorm_refresh", refreshCookie)
+                .contentType("application/json")
+                .body(Map.of("client", "admin-web"))
+                .post("/api/v1/auth/refresh")
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"))
+                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"));
+
+        // 3) Admin-web login returns 403 ACCOUNT_RESTRICTED
+        given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
+                .post("/api/v1/auth/login")
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"))
+                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"));
+
+        // 4) UC-03 3.3: Deleted (VO_HIEU_HOA) account returns 401 INVALID_CREDENTIALS on login/refresh/Bearer
+        var beforeDeleteSession = loginMobileSession(deletedAccount);
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'VO_HIEU_HOA' WHERE user_id = ?", deletedAccount.id());
+
+        given().contentType("application/json")
+                .body(Map.of("email", deletedAccount.email(), "password", PASSWORD, "client", "mobile"))
+                .post("/api/v1/auth/login")
+                .then()
+                .statusCode(401)
+                .body("code", equalTo("INVALID_CREDENTIALS"));
+
+        given().contentType("application/json")
+                .body(Map.of("client", "mobile", "refreshToken", beforeDeleteSession.refreshToken()))
+                .post("/api/v1/auth/refresh")
+                .then()
+                .statusCode(401)
+                .body("code", equalTo("INVALID_CREDENTIALS"));
+
+        given().auth().oauth2(beforeDeleteSession.token())
+                .get("/api/v1/auth/me")
+                .then()
+                .statusCode(401);
     }
 }
