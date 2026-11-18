@@ -6,9 +6,11 @@ import LoginPage from '../auth/LoginPage';
 import type { User } from '../auth/session';
 import { rolePages } from '../config/rolePages';
 import RolePage from '../pages/RolePage';
+import UsersManagementPage from '../users/UsersManagementPage';
 function ProtectedPage({ user, permission }: { user: User; permission: string }) {
   const allowed = rolePages[user.role].some((page) => page.path === permission);
-  return allowed ? <RolePage permission={permission} role={user.role} /> : <Navigate to="/account" replace />;
+  if (!allowed) return <Navigate to="/account" replace />;
+  return permission === 'users' ? <UsersManagementPage /> : <RolePage permission={permission} role={user.role} />;
 }
 export default function AppLayout() {
   const [change, setChange] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
