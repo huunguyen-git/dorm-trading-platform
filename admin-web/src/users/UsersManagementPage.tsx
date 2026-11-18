@@ -459,13 +459,13 @@ export default function UsersManagementPage() {
     }
     if (studentCardFront && !isValidStudentCardRef(studentCardFront)) {
       setEditError(
-        'Ảnh thẻ sinh viên mặt trước không đáp ứng quy chuẩn (cần https://..., /uploads/... hoặc data:image/(jpeg|png|webp);base64,...).',
+        'Ảnh thẻ sinh viên mặt trước không đáp ứng quy chuẩn (chỉ chấp nhận ảnh JPEG, PNG, WebP hợp lệ qua https://..., /uploads/..., /student-cards/... hoặc data:image/...).',
       );
       return;
     }
     if (studentCardBack && !isValidStudentCardRef(studentCardBack)) {
       setEditError(
-        'Ảnh thẻ sinh viên mặt sau không đáp ứng quy chuẩn (cần https://..., /uploads/... hoặc data:image/(jpeg|png|webp);base64,...).',
+        'Ảnh thẻ sinh viên mặt sau không đáp ứng quy chuẩn (chỉ chấp nhận ảnh JPEG, PNG, WebP hợp lệ qua https://..., /uploads/..., /student-cards/... hoặc data:image/...).',
       );
       return;
     }

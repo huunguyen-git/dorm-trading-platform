@@ -67,4 +67,40 @@ describe('api client', () => {
       }),
     );
   });
+
+  it('evicts session on mid-session 403 ACCOUNT_RESTRICTED but keeps session on 403 INSUFFICIENT_PRIVILEGE', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1');
+    setAccessToken('mod-token');
+    const onExpire = vi.fn();
+    window.addEventListener('session-expired', onExpire);
+
+    // 1) Ordinary RBAC 403 (e.g. moderator trying to lock senior admin) must NOT evict session
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ code: 'INSUFFICIENT_PRIVILEGE', message: 'Không đủ quyền.' }, { status: 403 }),
+    );
+    await expect(api('/admin/users/u-1/lock', { method: 'POST' })).rejects.toThrow('Không đủ quyền.');
+    expect(onExpire).not.toHaveBeenCalled();
+
+    // 2) Public login 403 ACCOUNT_RESTRICTED surfaces message without emitting session-expired
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 'ACCOUNT_RESTRICTED', message: 'Tài khoản đang bị khóa tạm thời.' },
+        { status: 403 },
+      ),
+    );
+    await expect(api('/auth/login', { method: 'POST' })).rejects.toThrow('Tài khoản đang bị khóa tạm thời.');
+    expect(onExpire).not.toHaveBeenCalled();
+
+    // 3) Protected call 403 ACCOUNT_RESTRICTED clears token and emits session-expired
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 'ACCOUNT_RESTRICTED', message: 'Tài khoản bị khóa vĩnh viễn.' },
+        { status: 403 },
+      ),
+    );
+    await expect(api('/admin/users')).rejects.toThrow('Tài khoản bị khóa vĩnh viễn.');
+    expect(onExpire).toHaveBeenCalledOnce();
+
+    window.removeEventListener('session-expired', onExpire);
+  });
 });

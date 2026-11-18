@@ -12,6 +12,7 @@ import {
   updateAdminUserIdentity,
   type UpdateAdminUserIdentityPayload,
 } from './userAdminApi';
+import { formatTransactionStatus, isPreviewableImageSrc, isValidStudentCardRef } from './userFormatters';
 
 vi.mock('../api/client', () => ({
   api: vi.fn(),
@@ -185,5 +186,28 @@ describe('userAdminApi', () => {
       method: 'POST',
       body: JSON.stringify({ reason: 'Đã xác minh khiếu nại hợp lệ', expectedVersion: 4 }),
     });
+  });
+
+  it('aligns student card validation and V1 transaction status labels with backend contracts', () => {
+    expect(isValidStudentCardRef('/uploads/student-cards/private-front.png')).toBe(true);
+    expect(isValidStudentCardRef('/student-cards/front-2252.jpg')).toBe(true);
+    expect(isValidStudentCardRef('http://localhost:8082/uploads/card.webp')).toBe(true);
+    expect(isValidStudentCardRef('https://cdn.dorm.edu.vn/cards/front-2252.jpg')).toBe(true);
+    expect(isValidStudentCardRef('data:image/jpg;base64,iVBORw0KGgo=')).toBe(true);
+
+    expect(isValidStudentCardRef('https://cdn.dorm.edu.vn/cards/front.pdf')).toBe(false);
+    expect(isValidStudentCardRef('data:image/svg+xml;base64,PHN2Zz4=')).toBe(false);
+    expect(isValidStudentCardRef('/uploads/../etc/passwd')).toBe(false);
+
+    expect(isPreviewableImageSrc('/student-cards/front-2252.jpg')).toBe(true);
+    expect(isPreviewableImageSrc('/uploads/../etc/passwd')).toBe(false);
+
+    expect(formatTransactionStatus('YEU_CAU')).toBe('Chờ chấp nhận');
+    expect(formatTransactionStatus('GIU_CHO')).toBe('Đang giữ chỗ');
+    expect(formatTransactionStatus('DANG_GIAO')).toBe('Đang giao dịch');
+    expect(formatTransactionStatus('CHO_XAC_NHAN')).toBe('Chờ xác nhận bàn giao');
+    expect(formatTransactionStatus('CHO_XU_LY')).toBe('Chờ xử lý');
+    expect(formatTransactionStatus('HOAN_TAT')).toBe('Hoàn tất');
+    expect(formatTransactionStatus('HUY')).toBe('Đã hủy');
   });
 });

@@ -145,6 +145,7 @@ export interface LockUserPayload {
   durationDays?: number;
   reason: string;
   appealable?: boolean;
+  penaltyCode?: string;
   expectedVersion?: number;
 }
 
@@ -228,6 +229,7 @@ export function lockAdminUser(userId: string, payload: LockUserPayload) {
     ...(typeof payload.durationDays === 'number' ? { durationDays: payload.durationDays } : {}),
     reason: payload.reason,
     ...(typeof payload.appealable === 'boolean' ? { appealable: payload.appealable } : {}),
+    ...(payload.penaltyCode ? { penaltyCode: payload.penaltyCode } : {}),
     ...(typeof payload.expectedVersion === 'number' ? { expectedVersion: payload.expectedVersion } : {}),
   };
   return api<AdminUserDetail>(`/admin/users/${encodeURIComponent(userId)}/lock`, {

@@ -1,21 +1,66 @@
 import type { AccountStatus, RestrictionType, StudentStatus, TransactionRole } from './userAdminApi';
 
-const VALID_CARD_PATTERN =
-  /^(https:\/\/[^\s]+|\/uploads\/[^\s]+|data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+)$/;
+const DATA_IMAGE_CARD_PATTERN = /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+const RELATIVE_CARD_PATH_PATTERN = /^\/(?:uploads|student-cards)\/[A-Za-z0-9._/-]+$/;
+const ALLOWED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+
+function hasAllowedOrNoExtension(path: string): boolean {
+  const lastSlash = path.lastIndexOf('/');
+  const filename = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+  if (!filename.trim()) return false;
+  const dot = filename.lastIndexOf('.');
+  if (dot < 0) return true;
+  const ext = filename.slice(dot + 1).toLowerCase();
+  return ALLOWED_IMAGE_EXTENSIONS.has(ext);
+}
 
 export function isValidStudentCardRef(value: string): boolean {
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 2_000_000) return false;
-  return VALID_CARD_PATTERN.test(trimmed);
+  if (!trimmed) return false;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    if (trimmed.charCodeAt(i) < 32) return false;
+  }
+  if (trimmed.slice(0, 5).toLowerCase() === 'data:') {
+    return trimmed.length <= 2_097_152 && DATA_IMAGE_CARD_PATTERN.test(trimmed);
+  }
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/student-cards/')) {
+    return (
+      trimmed.length <= 512 &&
+      !trimmed.includes('..') &&
+      RELATIVE_CARD_PATH_PATTERN.test(trimmed) &&
+      hasAllowedOrNoExtension(trimmed)
+    );
+  }
+  if (trimmed.length <= 2048 && !/\s/.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const protocol = url.protocol.toLowerCase();
+      const host = url.hostname.toLowerCase();
+      const allowedScheme =
+        protocol === 'https:' || (protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1'));
+      return (
+        allowedScheme &&
+        Boolean(host) &&
+        url.pathname.length > 1 &&
+        !url.pathname.includes('..') &&
+        hasAllowedOrNoExtension(url.pathname)
+      );
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export function isPreviewableImageSrc(value: string | null | undefined): value is string {
   if (!value) return false;
   const trimmed = value.trim();
+  if (trimmed.includes('..')) return false;
   return (
     trimmed.startsWith('https://') ||
     trimmed.startsWith('http://') ||
     trimmed.startsWith('/uploads/') ||
+    trimmed.startsWith('/student-cards/') ||
     trimmed.startsWith('data:image/')
   );
 }
@@ -88,14 +133,24 @@ export function formatTransactionRole(role: TransactionRole | string): string {
 
 export function formatTransactionStatus(status: string): string {
   switch (status) {
+    case 'YEU_CAU':
+      return 'Chờ chấp nhận';
+    case 'GIU_CHO':
     case 'DANG_GIU_CHO':
       return 'Đang giữ chỗ';
     case 'DA_HEN_GIAO':
       return 'Đã hẹn giao';
+    case 'DANG_GIAO':
+      return 'Đang giao dịch';
+    case 'CHO_XAC_NHAN':
+      return 'Chờ xác nhận bàn giao';
     case 'DA_BAO_GIAO':
       return 'Đã báo giao';
+    case 'CHO_XU_LY':
+      return 'Chờ xử lý';
     case 'HOAN_TAT':
       return 'Hoàn tất';
+    case 'HUY':
     case 'DA_HUY':
       return 'Đã hủy';
     case 'TRANH_CHAP':
