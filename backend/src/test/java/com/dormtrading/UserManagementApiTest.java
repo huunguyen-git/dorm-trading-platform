@@ -60,7 +60,7 @@ class UserManagementApiTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        currentTime.set(Instant.parse("2026-11-18T10:00:00Z"));
+        currentTime.set(Instant.now());
         when(clock.instant()).thenAnswer(inv -> currentTime.get());
         doAnswer(inv -> {
             var msg = (SimpleMailMessage) inv.getArgument(0);
