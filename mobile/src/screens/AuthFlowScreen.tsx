@@ -37,7 +37,7 @@ export default function AuthFlowScreen() {
       : await post<Challenge>('/auth/otp/resend', { email: email.trim(), purpose });
     if (mode === 'register') setRegistered(true);
     setChallenge(response); setCode(''); setPassword(''); setConfirmation('');
-    setTick(Date.now()); setResendAt(Date.now() + response.resendAfter * 1000); setExpiresAt(Date.now() + response.expiresIn * 1000); setMessage(response.message);
+    const now = Date.now(); setTick(now); setResendAt(now + response.resendAfter * 1000); setExpiresAt(now + response.expiresIn * 1000); setMessage(response.message);
   }
   async function submit() {
     if (mode === 'change' || grant) validatePassword();

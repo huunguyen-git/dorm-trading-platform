@@ -11,7 +11,16 @@ export async function refreshSession() {
     const generation = epoch;
     const rotate = async () => {
       const response = await fetch(`${baseUrl()}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'admin-web' }) });
-      if (!response.ok) throw new ApiError(response.status, 'Phiên đã hết hạn. Vui lòng đăng nhập lại.');
+      if (!response.ok) {
+        let message = 'Phiên đã hết hạn. Vui lòng đăng nhập lại.';
+        try {
+          const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
+          if (response.status === 403 && parsed?.code === 'ACCOUNT_RESTRICTED' && parsed.message) {
+            message = parsed.message;
+          }
+        } catch { /* ignore */ }
+        throw new ApiError(response.status, message);
+      }
       const body = await response.json() as { token: string };
       if (epoch === generation) accessToken = body.token;
     };
@@ -30,13 +39,29 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (accessToken === sentToken) await refreshSession();
       // A security-filter 401 occurs before the controller; never replay other errors.
       response = await send();
-    } catch { /* handled below */ }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        setAccessToken(null);
+        window.dispatchEvent(new Event('session-expired'));
+        throw error;
+      }
+      /* handled below */
+    }
   }
   if (response.status === 401 && !publicCall && path !== '/auth/password/change') { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
   if (!response.ok) {
     const raw = await response.text();
     let message = raw || `API ${response.status}`;
-    try { message = JSON.parse(raw).message ?? message; } catch { /* plain response */ }
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { code?: string; message?: string };
+      code = parsed?.code;
+      message = parsed?.message ?? message;
+    } catch { /* plain response */ }
+    if (response.status === 403 && code === 'ACCOUNT_RESTRICTED' && !publicCall) {
+      setAccessToken(null);
+      window.dispatchEvent(new Event('session-expired'));
+    }
     throw new ApiError(response.status, message);
   }
   if (response.status === 204) return undefined as T;
