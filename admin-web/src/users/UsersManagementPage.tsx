@@ -32,6 +32,7 @@ import {
   isPreviewableImageSrc,
   isValidStudentCardRef,
 } from './userFormatters';
+import UserRestrictionPanel from './UserRestrictionPanel';
 
 const PAGE_SIZE = 20;
 
@@ -515,6 +516,36 @@ export default function UsersManagementPage() {
     } finally {
       setEditBusy(false);
     }
+  }
+
+  async function refreshUserAndLogs(targetUserId: string) {
+    setLogPage(0);
+    const [freshList, freshDetail, freshLogs] = await Promise.allSettled([
+      listAdminUsers(toSearchParams(appliedFilters, page)),
+      getAdminUserDetail(targetUserId),
+      getAdminUserModerationLogs(targetUserId, 0, PAGE_SIZE),
+    ]);
+    if (freshList.status === 'fulfilled' && Array.isArray(freshList.value?.items)) {
+      setUsersData(freshList.value);
+    }
+    if (freshDetail.status === 'fulfilled' && freshDetail.value?.id) {
+      setDetail(freshDetail.value);
+      setIdentityForm(toIdentityForm(freshDetail.value));
+      if (freshDetail.value.accountStatus === 'VO_HIEU_HOA') {
+        setIsEditingIdentity(false);
+      }
+    }
+    if (freshLogs.status === 'fulfilled' && Array.isArray(freshLogs.value?.items)) {
+      setLogsData(freshLogs.value);
+    } else {
+      setLogsData(null);
+      setLogsRefreshKey((value) => value + 1);
+    }
+  }
+
+  async function handleRestrictionChanged(updated: AdminUserDetail) {
+    syncUserDetailIntoState(updated);
+    await refreshUserAndLogs(updated.id);
   }
 
   const isTargetDeactivated = detail?.accountStatus === 'VO_HIEU_HOA';
@@ -1373,8 +1404,19 @@ export default function UsersManagementPage() {
                                 <td>{log.actorName ?? 'Hệ thống'}</td>
                                 <td>{log.reason}</td>
                                 <td>
-                                  {formatAccountStatusLabel(log.previousStatus)} →{' '}
-                                  {formatAccountStatusLabel(log.newStatus)}
+                                  <span>
+                                    {formatAccountStatusLabel(log.previousStatus)} →{' '}
+                                    {formatAccountStatusLabel(log.newStatus)}
+                                  </span>
+                                  {log.lockType && (
+                                    <span className="cell-sub">
+                                      {log.lockType === 'KHOA_VINH_VIEN'
+                                        ? 'Hình thức: Khóa vĩnh viễn'
+                                        : log.lockType === 'KHOA_TAM_THOI'
+                                          ? 'Hình thức: Khóa tạm thời'
+                                          : log.lockType}
+                                    </span>
+                                  )}
                                 </td>
                                 <td>{formatDateTime(log.lockedUntil)}</td>
                                 <td>
@@ -1418,6 +1460,15 @@ export default function UsersManagementPage() {
                     </>
                   )}
                 </div>
+              )}
+
+              {currentUser && (
+                <UserRestrictionPanel
+                  currentUser={currentUser}
+                  detail={detail}
+                  onRestrictionChanged={handleRestrictionChanged}
+                  onConflictReload={refreshUserAndLogs}
+                />
               )}
             </>
           ) : null}

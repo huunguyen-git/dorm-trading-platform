@@ -187,3 +187,21 @@ hr { border: 0; border-top: 1px solid var(--color-line); margin: 24px 0; }
   .filter-grid, .admin-form-grid, .student-card-grid { grid-template-columns: 1fr; }
   .filter-field-wide { grid-column: span 1; }
 }
+
+/* P1-05: Account restriction status card, 2-step confirmation, and lock/unlock controls */
+.restriction-section { border-top: 1px solid var(--color-line); padding-top: 20px; display: grid; gap: 20px; }
+.restriction-banner { background: #fff5f2; border: 1px solid #efc9bf; border-radius: var(--radius); padding: 20px; display: grid; gap: 12px; }
+.restriction-banner-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.restriction-banner h3 { margin: 0; color: var(--color-danger); font-size: 18px; }
+.restriction-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; align-items: start; }
+.confirm-summary { background: #faf6ef; border: 1px solid #e2d5c1; border-radius: var(--radius-sm); padding: 16px; display: grid; gap: 12px; }
+.confirm-summary h4 { margin: 0; font-size: 15px; color: var(--color-ink); }
+.radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.radio-option { display: flex !important; align-items: center; gap: 10px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 10px 12px; background: #faf9f6; cursor: pointer; font-weight: 600; }
+.radio-option input[type="radio"] { width: 16px; height: 16px; min-height: 16px; margin: 0; accent-color: var(--color-brand); }
+.radio-option-active { border-color: var(--color-brand); background: #fff8f5; }
+.button-danger { background: var(--color-danger); color: white; border-color: var(--color-danger); font-weight: 600; }
+.status-badge-appeal { background: #eef3ec; color: #36532c; border: 1px solid #c5d8bf; font-weight: 700; }
+@media (max-width: 680px) {
+  .radio-group, .restriction-grid { grid-template-columns: 1fr; }
+}
