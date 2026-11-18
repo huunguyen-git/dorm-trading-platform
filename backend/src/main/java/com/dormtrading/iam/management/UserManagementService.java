@@ -10,12 +10,16 @@ import com.dormtrading.iam.management.UserManagementDtos.UserSearchFilter;
 import com.dormtrading.iam.management.UserManagementDtos.UserSummary;
 import com.dormtrading.iam.management.UserManagementDtos.UserTransactionItem;
 import com.dormtrading.review.reputation.ReputationLedgerService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigInteger;
+import java.net.URI;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -24,11 +28,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Service
 @Transactional(noRollbackFor = AuthFailure.class)
@@ -40,6 +46,31 @@ public class UserManagementService {
     private static final Set<String> VALID_STUDENT_STATUSES = Set.of(
             "DANG_HOC", "DA_TOT_NGHIEP"
     );
+    private static final Set<String> ALLOWED_IDENTITY_PATCH_KEYS = Set.of(
+            "fullName",
+            "studentId",
+            "phone",
+            "university",
+            "campus",
+            "major",
+            "cohort",
+            "studentStatus",
+            "studentCardFront",
+            "studentCardBack",
+            "reason",
+            "expectedVersion"
+    );
+    private static final String DEFAULT_IDENTITY_UPDATE_REASON = "Cập nhật hồ sơ người dùng";
+    private static final Pattern STUDENT_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{4,20}$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^[0-9+() -]{8,20}$");
+    private static final Pattern DATA_IMAGE_PATTERN = Pattern.compile(
+            "^data:image/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern RELATIVE_CARD_PATH_PATTERN = Pattern.compile(
+            "^/(?:uploads|student-cards)/[A-Za-z0-9._/-]+$"
+    );
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
 
     private final JdbcTemplate db;
     private final Clock clock;
@@ -539,6 +570,358 @@ public class UserManagementService {
             });
         } catch (Exception e) {
             return Map.of();
+        }
+    }
+
+    public UserDetail updateUserIdentity(UUID actorId, UUID targetUserId, Map<String, Object> body) {
+        if (actorId == null || targetUserId == null || body == null || body.isEmpty()) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Thông tin cập nhật hồ sơ không hợp lệ.");
+        }
+        if (!ALLOWED_IDENTITY_PATCH_KEYS.containsAll(body.keySet())) {
+            throw new AuthFailure(
+                    400,
+                    "INVALID_PROFILE_FIELDS",
+                    "Chỉ được phép cập nhật thông tin định danh, học tập và ảnh thẻ sinh viên được cấp phép."
+            );
+        }
+
+        Long expectedVersion = parseExpectedVersion(body.get("expectedVersion"));
+        for (var entry : body.entrySet()) {
+            if ("expectedVersion".equals(entry.getKey())) {
+                continue;
+            }
+            Object val = entry.getValue();
+            if (val != null && !(val instanceof String)) {
+                throw new AuthFailure(400, "INVALID_INPUT", "Giá trị trường cập nhật phải là chuỗi ký tự.");
+            }
+        }
+
+        String fullName = requiredString(body.get("fullName"), 150, "Họ tên không hợp lệ.");
+        String studentId = requiredString(body.get("studentId"), 20, "Mã số sinh viên không hợp lệ.");
+        if (!STUDENT_ID_PATTERN.matcher(studentId).matches()) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Mã số sinh viên phải gồm 4-20 ký tự chữ, số, gạch nối hoặc gạch dưới.");
+        }
+        String rawReason = (String) body.get("reason");
+        String reason;
+        if (rawReason == null || rawReason.isBlank()) {
+            reason = DEFAULT_IDENTITY_UPDATE_REASON;
+        } else {
+            reason = rawReason.strip();
+            if (reason.length() > 500) {
+                throw new AuthFailure(400, "INVALID_INPUT", "Lý do chỉnh sửa hồ sơ vượt quá 500 ký tự.");
+            }
+        }
+
+        var lockedRow = one("SELECT * FROM thanh_viens WHERE user_id = ? FOR UPDATE", targetUserId);
+        if (lockedRow == null) {
+            throw new AuthFailure(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.");
+        }
+
+        Instant currentTime = now();
+        Set<String> targetAdminRoles = loadActiveAdminRoles(List.of(targetUserId), currentTime)
+                .getOrDefault(targetUserId, Set.of());
+        Set<String> actorAdminRoles = loadActiveAdminRoles(List.of(actorId), currentTime)
+                .getOrDefault(actorId, Set.of());
+
+        if (targetAdminRoles.contains("QUAN_TRI_VIEN_CAP_CAO")
+                && !actorAdminRoles.contains("QUAN_TRI_VIEN_CAP_CAO")) {
+            throw new AuthFailure(
+                    403,
+                    "INSUFFICIENT_PRIVILEGE",
+                    "Kiểm duyệt viên không được chỉnh sửa hồ sơ Quản trị viên cấp cao."
+            );
+        }
+
+        if ("VO_HIEU_HOA".equals(lockedRow.get("trang_thai_tai_khoan"))) {
+            throw new AuthFailure(409, "ACCOUNT_DELETED", "Tài khoản người dùng đã bị vô hiệu hóa hoặc xóa.");
+        }
+
+        long currentVersion = ((Number) lockedRow.get("version")).longValue();
+        if (expectedVersion != null && expectedVersion.longValue() != currentVersion) {
+            throw new AuthFailure(
+                    409,
+                    "STATE_CONFLICT",
+                    "Thông tin hồ sơ đã bị thay đổi đồng thời. Vui lòng tải lại dữ liệu mới nhất."
+            );
+        }
+
+        if (reconcileExpiredLockIfNeeded(targetUserId)) {
+            lockedRow = one("SELECT * FROM thanh_viens WHERE user_id = ?", targetUserId);
+        }
+
+        String phone = body.containsKey("phone")
+                ? optionalPhone((String) body.get("phone"))
+                : (String) lockedRow.get("so_dien_thoai");
+        String university = body.containsKey("university")
+                ? optionalString((String) body.get("university"), 150, "Tên trường vượt quá độ dài cho phép.")
+                : (String) lockedRow.get("truong");
+        String campus = body.containsKey("campus")
+                ? optionalString((String) body.get("campus"), 150, "Cơ sở vượt quá độ dài cho phép.")
+                : (String) lockedRow.get("co_so");
+        String major = body.containsKey("major")
+                ? optionalString((String) body.get("major"), 150, "Ngành học vượt quá độ dài cho phép.")
+                : (String) lockedRow.get("nganh_hoc");
+        String cohort = body.containsKey("cohort")
+                ? optionalString((String) body.get("cohort"), 50, "Niên khóa vượt quá độ dài cho phép.")
+                : (String) lockedRow.get("nien_khoa");
+        String studentStatus;
+        if (body.containsKey("studentStatus")) {
+            String rawStatus = (String) body.get("studentStatus");
+            if (rawStatus == null || !VALID_STUDENT_STATUSES.contains(rawStatus.strip())) {
+                throw new AuthFailure(400, "INVALID_INPUT", "Trạng thái học tập không hợp lệ.");
+            }
+            studentStatus = rawStatus.strip();
+        } else {
+            studentStatus = (String) lockedRow.get("trang_thai_sv");
+        }
+
+        String existingFront = normalizeNullableText((String) lockedRow.get("anh_the_sv_truoc"));
+        String existingBack = normalizeNullableText((String) lockedRow.get("anh_the_sv_sau"));
+        String studentCardFront = body.containsKey("studentCardFront")
+                ? validateStudentCard((String) body.get("studentCardFront"))
+                : existingFront;
+        String studentCardBack = body.containsKey("studentCardBack")
+                ? validateStudentCard((String) body.get("studentCardBack"))
+                : existingBack;
+
+        var conflict = one(
+                "SELECT user_id FROM thanh_viens WHERE mssv = ? AND user_id <> ?",
+                studentId,
+                targetUserId
+        );
+        if (conflict != null) {
+            throw new AuthFailure(409, "STUDENT_ID_CONFLICT", "Mã số sinh viên đã tồn tại ở tài khoản khác.");
+        }
+
+        Map<String, Object> before = snapshotIdentityFields(
+                (String) lockedRow.get("ho_ten"),
+                (String) lockedRow.get("mssv"),
+                (String) lockedRow.get("so_dien_thoai"),
+                (String) lockedRow.get("truong"),
+                (String) lockedRow.get("co_so"),
+                (String) lockedRow.get("nganh_hoc"),
+                (String) lockedRow.get("nien_khoa"),
+                (String) lockedRow.get("trang_thai_sv"),
+                existingFront,
+                existingBack
+        );
+        Map<String, Object> after = snapshotIdentityFields(
+                fullName,
+                studentId,
+                phone,
+                university,
+                campus,
+                major,
+                cohort,
+                studentStatus,
+                studentCardFront,
+                studentCardBack
+        );
+
+        try {
+            // FR-02: Updating studentStatus (including DA_TOT_NGHIEP) never alters trang_thai_tai_khoan or restrictions.
+            db.update(
+                    "UPDATE thanh_viens " +
+                    "SET ho_ten = ?, mssv = ?, so_dien_thoai = ?, truong = ?, co_so = ?, " +
+                    "    nganh_hoc = ?, nien_khoa = ?, trang_thai_sv = ?, " +
+                    "    anh_the_sv_truoc = ?, anh_the_sv_sau = ?, " +
+                    "    updated_at = ?, version = version + 1 " +
+                    "WHERE user_id = ?",
+                    fullName,
+                    studentId,
+                    phone,
+                    university,
+                    campus,
+                    major,
+                    cohort,
+                    studentStatus,
+                    studentCardFront,
+                    studentCardBack,
+                    at(currentTime),
+                    targetUserId
+            );
+        } catch (DuplicateKeyException e) {
+            throw new AuthFailure(409, "STUDENT_ID_CONFLICT", "Mã số sinh viên đã tồn tại ở tài khoản khác.");
+        }
+
+        String currentStatus = (String) lockedRow.get("trang_thai_tai_khoan");
+        String currentLockType = (String) lockedRow.get("loai_han_che");
+        Instant currentLockedUntil = toInstant(lockedRow.get("khoa_den_ngay"));
+        boolean currentAppealable = Boolean.TRUE.equals(lockedRow.get("cho_phep_khieu_nai"));
+
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("before", before);
+        details.put("after", after);
+
+        db.update(
+                "INSERT INTO nhat_ky_kiem_duyet(" +
+                "id, target_user_id, actor_user_id, action_type, reason, previous_status, new_status, " +
+                "lock_type, locked_until, appealable, details, created_at) " +
+                "VALUES (?, ?, ?, 'UPDATE_IDENTITY', ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?)",
+                UUID.randomUUID(),
+                targetUserId,
+                actorId,
+                reason,
+                currentStatus,
+                currentStatus,
+                currentLockType,
+                at(currentLockedUntil),
+                currentAppealable,
+                serializeJson(details),
+                at(currentTime)
+        );
+
+        return getUserDetail(targetUserId);
+    }
+
+    private Long parseExpectedVersion(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof Integer i && i >= 0) {
+            return i.longValue();
+        }
+        if (raw instanceof Long l && l >= 0) {
+            return l;
+        }
+        if (raw instanceof BigInteger bi && bi.signum() >= 0 && bi.bitLength() <= 63) {
+            return bi.longValue();
+        }
+        throw new AuthFailure(400, "INVALID_INPUT", "Phiên bản đối chiếu (expectedVersion) không hợp lệ.");
+    }
+
+    private String normalizeNullableText(String raw) {
+        return (raw == null || raw.isBlank()) ? null : raw.strip();
+    }
+
+    private String validateStudentCard(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.strip();
+        if (trimmed.chars().anyMatch(c -> c < 32)) {
+            throw invalidStudentCard();
+        }
+        if (trimmed.regionMatches(true, 0, "data:", 0, 5)) {
+            if (trimmed.length() > 2_097_152 || !DATA_IMAGE_PATTERN.matcher(trimmed).matches()) {
+                throw invalidStudentCard();
+            }
+            return trimmed;
+        }
+        if (trimmed.startsWith("/uploads/") || trimmed.startsWith("/student-cards/")) {
+            if (trimmed.length() > 512
+                    || trimmed.contains("..")
+                    || !RELATIVE_CARD_PATH_PATTERN.matcher(trimmed).matches()
+                    || !hasAllowedOrNoExtension(trimmed)) {
+                throw invalidStudentCard();
+            }
+            return trimmed;
+        }
+        if (trimmed.length() <= 2048 && trimmed.chars().noneMatch(Character::isWhitespace)) {
+            try {
+                URI uri = URI.create(trimmed);
+                String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+                String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+                String path = uri.getPath();
+                boolean allowedScheme = "https".equals(scheme)
+                        || ("http".equals(scheme) && ("localhost".equals(host) || "127.0.0.1".equals(host)));
+                if (allowedScheme
+                        && !host.isBlank()
+                        && path != null
+                        && path.length() > 1
+                        && !path.contains("..")
+                        && hasAllowedOrNoExtension(path)) {
+                    return trimmed;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to throw INVALID_STUDENT_CARD
+            }
+        }
+        throw invalidStudentCard();
+    }
+
+    private boolean hasAllowedOrNoExtension(String path) {
+        int lastSlash = path.lastIndexOf('/');
+        String filename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+        if (filename.isBlank()) {
+            return false;
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0) {
+            return true;
+        }
+        String ext = filename.substring(dot + 1).toLowerCase(Locale.ROOT);
+        return ALLOWED_IMAGE_EXTENSIONS.contains(ext);
+    }
+
+    private AuthFailure invalidStudentCard() {
+        return new AuthFailure(
+                400,
+                "INVALID_STUDENT_CARD",
+                "Ảnh thẻ sinh viên không đáp ứng quy chuẩn (chỉ chấp nhận ảnh JPEG, PNG, WebP hợp lệ)."
+        );
+    }
+
+    private String requiredString(Object raw, int maxLen, String message) {
+        if (!(raw instanceof String s) || s.isBlank() || s.strip().length() > maxLen) {
+            throw new AuthFailure(400, "INVALID_INPUT", message);
+        }
+        return s.strip();
+    }
+
+    private String optionalString(String raw, int maxLen, String message) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.strip();
+        if (trimmed.length() > maxLen) {
+            throw new AuthFailure(400, "INVALID_INPUT", message);
+        }
+        return trimmed;
+    }
+
+    private String optionalPhone(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.strip();
+        if (trimmed.length() > 20 || !PHONE_PATTERN.matcher(trimmed).matches()) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Số điện thoại không hợp lệ.");
+        }
+        return trimmed;
+    }
+
+    private Map<String, Object> snapshotIdentityFields(
+            String fullName,
+            String studentId,
+            String phone,
+            String university,
+            String campus,
+            String major,
+            String cohort,
+            String studentStatus,
+            String studentCardFront,
+            String studentCardBack
+    ) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("fullName", fullName);
+        map.put("studentId", studentId);
+        map.put("phone", phone);
+        map.put("university", university);
+        map.put("campus", campus);
+        map.put("major", major);
+        map.put("cohort", cohort);
+        map.put("studentStatus", studentStatus);
+        map.put("studentCardFront", studentCardFront);
+        map.put("studentCardBack", studentCardBack);
+        return map;
+    }
+
+    private String serializeJson(Map<String, Object> details) {
+        try {
+            return objectMapper.writeValueAsString(details);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialize audit details", e);
         }
     }
 }
