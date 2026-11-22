@@ -9,7 +9,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -22,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(noRollbackFor = AuthFailure.class)
+@SuppressWarnings("null")
 public class InventoryService {
 
     private final JdbcTemplate db;
