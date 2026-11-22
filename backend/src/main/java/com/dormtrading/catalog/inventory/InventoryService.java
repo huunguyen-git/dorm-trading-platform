@@ -44,8 +44,7 @@ public class InventoryService {
             rs.getString("trang_thai"),
             rs.getLong("version"),
             rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("updated_at").toInstant()
-    );
+            rs.getTimestamp("updated_at").toInstant());
 
     private List<String> extractArray(ResultSet rs, String column) throws SQLException {
         Array sqlArray = rs.getArray(column);
@@ -63,7 +62,8 @@ public class InventoryService {
         if (userId == null) {
             throw new AuthFailure(401, "UNAUTHENTICATED", "Yêu cầu đăng nhập.");
         }
-        var rows = db.queryForList("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class, userId);
+        var rows = db.queryForList("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class,
+                userId);
         if (rows.isEmpty()) {
             throw new AuthFailure(401, "USER_NOT_FOUND", "Người dùng không tồn tại.");
         }
@@ -130,8 +130,7 @@ public class InventoryService {
                 rs.getObject("ma_tin", UUID.class),
                 rs.getString("tieu_de"),
                 rs.getString("trang_thai"),
-                rs.getInt("gia_vnd")
-        ), itemId);
+                rs.getInt("gia_vnd")), itemId);
     }
 
     public InventoryDetailDto createItem(UUID userId, CreateInventoryItemRequest req) {
@@ -174,8 +173,9 @@ public class InventoryService {
 
         db.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO do_vats (ma_vat, user_id, ten, tinh_trang, hinh_anh, trang_thai, version, created_at, updated_at) " +
-                    "VALUES (?, ?, ?, ?, ?, 'KHA_DUNG', 0, ?, ?)");
+                    "INSERT INTO do_vats (ma_vat, user_id, ten, tinh_trang, hinh_anh, trang_thai, version, created_at, updated_at) "
+                            +
+                            "VALUES (?, ?, ?, ?, ?, 'KHA_DUNG', 0, ?, ?)");
             ps.setObject(1, maVat);
             ps.setObject(2, userId);
             ps.setString(3, ten);
@@ -186,7 +186,8 @@ public class InventoryService {
             return ps;
         });
 
-        InventoryItem created = new InventoryItem(maVat, userId, ten, tinhTrang, cleanImages, "KHA_DUNG", 0L, timestamp, timestamp);
+        InventoryItem created = new InventoryItem(maVat, userId, ten, tinhTrang, cleanImages, "KHA_DUNG", 0L, timestamp,
+                timestamp);
         return InventoryDetailDto.from(created, List.of());
     }
 
@@ -208,12 +209,15 @@ public class InventoryService {
         InventoryItem current = items.getFirst();
 
         if (!"KHA_DUNG".equals(current.trangThai())) {
-            throw new AuthFailure(409, "ITEM_STATUS_CONFLICT", "Đồ vật không ở trạng thái khả dụng để chỉnh sửa (trạng thái: " + current.trangThai() + ").");
+            throw new AuthFailure(409, "ITEM_STATUS_CONFLICT",
+                    "Đồ vật không ở trạng thái khả dụng để chỉnh sửa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class, itemId);
+        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
+                itemId);
         if (linkedCount != null && linkedCount > 0) {
-            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING", "Đồ vật đã được liên kết với tin đăng, không thể chỉnh sửa.");
+            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
+                    "Đồ vật đã được liên kết với tin đăng, không thể chỉnh sửa.");
         }
 
         if (req.version() != null && !req.version().equals(current.version())) {
@@ -253,7 +257,7 @@ public class InventoryService {
         int updated = db.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "UPDATE do_vats SET ten = ?, tinh_trang = ?, hinh_anh = ?, version = version + 1, updated_at = ? " +
-                    "WHERE ma_vat = ? AND user_id = ? AND version = ?");
+                            "WHERE ma_vat = ? AND user_id = ? AND version = ?");
             ps.setString(1, ten);
             ps.setString(2, tinhTrang);
             ps.setArray(3, con.createArrayOf("text", cleanImages.toArray(new String[0])));
@@ -268,7 +272,8 @@ public class InventoryService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột đồng thời khi cập nhật đồ vật.");
         }
 
-        InventoryItem updatedItem = new InventoryItem(itemId, userId, ten, tinhTrang, cleanImages, current.trangThai(), targetVersion + 1, current.createdAt(), timestamp);
+        InventoryItem updatedItem = new InventoryItem(itemId, userId, ten, tinhTrang, cleanImages, current.trangThai(),
+                targetVersion + 1, current.createdAt(), timestamp);
         return InventoryDetailDto.from(updatedItem, List.of());
     }
 
@@ -290,12 +295,15 @@ public class InventoryService {
         InventoryItem current = items.getFirst();
 
         if (!"KHA_DUNG".equals(current.trangThai())) {
-            throw new AuthFailure(409, "ITEM_STATUS_CONFLICT", "Đồ vật không ở trạng thái khả dụng để xóa (trạng thái: " + current.trangThai() + ").");
+            throw new AuthFailure(409, "ITEM_STATUS_CONFLICT",
+                    "Đồ vật không ở trạng thái khả dụng để xóa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class, itemId);
+        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
+                itemId);
         if (linkedCount != null && linkedCount > 0) {
-            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING", "Đồ vật đã được liên kết với tin đăng, không thể xóa.");
+            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
+                    "Đồ vật đã được liên kết với tin đăng, không thể xóa.");
         }
 
         if (expectedVersion != null && !expectedVersion.equals(current.version())) {
@@ -303,12 +311,14 @@ public class InventoryService {
         }
 
         try {
-            int deleted = db.update("DELETE FROM do_vats WHERE ma_vat = ? AND user_id = ? AND version = ?", itemId, userId, current.version());
+            int deleted = db.update("DELETE FROM do_vats WHERE ma_vat = ? AND user_id = ? AND version = ?", itemId,
+                    userId, current.version());
             if (deleted == 0) {
                 throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột đồng thời khi xóa đồ vật.");
             }
         } catch (DataIntegrityViolationException e) {
-            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING", "Đồ vật đã được liên kết với tin đăng, không thể xóa.");
+            throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
+                    "Đồ vật đã được liên kết với tin đăng, không thể xóa.");
         }
     }
 }
