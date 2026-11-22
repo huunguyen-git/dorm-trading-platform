@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(noRollbackFor = AuthFailure.class)
-@SuppressWarnings("null")
 public class AuthService {
     private final JdbcTemplate db;
     private final PasswordEncoder encoder;

@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-@SuppressWarnings("null")
 public class AuthController {
     private final AuthService auth;
     private final Set<String> origins;

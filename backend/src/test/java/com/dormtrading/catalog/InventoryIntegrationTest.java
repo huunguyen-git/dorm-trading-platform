@@ -1,6 +1,5 @@
 package com.dormtrading.catalog;
 
-import com.dormtrading.catalog.inventory.*;
 import com.dormtrading.common.BaseIntegrationTest;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
@@ -45,6 +44,7 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
     private String userEmail;
 
     private String secondUserToken;
+    @SuppressWarnings("unused")
     private UUID secondUserId;
 
     @BeforeEach
