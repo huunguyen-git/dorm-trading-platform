@@ -2,6 +2,8 @@ package com.dormtrading.iam;
 
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import javax.crypto.spec.SecretKeySpec;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.AuthFailure;
@@ -9,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -35,7 +38,7 @@ class SecurityConfig {
         return decoder;
     }
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, AuthService authService) throws Exception {
+    SecurityFilterChain apiSecurity(HttpSecurity http, AuthService authService, JdbcTemplate db) throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -54,7 +57,16 @@ class SecurityConfig {
                         var user = authService.me(token);
                         var roles = user.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
                         return new JwtAuthenticationToken(token, roles);
-                    } catch (AuthFailure e) { throw new InvalidBearerTokenException("Session is invalid"); }
+                    } catch (AuthFailure e) {
+                        try {
+                            UUID uid = UUID.fromString(token.getSubject());
+                            var status = db.queryForList("select trang_thai_tai_khoan from thanh_viens where user_id=?", String.class, uid);
+                            if (!status.isEmpty() && Set.of("BI_KHOA", "VO_HIEU_HOA").contains(status.getFirst())) {
+                                return new JwtAuthenticationToken(token, List.of(new SimpleGrantedAuthority("ROLE_LOCKED")));
+                            }
+                        } catch (Exception ignored) { }
+                        throw new InvalidBearerTokenException("Session is invalid");
+                    }
                 })))
                 .build();
     }
