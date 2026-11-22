@@ -1,0 +1,131 @@
+import { create } from 'zustand';
+import * as inventoryApi from './api';
+import type { CreateInventoryItemInput, InventoryItem, UpdateInventoryItemInput } from './types';
+
+export interface InventoryState {
+  items: InventoryItem[];
+  selectedItem: InventoryItem | null;
+  loading: boolean;
+  error: string | null;
+  loadItems: () => Promise<void>;
+  loadItem: (id: string) => Promise<InventoryItem>;
+  addItem: (input: CreateInventoryItemInput) => Promise<InventoryItem>;
+  updateItem: (id: string, input: UpdateInventoryItemInput) => Promise<InventoryItem>;
+  deleteItem: (id: string) => Promise<void>;
+  clearError: () => void;
+}
+
+export const useInventory = create<InventoryState>((set, get) => ({
+  items: [],
+  selectedItem: null,
+  loading: false,
+  error: null,
+
+  clearError: () => set({ error: null }),
+
+  loadItems: async () => {
+    set({ loading: true, error: null });
+    try {
+      const items = await inventoryApi.fetchInventoryItems();
+      set({ items });
+    } catch (err: any) {
+      const message = err?.message || 'Không thể tải danh sách kho đồ.';
+      set({ error: message });
+      throw err;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  loadItem: async (id: string) => {
+    set({ loading: true, error: null });
+    try {
+      const item = await inventoryApi.fetchInventoryItem(id);
+      set({ selectedItem: item });
+      return item;
+    } catch (err: any) {
+      const message = err?.message || 'Không thể tải chi tiết đồ vật.';
+      set({ error: message });
+      throw err;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  addItem: async (input: CreateInventoryItemInput) => {
+    set({ loading: true, error: null });
+    try {
+      const created = await inventoryApi.createInventoryItem(input);
+      set({ items: [created, ...get().items] });
+      return created;
+    } catch (err: any) {
+      const message = err?.message || 'Không thể tạo đồ vật mới.';
+      set({ error: message });
+      throw err;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  updateItem: async (id: string, input: UpdateInventoryItemInput) => {
+    const existing = get().items.find((i) => i.id === id);
+    if (existing && (!existing.canEdit || existing.trangThai !== 'KHA_DUNG' || existing.linkedListingCount > 0)) {
+      const message = 'Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.';
+      set({ error: message });
+      throw new Error(message);
+    }
+
+    set({ loading: true, error: null });
+    const prevItems = get().items;
+    try {
+      const updated = await inventoryApi.updateInventoryItem(id, {
+        ...input,
+        version: input.version ?? existing?.version,
+      });
+      set({
+        items: get().items.map((i) => (i.id === id ? updated : i)),
+        selectedItem: get().selectedItem?.id === id ? updated : get().selectedItem,
+      });
+      return updated;
+    } catch (err: any) {
+      set({ items: prevItems });
+      const rawMessage = err?.message || '';
+      const message = rawMessage.includes('409')
+        ? 'Xung đột dữ liệu hoặc đồ vật đã gắn vào tin đăng khác.'
+        : (rawMessage || 'Không thể cập nhật đồ vật.');
+      set({ error: message });
+      throw new Error(message);
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  deleteItem: async (id: string) => {
+    const existing = get().items.find((i) => i.id === id);
+    if (existing && (!existing.canDelete || existing.trangThai !== 'KHA_DUNG' || existing.linkedListingCount > 0)) {
+      const message = 'Không thể xóa đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng.';
+      set({ error: message });
+      throw new Error(message);
+    }
+
+    set({ loading: true, error: null });
+    const prevItems = get().items;
+    set({ items: get().items.filter((i) => i.id !== id) });
+    try {
+      await inventoryApi.deleteInventoryItem(id);
+      if (get().selectedItem?.id === id) {
+        set({ selectedItem: null });
+      }
+    } catch (err: any) {
+      set({ items: prevItems });
+      const rawMessage = err?.message || '';
+      const message = rawMessage.includes('409')
+        ? 'Không thể xóa đồ vật đang gắn với tin đăng hoặc đang xử lý giao dịch.'
+        : (rawMessage || 'Không thể xóa đồ vật.');
+      set({ error: message });
+      throw new Error(message);
+    } finally {
+      set({ loading: false });
+    }
+  },
+}));
