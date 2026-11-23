@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { useInventory } from '../inventory/store';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
@@ -27,17 +27,26 @@ export default function InventoryDetailScreen() {
 
   const { items, selectedItem, loadItem, deleteItem, loading, error } = useInventory();
   const [localItem, setLocalItem] = useState<InventoryItem | null>(() => {
-    return items.find((i) => i.id === id) || selectedItem || null;
+    return items.find((i) => i.id === id) || (selectedItem?.id === id ? selectedItem : null);
   });
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
+  useFocusEffect(
+    useCallback(() => {
+      void loadItem(id)
+        .then((item) => setLocalItem(item))
+        .catch((err) => setActionError(err?.message || 'Không thể tải chi tiết đồ vật.'));
+    }, [id, loadItem])
+  );
+
   useEffect(() => {
-    void loadItem(id)
-      .then((item) => setLocalItem(item))
-      .catch((err) => setActionError(err?.message || 'Không thể tải chi tiết đồ vật.'));
-  }, [id, loadItem]);
+    const matched = items.find((i) => i.id === id) || (selectedItem?.id === id ? selectedItem : null);
+    if (matched) {
+      setLocalItem(matched);
+    }
+  }, [id, items, selectedItem]);
 
   const item = localItem;
 
@@ -68,7 +77,7 @@ export default function InventoryDetailScreen() {
     setBusy(true);
     setActionError('');
     try {
-      await deleteItem(item.id);
+      await deleteItem(item.id, item.version);
       navigation.goBack();
     } catch (err: any) {
       setActionError(err?.message || 'Không thể xóa đồ vật.');

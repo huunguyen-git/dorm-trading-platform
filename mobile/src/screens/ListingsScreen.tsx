@@ -19,7 +19,7 @@ export default function ListingsScreen() {
     <Text style={ui.brand}>DORM TRADING</Text><Text style={[text.title, { marginTop: space.sm }]}>Tin đăng</Text><Text style={ui.caption}>Khám phá những món đồ đang chờ một chủ nhân mới.</Text>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.lg }}>
       <Action secondary title="Đăng tin" disabled={!!token && !user?.roles.includes('MEMBER')} onPress={() => navigation.navigate(token ? 'CreateListing' : 'Login')} />
-      <Action secondary title="Kho đồ" onPress={() => navigation.navigate(token ? 'InventoryList' : 'Login')} />
+      <Action secondary title="Kho đồ" disabled={!!token && !user?.roles.includes('MEMBER')} onPress={() => navigation.navigate(token ? 'InventoryList' : 'Login')} />
       <Action secondary title="Hồ sơ" onPress={() => navigation.navigate(token ? 'Profile' : 'Login')} />
       {!token && <Action secondary title="Đăng nhập" onPress={() => navigation.navigate('Login')} />}
     </View>

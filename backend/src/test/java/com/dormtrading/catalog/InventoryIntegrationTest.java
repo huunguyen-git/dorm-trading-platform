@@ -432,7 +432,7 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void testSecurityLockedUserRejectedWith403() {
+    void testSecurityLockedUserRejectedWith401_WhenLocked() {
         // Create an item first while active
         String itemIdStr = given()
                 .auth().oauth2(userToken)
@@ -444,38 +444,38 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
         // Lock user account (BI_KHOA)
         db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA' WHERE user_id = ?", userId);
 
-        // All inventory operations must now return 403 Forbidden
+        // All inventory operations must now return 401 Unauthorized because session/token is invalid for BI_KHOA user
         given()
                 .auth().oauth2(userToken)
                 .when()
                 .get("/api/v1/inventory")
                 .then()
-                .statusCode(403);
+                .statusCode(401);
 
         given()
                 .auth().oauth2(userToken)
                 .contentType(ContentType.JSON)
-                .body(Map.of("ten", "Vat moi", "tinhTrang", "Tot", "hinhAnh", List.of("img.jpg")))
+                .body(Map.of("ten", "Vat moi", "tinhTrang", "Tot", "hinhAnh", List.of("https://img.jpg")))
                 .when()
                 .post("/api/v1/inventory")
                 .then()
-                .statusCode(403);
+                .statusCode(401);
 
         given()
                 .auth().oauth2(userToken)
                 .contentType(ContentType.JSON)
-                .body(Map.of("tinhTrang", "Sua mo ta", "hinhAnh", List.of("img.jpg"), "version", 0))
+                .body(Map.of("tinhTrang", "Sua mo ta", "hinhAnh", List.of("https://img.jpg"), "version", 0))
                 .when()
                 .put("/api/v1/inventory/{id}", itemIdStr)
                 .then()
-                .statusCode(403);
+                .statusCode(401);
 
         given()
                 .auth().oauth2(userToken)
                 .when()
                 .delete("/api/v1/inventory/{id}", itemIdStr)
                 .then()
-                .statusCode(403);
+                .statusCode(401);
     }
 
     @Test
@@ -514,5 +514,159 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
             // Exactly one should succeed with 200, the other must fail with 409 Conflict
             assertThat(statusCodes).containsExactlyInAnyOrder(200, 409);
         }
+    }
+
+    @Test
+    void testDeleteItemConflict_WhenVersionMismatch() {
+        var createBody = Map.of(
+                "ten", "Quạt đứng Senko",
+                "tinhTrang", "Chạy êm",
+                "hinhAnh", List.of("https://img.jpg")
+        );
+        String itemIdStr = given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(createBody)
+                .post("/api/v1/inventory")
+                .then().statusCode(201).extract().jsonPath().getString("id");
+
+        // Try deleting with wrong version 99
+        given()
+                .auth().oauth2(userToken)
+                .when()
+                .delete("/api/v1/inventory/{id}?version=99", itemIdStr)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+    }
+
+    @Test
+    void testCrossUserAccessForbidden_Returns404() {
+        var createBody = Map.of(
+                "ten", "Đèn học Rạng Đông",
+                "tinhTrang", "Tốt",
+                "hinhAnh", List.of("https://img.jpg")
+        );
+        String itemIdStr = given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(createBody)
+                .post("/api/v1/inventory")
+                .then().statusCode(201).extract().jsonPath().getString("id");
+
+        // User 2 attempts to get detail
+        given()
+                .auth().oauth2(secondUserToken)
+                .when()
+                .get("/api/v1/inventory/{id}", itemIdStr)
+                .then()
+                .statusCode(404)
+                .body("code", equalTo("ITEM_NOT_FOUND"));
+
+        // User 2 attempts to update
+        given()
+                .auth().oauth2(secondUserToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("tinhTrang", "Hacked", "hinhAnh", List.of("https://img.jpg"), "version", 0))
+                .when()
+                .put("/api/v1/inventory/{id}", itemIdStr)
+                .then()
+                .statusCode(404)
+                .body("code", equalTo("ITEM_NOT_FOUND"));
+
+        // User 2 attempts to delete
+        given()
+                .auth().oauth2(secondUserToken)
+                .when()
+                .delete("/api/v1/inventory/{id}", itemIdStr)
+                .then()
+                .statusCode(404)
+                .body("code", equalTo("ITEM_NOT_FOUND"));
+    }
+
+    @Test
+    void testPendingActivationUserForbidden_Returns403() {
+        // Change user status to CHO_KICH_HOAT
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'CHO_KICH_HOAT' WHERE user_id = ?", userId);
+
+        given()
+                .auth().oauth2(userToken)
+                .when()
+                .get("/api/v1/inventory")
+                .then()
+                .statusCode(403);
+    }
+
+    @Test
+    void testValidation_ConditionTooLong_Returns400() {
+        String longCondition = "A".repeat(2001);
+        given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("ten", "Món đồ", "tinhTrang", longCondition, "hinhAnh", List.of("https://img.jpg")))
+                .when()
+                .post("/api/v1/inventory")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+    }
+
+    @Test
+    void testValidation_InvalidImageUrlScheme_Returns400() {
+        given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("ten", "Món đồ", "tinhTrang", "Tốt", "hinhAnh", List.of("javascript:alert(1)")))
+                .when()
+                .post("/api/v1/inventory")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+
+        given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("ten", "Món đồ", "tinhTrang", "Tốt", "hinhAnh", List.of("data:image/png;base64,abc")))
+                .when()
+                .post("/api/v1/inventory")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+    }
+
+    @Test
+    void testUpdateItem_EmptyNameRejectedWith400() {
+        var createBody = Map.of(
+                "ten", "Bàn gấp",
+                "tinhTrang", "Mới",
+                "hinhAnh", List.of("https://img.jpg")
+        );
+        String itemIdStr = given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(createBody)
+                .post("/api/v1/inventory")
+                .then().statusCode(201).extract().jsonPath().getString("id");
+
+        given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("ten", "   ", "tinhTrang", "Cũ hơn", "hinhAnh", List.of("https://img.jpg"), "version", 0))
+                .when()
+                .put("/api/v1/inventory/{id}", itemIdStr)
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+    }
+
+    @Test
+    void testInvalidUuidPath_Returns400() {
+        given()
+                .auth().oauth2(userToken)
+                .when()
+                .get("/api/v1/inventory/not-a-valid-uuid")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
     }
 }

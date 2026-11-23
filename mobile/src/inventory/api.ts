@@ -39,8 +39,9 @@ export async function updateInventoryItem(id: string, input: UpdateInventoryItem
   return normalizeInventoryItem(data);
 }
 
-export async function deleteInventoryItem(id: string): Promise<void> {
-  await api<void>(`/inventory/${id}`, {
+export async function deleteInventoryItem(id: string, version?: number): Promise<void> {
+  const query = typeof version === 'number' ? `?version=${version}` : '';
+  await api<void>(`/inventory/${id}${query}`, {
     method: 'DELETE',
   });
 }

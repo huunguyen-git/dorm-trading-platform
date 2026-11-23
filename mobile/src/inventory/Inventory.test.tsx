@@ -27,6 +27,12 @@ jest.mock('@react-navigation/native', () => {
     useRoute: () => ({
       params: mockRouteParams,
     }),
+    useFocusEffect: (cb: any) => {
+      const React = require('react');
+      React.useEffect(() => {
+        cb();
+      }, [cb]);
+    },
   };
 });
 
@@ -226,7 +232,7 @@ describe('Screen: InventoryListScreen', () => {
     );
 
     await waitFor(() => {
-      expect(mockedApi.deleteInventoryItem).toHaveBeenCalledWith('item-1');
+      expect(mockedApi.deleteInventoryItem).toHaveBeenCalledWith('item-1', 1);
     });
   });
 
@@ -237,6 +243,27 @@ describe('Screen: InventoryListScreen', () => {
     });
 
     mockedApi.deleteInventoryItem.mockRejectedValue(new Error('API 409: Item linked to listing'));
+
+    render(<InventoryListScreen />);
+
+    const deleteBtn = screen.getByTestId('delete-item-item-1');
+    fireEvent.press(deleteBtn);
+
+    expect(
+      await screen.findByText('Không thể xóa đồ vật đang gắn với tin đăng hoặc đang xử lý giao dịch.'),
+    ).toBeTruthy();
+  });
+
+  test('displays conflict error banner when API returns 409 error object without 409 in message', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation((title, message, buttons) => {
+      const confirmButton = buttons?.find((b) => b.text === 'Xóa');
+      confirmButton?.onPress?.();
+    });
+
+    const error = new Error('Đồ vật đã được liên kết với tin đăng') as any;
+    error.status = 409;
+    error.code = 'ITEM_LINKED_TO_LISTING';
+    mockedApi.deleteInventoryItem.mockRejectedValue(error);
 
     render(<InventoryListScreen />);
 
@@ -275,6 +302,27 @@ describe('Screen: InventoryDetailScreen', () => {
     expect(editBtn.props.accessibilityState.disabled).toBe(true);
     expect(deleteBtn.props.accessibilityState.disabled).toBe(true);
   });
+
+  test('deletes item passing current version and navigates back', async () => {
+    mockRouteParams.id = 'item-1';
+    mockedApi.fetchInventoryItem.mockResolvedValue(sampleItems[0]);
+    mockedApi.deleteInventoryItem.mockResolvedValue(undefined);
+
+    jest.spyOn(Alert, 'alert').mockImplementation((title, message, buttons) => {
+      const confirmButton = buttons?.find((b) => b.text === 'Xóa');
+      confirmButton?.onPress?.();
+    });
+
+    render(<InventoryDetailScreen />);
+
+    const deleteBtn = await screen.findByTestId('detail-delete-button');
+    fireEvent.press(deleteBtn);
+
+    await waitFor(() => {
+      expect(mockedApi.deleteInventoryItem).toHaveBeenCalledWith('item-1', 1);
+      expect(mockGoBack).toHaveBeenCalled();
+    });
+  });
 });
 
 describe('Screen: InventoryFormScreen (Add & Edit)', () => {
@@ -305,12 +353,12 @@ describe('Screen: InventoryFormScreen (Add & Edit)', () => {
 
     render(<InventoryFormScreen />);
 
-    // Add preset image 1
-    const addPresetBtn = screen.getByTestId('add-preset-image-button');
-    fireEvent.press(addPresetBtn);
+    // Add image 1 by URL
+    fireEvent.changeText(screen.getByTestId('input-image-url'), 'https://example.com/img1.jpg');
+    fireEvent.press(screen.getByTestId('add-image-url-button'));
     expect(await screen.findByText('Ảnh thực tế (1/5)')).toBeTruthy();
 
-    // Add image by URL
+    // Add image 2 by URL
     fireEvent.changeText(screen.getByTestId('input-image-url'), 'https://example.com/custom.jpg');
     fireEvent.press(screen.getByTestId('add-image-url-button'));
     expect(screen.getByText('Ảnh thực tế (2/5)')).toBeTruthy();

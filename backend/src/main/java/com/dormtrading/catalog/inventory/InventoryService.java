@@ -133,6 +133,23 @@ public class InventoryService {
                 rs.getInt("gia_vnd")), itemId);
     }
 
+    private void validateImageUrl(String img) {
+        if (img == null || img.isBlank()) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được để trống.");
+        }
+        String trimmed = img.strip();
+        if (trimmed.length() > 1000) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được vượt quá 1000 ký tự.");
+        }
+        String lower = trimmed.toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải bắt đầu bằng http:// hoặc https://.");
+        }
+        if (lower.startsWith("javascript:") || lower.startsWith("data:")) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không hợp lệ.");
+        }
+    }
+
     public InventoryDetailDto createItem(UUID userId, CreateInventoryItemRequest req) {
         checkUserActive(userId);
         if (req == null) {
@@ -151,6 +168,9 @@ public class InventoryService {
         if (tinhTrang == null || tinhTrang.isBlank()) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mô tả tình trạng không được để trống.");
         }
+        if (tinhTrang.length() > 2000) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Mô tả tình trạng không được vượt quá 2000 ký tự.");
+        }
 
         List<String> rawImages = req.resolveHinhAnh();
         if (rawImages == null || rawImages.isEmpty()) {
@@ -162,9 +182,7 @@ public class InventoryService {
 
         List<String> cleanImages = new ArrayList<>();
         for (String img : rawImages) {
-            if (img == null || img.isBlank()) {
-                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được để trống.");
-            }
+            validateImageUrl(img);
             cleanImages.add(img.strip());
         }
 
@@ -224,9 +242,20 @@ public class InventoryService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột phiên bản dữ liệu. Vui lòng làm mới trang.");
         }
 
+        if ((req.ten() != null && req.ten().isBlank()) || (req.name() != null && req.name().isBlank())) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Tên đồ vật không được để trống.");
+        }
+
+        if ((req.tinhTrang() != null && req.tinhTrang().isBlank()) || (req.description() != null && req.description().isBlank())) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Mô tả tình trạng không được để trống.");
+        }
+
         String tinhTrang = req.resolveTinhTrang();
         if (tinhTrang == null || tinhTrang.isBlank()) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mô tả tình trạng không được để trống.");
+        }
+        if (tinhTrang.length() > 2000) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Mô tả tình trạng không được vượt quá 2000 ký tự.");
         }
 
         List<String> rawImages = req.resolveHinhAnh();
@@ -239,9 +268,7 @@ public class InventoryService {
 
         List<String> cleanImages = new ArrayList<>();
         for (String img : rawImages) {
-            if (img == null || img.isBlank()) {
-                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được để trống.");
-            }
+            validateImageUrl(img);
             cleanImages.add(img.strip());
         }
 

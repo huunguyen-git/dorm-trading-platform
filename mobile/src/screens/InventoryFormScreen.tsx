@@ -69,11 +69,6 @@ export default function InventoryFormScreen() {
     setHinhAnh(hinhAnh.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const handleAddPresetImage = () => {
-    const presetId = Math.floor(Math.random() * 1000) + 1;
-    handleAddImage(`https://picsum.photos/seed/${presetId}/600/400`);
-  };
-
   const handleSubmit = async () => {
     if (isBlocked) {
       setError('Đồ vật này đang nằm trong tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.');
@@ -225,16 +220,6 @@ export default function InventoryFormScreen() {
                 testID="add-image-url-button"
                 disabled={busy || hinhAnh.length >= 5 || !newImageUrl.trim()}
                 onPress={() => handleAddImage()}
-              />
-            </View>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-start' }}>
-              <Action
-                secondary
-                title="+ Thêm ảnh mẫu"
-                testID="add-preset-image-button"
-                disabled={busy || hinhAnh.length >= 5}
-                onPress={handleAddPresetImage}
               />
             </View>
           </View>

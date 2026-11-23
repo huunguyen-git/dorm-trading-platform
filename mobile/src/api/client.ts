@@ -28,8 +28,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 401 && !publicCall && path !== '/auth/password/change') { await tokenStore.clear(); useSession.setState({ token: null, user: null, loading: false }); }
   if (!response.ok) {
     const raw = await response.text(); let message = `API ${response.status}: ${raw}`;
-    try { message = JSON.parse(raw).message ?? message; } catch { /* plain response */ }
-    throw new Error(message);
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(raw);
+      message = parsed.message ?? message;
+      code = parsed.code;
+    } catch { /* plain response */ }
+    const error = new Error(message) as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = code;
+    throw error;
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

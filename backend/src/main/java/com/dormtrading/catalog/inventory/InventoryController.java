@@ -1,12 +1,14 @@
 package com.dormtrading.catalog.inventory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import com.dormtrading.iam.auth.AuthFailure;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestController
 @RequestMapping("/api/v1/inventory")
@@ -66,6 +69,12 @@ public class InventoryController {
             @RequestBody(required = false) DeleteInventoryItemRequest body) {
         Long targetVersion = version != null ? version : (body != null ? body.version() : null);
         inventoryService.deleteItem(userId(jwt), id, targetVersion);
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, IllegalArgumentException.class})
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, Object> handleTypeMismatch(Exception e) {
+        return Map.of("code", "INVALID_INPUT", "message", "Định dạng mã đồ vật không hợp lệ.");
     }
 
     private UUID userId(Jwt jwt) {

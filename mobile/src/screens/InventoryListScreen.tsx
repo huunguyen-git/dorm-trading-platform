@@ -56,17 +56,17 @@ export default function InventoryListScreen() {
         {
           text: 'Xóa',
           style: 'destructive',
-          onPress: () => performDelete(item.id),
+          onPress: () => performDelete(item.id, item.version),
         },
       ],
     );
   };
 
-  const performDelete = async (id: string) => {
+  const performDelete = async (id: string, version?: number) => {
     setDeletingId(id);
     setActionError('');
     try {
-      await deleteItem(id);
+      await deleteItem(id, version);
     } catch (err: any) {
       setActionError(err?.message || 'Không thể xóa đồ vật.');
     } finally {
