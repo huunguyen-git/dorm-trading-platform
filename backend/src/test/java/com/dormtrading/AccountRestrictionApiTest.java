@@ -212,6 +212,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("code", equalTo("STATE_CONFLICT"));
 
         // Manual unlock restores HOAT_DONG and keeps reputationScore = 100
+        currentTime.set(currentTime.get().plusSeconds(1));
         var unlocked = given().auth().oauth2(modToken)
                 .header("Origin", ALLOWED_ORIGIN)
                 .contentType("application/json")
@@ -224,6 +225,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(unlocked.jsonPath().getLong("version")).isEqualTo(v0 + 2);
 
         // Permanent lock preserves appeal right by default (FR-12)
+        currentTime.set(currentTime.get().plusSeconds(1));
         var permLocked = given().auth().oauth2(modToken)
                 .header("Origin", ALLOWED_ORIGIN)
                 .contentType("application/json")
@@ -576,7 +578,11 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .post("/api/v1/auth/login");
         assertThat(loggedOutLogin.statusCode()).isEqualTo(200);
         String loggedOutToken = loggedOutLogin.jsonPath().getString("token");
-        given().auth().oauth2(loggedOutToken).post("/api/v1/auth/logout").then().statusCode(204);
+        given().header("Origin", ALLOWED_ORIGIN)
+                .auth().oauth2(loggedOutToken)
+                .post("/api/v1/auth/logout")
+                .then()
+                .statusCode(204);
 
         var modWebLogin = given()
                 .header("Origin", ALLOWED_ORIGIN)
@@ -593,7 +599,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .header("Origin", ALLOWED_ORIGIN)
                 .auth().oauth2(staleGenToken)
                 .contentType("application/json")
-                .body(Map.of("current", PASSWORD, "password", newPassword))
+                .body(Map.of("currentPassword", PASSWORD, "password", newPassword))
                 .post("/api/v1/auth/password/change");
         assertThat(rotated.statusCode()).isEqualTo(200);
         String modWebToken = rotated.jsonPath().getString("token");
@@ -637,7 +643,8 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"))
                 .body("restriction.appealable", equalTo(true));
 
-        // 3) If an unrevoked admin-web session exists while DB row is BI_KHOA, it returns 403 ACCOUNT_RESTRICTED as defense-in-depth
+        // 3) If an unrevoked admin-web session exists while DB row is BI_KHOA, it returns 403 ACCOUNT_RESTRICTED as defense-in-depth,
+        // while stale-generation tokens on that unrevoked session STILL reject with 401 before BI_KHOA check.
         db.update("UPDATE auth_session SET revoked = FALSE WHERE user_id = ? AND client = 'admin-web'", modTarget.id());
         given().auth().oauth2(modWebToken)
                 .get("/api/v1/admin/users")
@@ -646,6 +653,11 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("code", equalTo("ACCOUNT_RESTRICTED"))
                 .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"))
                 .body("restriction.appealable", equalTo(true));
+
+        given().auth().oauth2(staleGenToken)
+                .get("/api/v1/admin/users")
+                .then()
+                .statusCode(401);
 
         // 4) UC-03 3.3: Deleted (VO_HIEU_HOA) account returns 401 INVALID_CREDENTIALS on login/refresh/Bearer
         var beforeDeleteSession = loginMobileSession(deletedAccount);
