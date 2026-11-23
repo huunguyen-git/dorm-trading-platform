@@ -20,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigInteger;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -28,10 +31,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -752,6 +757,8 @@ public class UserManagementService {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("before", before);
         details.put("after", after);
+        details.put("studentCardFrontChanged", !Objects.equals(existingFront, studentCardFront));
+        details.put("studentCardBackChanged", !Objects.equals(existingBack, studentCardBack));
 
         db.update(
                 "INSERT INTO nhat_ky_kiem_duyet(" +
@@ -912,9 +919,31 @@ public class UserManagementService {
         map.put("major", major);
         map.put("cohort", cohort);
         map.put("studentStatus", studentStatus);
-        map.put("studentCardFront", studentCardFront);
-        map.put("studentCardBack", studentCardBack);
+        map.put("studentCardFront", summarizeStudentCardForAudit(studentCardFront));
+        map.put("studentCardBack", summarizeStudentCardForAudit(studentCardBack));
         return map;
+    }
+
+    private String summarizeStudentCardForAudit(String cardValue) {
+        if (cardValue == null || cardValue.isBlank()) {
+            return null;
+        }
+        String trimmed = cardValue.strip();
+        if (trimmed.regionMatches(true, 0, "data:", 0, 5)) {
+            int commaIdx = trimmed.indexOf(',');
+            String header = commaIdx > 0 ? trimmed.substring(0, commaIdx).toLowerCase(Locale.ROOT) : "data:image";
+            return header + "[sha256=" + sha256Hex(trimmed) + ",chars=" + trimmed.length() + "]";
+        }
+        return trimmed;
+    }
+
+    private String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private String serializeJson(Map<String, Object> details) {

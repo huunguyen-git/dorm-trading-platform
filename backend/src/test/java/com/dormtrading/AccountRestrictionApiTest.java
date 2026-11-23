@@ -240,12 +240,13 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(permLocked.jsonPath().getString("lockedUntil")).isNull();
         assertThat(permLocked.jsonPath().getBoolean("appealable")).isTrue();
         assertThat(permLocked.jsonPath().getInt("reputationScore")).isEqualTo(50);
+        assertThat(permLocked.jsonPath().getLong("version")).isEqualTo(v0 + 3);
 
         var logs = given().auth().oauth2(modToken)
                 .get("/api/v1/admin/users/" + member.id() + "/moderation-logs");
         assertThat(logs.statusCode()).isEqualTo(200);
         assertThat(logs.jsonPath().getList("items.actionType", String.class))
-                .contains("LOCK_PERMANENT", "UNLOCK_MANUAL", "LOCK_TEMPORARY");
+                .containsExactly("LOCK_PERMANENT", "UNLOCK_MANUAL", "LOCK_TEMPORARY");
     }
 
     @Test
@@ -378,6 +379,97 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .statusCode(200)
                 .body("accountStatus", equalTo("HOAT_DONG"))
                 .body("reputationScore", equalTo(50));
+
+        // Direct unlock on an expired temporary lock WITHOUT prior GET must reconcile UNLOCK_EXPIRED_TEMP and reject 409 ACCOUNT_NOT_LOCKED
+        var secondMember = createAccount(true, null);
+        reputationLedger.applyPenaltyScale(secondMember.id(), "TP_GIA_MAO_THONG_TIN", "Vi phạm ngưỡng 50 lần 2", "EXP2:" + secondMember.id(), moderator.id());
+        currentTime.set(currentTime.get().plus(Duration.ofDays(14).plusSeconds(1)));
+
+        given().auth().oauth2(modToken)
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("reason", "Mở khóa khi khóa tạm vừa hết hạn"))
+                .post("/api/v1/admin/users/" + secondMember.id() + "/unlock")
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("ACCOUNT_NOT_LOCKED"));
+
+        var secondAfter = given().auth().oauth2(modToken)
+                .get("/api/v1/admin/users/" + secondMember.id());
+        assertThat(secondAfter.statusCode()).isEqualTo(200);
+        assertThat(secondAfter.jsonPath().getString("accountStatus")).isEqualTo("HOAT_DONG");
+        assertThat(secondAfter.jsonPath().getInt("reputationScore")).isEqualTo(50);
+
+        var secondLogs = given().auth().oauth2(modToken)
+                .get("/api/v1/admin/users/" + secondMember.id() + "/moderation-logs");
+        assertThat(secondLogs.jsonPath().getList("items.actionType", String.class))
+                .containsExactly("UNLOCK_EXPIRED_TEMP", "THRESHOLD_LOCK_TEMPORARY");
+    }
+
+    @Test
+    @DisplayName("FR-12 & UC-13: Khóa TEMPORARY kèm penaltyCode tụt điểm <=30 tự nâng cấp KHOA_VINH_VIEN và tăng version đúng 1 lần")
+    void temporaryLockWithPenaltyCodeRespectsReputationThresholdsAndBumpsVersionOnce() {
+        var moderator = createAccount(true, "KIEM_DUYET_VIEN");
+        var escalatedTarget = createAccount(true, null);
+        var tempBandTarget = createAccount(true, null);
+        String modToken = loginAdminWeb(moderator);
+
+        // Set initial scores to 60 so -50 -> 10 (<=30) and -15 -> 45 (30 < 45 <= 50)
+        db.update("UPDATE thanh_viens SET diem_uy_tin = 60 WHERE user_id IN (?, ?)", escalatedTarget.id(), tempBandTarget.id());
+
+        long vEsc = given().auth().oauth2(modToken).get("/api/v1/admin/users/" + escalatedTarget.id()).jsonPath().getLong("version");
+        var escalatedResp = given().auth().oauth2(modToken)
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of(
+                        "lockType", "TEMPORARY",
+                        "durationDays", 7,
+                        "reason", "Giả mạo thông tin gây tụt xuống ngưỡng vĩnh viễn",
+                        "appealable", false,
+                        "penaltyCode", "TP_GIA_MAO_THONG_TIN",
+                        "expectedVersion", vEsc
+                ))
+                .post("/api/v1/admin/users/" + escalatedTarget.id() + "/lock");
+        assertThat(escalatedResp.statusCode()).isEqualTo(200);
+        assertThat(escalatedResp.jsonPath().getString("accountStatus")).isEqualTo("BI_KHOA");
+        assertThat(escalatedResp.jsonPath().getString("restrictionType")).isEqualTo("KHOA_VINH_VIEN");
+        assertThat(escalatedResp.jsonPath().getString("lockedUntil")).isNull();
+        assertThat(escalatedResp.jsonPath().getBoolean("appealable")).isTrue();
+        assertThat(escalatedResp.jsonPath().getInt("reputationScore")).isEqualTo(10);
+        assertThat(escalatedResp.jsonPath().getLong("version")).isEqualTo(vEsc + 1);
+
+        var escalatedLogs = given().auth().oauth2(modToken)
+                .get("/api/v1/admin/users/" + escalatedTarget.id() + "/moderation-logs");
+        assertThat(escalatedLogs.statusCode()).isEqualTo(200);
+        assertThat(escalatedLogs.jsonPath().getList("items.actionType", String.class))
+                .containsExactly("THRESHOLD_LOCK_PERMANENT");
+        assertThat(escalatedLogs.jsonPath().getBoolean("items[0].details.escalatedByReputationThreshold")).isTrue();
+        assertThat(escalatedLogs.jsonPath().getString("items[0].details.requestedLockType")).isEqualTo("TEMPORARY");
+
+        // Second case: TEMPORARY 7 days + penalty dropping 60 -> 45 (30 < 45 <= 50) enforces minimum 14 days & 1 version bump
+        long vTemp = given().auth().oauth2(modToken).get("/api/v1/admin/users/" + tempBandTarget.id()).jsonPath().getLong("version");
+        var tempResp = given().auth().oauth2(modToken)
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of(
+                        "lockType", "TEMPORARY",
+                        "durationDays", 7,
+                        "reason", "Bỏ hẹn tái phạm kèm khóa tạm",
+                        "penaltyCode", "TP_BO_HEN_TAI_PHAM",
+                        "expectedVersion", vTemp
+                ))
+                .post("/api/v1/admin/users/" + tempBandTarget.id() + "/lock");
+        assertThat(tempResp.statusCode()).isEqualTo(200);
+        assertThat(tempResp.jsonPath().getString("restrictionType")).isEqualTo("KHOA_TAM_THOI");
+        assertThat(tempResp.jsonPath().getInt("reputationScore")).isEqualTo(45);
+        assertThat(tempResp.jsonPath().getLong("version")).isEqualTo(vTemp + 1);
+        assertThat(Instant.parse(tempResp.jsonPath().getString("lockedUntil")))
+                .isEqualTo(currentTime.get().truncatedTo(ChronoUnit.MILLIS).plus(Duration.ofDays(14)));
+
+        var tempLogs = given().auth().oauth2(modToken)
+                .get("/api/v1/admin/users/" + tempBandTarget.id() + "/moderation-logs");
+        assertThat(tempLogs.jsonPath().getList("items.actionType", String.class))
+                .containsExactly("LOCK_TEMPORARY");
     }
 
     @Test
@@ -475,17 +567,39 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
 
         String seniorToken = loginAdminWeb(senior);
 
-        // Log in modTarget on admin-web via HTTP to capture refresh cookie + access token
+        // Log in modTarget on admin-web via HTTP to capture:
+        // (a) logged-out token, (b) pre-password-change stale-generation token, (c) current token & refresh cookie
+        var loggedOutLogin = given()
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(loggedOutLogin.statusCode()).isEqualTo(200);
+        String loggedOutToken = loggedOutLogin.jsonPath().getString("token");
+        given().auth().oauth2(loggedOutToken).post("/api/v1/auth/logout").then().statusCode(204);
+
         var modWebLogin = given()
                 .header("Origin", ALLOWED_ORIGIN)
                 .contentType("application/json")
                 .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
                 .post("/api/v1/auth/login");
         assertThat(modWebLogin.statusCode()).isEqualTo(200);
-        String modWebToken = modWebLogin.jsonPath().getString("token");
-        String refreshCookie = modWebLogin.getCookie("dorm_refresh");
+        String staleGenToken = modWebLogin.jsonPath().getString("token");
+        String staleGenCookie = modWebLogin.getCookie("dorm_refresh");
 
-        // Senior admin permanently locks modTarget
+        // Rotate session generation via password change, then keep the new active session
+        String newPassword = "three mountains over clear valley";
+        var rotated = given()
+                .header("Origin", ALLOWED_ORIGIN)
+                .auth().oauth2(staleGenToken)
+                .contentType("application/json")
+                .body(Map.of("current", PASSWORD, "password", newPassword))
+                .post("/api/v1/auth/password/change");
+        assertThat(rotated.statusCode()).isEqualTo(200);
+        String modWebToken = rotated.jsonPath().getString("token");
+        String refreshCookie = rotated.getCookie("dorm_refresh");
+
+        // Senior admin permanently locks modTarget (revokes all admin-web sessions immediately)
         given().auth().oauth2(seniorToken)
                 .header("Origin", ALLOWED_ORIGIN)
                 .contentType("application/json")
@@ -494,7 +608,37 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(200);
 
-        // 1) Admin-web Bearer token immediately gets 403 ACCOUNT_RESTRICTED with appealable=true
+        // 1) Revoked, logged-out, and stale-generation admin-web tokens/refresh MUST fail with 401 (never leak restriction details)
+        for (String invalidatedToken : new String[]{loggedOutToken, staleGenToken, modWebToken}) {
+            given().auth().oauth2(invalidatedToken)
+                    .get("/api/v1/admin/users")
+                    .then()
+                    .statusCode(401);
+        }
+
+        for (String invalidatedCookie : new String[]{staleGenCookie, refreshCookie}) {
+            given().header("Origin", ALLOWED_ORIGIN)
+                    .cookie("dorm_refresh", invalidatedCookie)
+                    .contentType("application/json")
+                    .body(Map.of("client", "admin-web"))
+                    .post("/api/v1/auth/refresh")
+                    .then()
+                    .statusCode(401);
+        }
+
+        // 2) Admin-web login returns 403 ACCOUNT_RESTRICTED with appealable=true
+        given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", newPassword, "client", "admin-web"))
+                .post("/api/v1/auth/login")
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"))
+                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"))
+                .body("restriction.appealable", equalTo(true));
+
+        // 3) If an unrevoked admin-web session exists while DB row is BI_KHOA, it returns 403 ACCOUNT_RESTRICTED as defense-in-depth
+        db.update("UPDATE auth_session SET revoked = FALSE WHERE user_id = ? AND client = 'admin-web'", modTarget.id());
         given().auth().oauth2(modWebToken)
                 .get("/api/v1/admin/users")
                 .then()
@@ -502,27 +646,6 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("code", equalTo("ACCOUNT_RESTRICTED"))
                 .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"))
                 .body("restriction.appealable", equalTo(true));
-
-        // 2) Admin-web refresh returns 403 ACCOUNT_RESTRICTED before generic revoked 401
-        given().header("Origin", ALLOWED_ORIGIN)
-                .cookie("dorm_refresh", refreshCookie)
-                .contentType("application/json")
-                .body(Map.of("client", "admin-web"))
-                .post("/api/v1/auth/refresh")
-                .then()
-                .statusCode(403)
-                .body("code", equalTo("ACCOUNT_RESTRICTED"))
-                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"));
-
-        // 3) Admin-web login returns 403 ACCOUNT_RESTRICTED
-        given().header("Origin", ALLOWED_ORIGIN)
-                .contentType("application/json")
-                .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
-                .post("/api/v1/auth/login")
-                .then()
-                .statusCode(403)
-                .body("code", equalTo("ACCOUNT_RESTRICTED"))
-                .body("restriction.lockType", equalTo("KHOA_VINH_VIEN"));
 
         // 4) UC-03 3.3: Deleted (VO_HIEU_HOA) account returns 401 INVALID_CREDENTIALS on login/refresh/Bearer
         var beforeDeleteSession = loginMobileSession(deletedAccount);

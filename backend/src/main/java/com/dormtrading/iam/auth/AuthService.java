@@ -99,6 +99,15 @@ public class AuthService {
     private AccountRestrictedFailure accountRestricted(Map<String,Object> row) {
         return new AccountRestrictedFailure(buildRestrictionPayload(row));
     }
+    private boolean isExpiredTemporaryLock(Map<String, Object> row) {
+        if (row == null) {
+            return false;
+        }
+        return "BI_KHOA".equals(row.get("trang_thai_tai_khoan"))
+                && "KHOA_TAM_THOI".equals(row.get("loai_han_che"))
+                && row.get("khoa_den_ngay") != null
+                && !instant(row, "khoa_den_ngay").isAfter(now());
+    }
     private void event(String subject, String kind) { db.update("insert into auth_event(subject,kind,happened_at) values (?,?,?)", subject, kind, at(now())); }
     private int count(String subject, String kind, long seconds) {
         return db.queryForObject("select count(*) from auth_event where subject=? and kind=? and happened_at>?", Integer.class,
@@ -168,7 +177,7 @@ public class AuthService {
         db.update("update auth_challenge set used=true where id=?",id);
         var user = account(email);
         if (purpose.equals("REGISTER")) {
-            db.update("update thanh_viens set email_verified=true,updated_at=? where user_id=?",at(now()),user.get("user_id"));
+            db.update("update thanh_viens set email_verified=true,updated_at=?,version=version+1 where user_id=?",at(now()),user.get("user_id"));
             return new Verified(null,true);
         }
         String grant = randomToken();
@@ -196,7 +205,7 @@ public class AuthService {
             throw denied();
         }
         db.update("update auth_login_guard set failures=0,blocked_until=null where email=?",email);
-        if (reputationLedger.reconcileExpiredTemporaryLock((UUID) row.get("user_id"))) {
+        if (isExpiredTemporaryLock(row) && reputationLedger.reconcileExpiredTemporaryLock((UUID) row.get("user_id"))) {
             row = account(email);
         }
         String accountStatus = row.get("trang_thai_tai_khoan").toString();
@@ -271,12 +280,13 @@ public class AuthService {
         if (Boolean.TRUE.equals(found.get("used"))) {
             db.update("update auth_session set revoked=true where id=?",found.get("id")); throw denied();
         }
-        reputationLedger.reconcileExpiredTemporaryLock((UUID) row.get("user_id"));
-        row = account(row.get("email").toString());
+        if (Boolean.TRUE.equals(found.get("revoked"))) throw denied();
+        if (isExpiredTemporaryLock(row) && reputationLedger.reconcileExpiredTemporaryLock((UUID) row.get("user_id"))) {
+            row = account(row.get("email").toString());
+        }
         String status = row.get("trang_thai_tai_khoan").toString();
         if ("VO_HIEU_HOA".equals(status)) throw denied();
         if (client.equals("admin-web") && "BI_KHOA".equals(status)) throw accountRestricted(row);
-        if (Boolean.TRUE.equals(found.get("revoked"))) throw denied();
         User user = user(row,client);
         if (client.equals("admin-web") && !user.roles().contains("MODERATOR")) throw denied();
         db.update("update auth_refresh set used=true where secret_hash=?",digest(token));
@@ -286,8 +296,10 @@ public class AuthService {
     public Optional<AccountRestrictedFailure> findActiveRestriction(Jwt jwt) {
         try {
             UUID userId = UUID.fromString(jwt.getSubject());
-            reputationLedger.reconcileExpiredTemporaryLock(userId);
             var row = one("select * from thanh_viens where user_id=?", userId);
+            if (isExpiredTemporaryLock(row) && reputationLedger.reconcileExpiredTemporaryLock(userId)) {
+                row = one("select * from thanh_viens where user_id=?", userId);
+            }
             if (row != null && "BI_KHOA".equals(row.get("trang_thai_tai_khoan").toString())) {
                 return Optional.of(accountRestricted(row));
             }
@@ -302,19 +314,19 @@ public class AuthService {
             UUID uid = UUID.fromString(jwt.getSubject());
             String client = jwt.getClaimAsString("client");
             var session = one("select * from auth_session where id=? and user_id=?", sid, uid);
-            if (session == null || !instant(session,"expires_at").isAfter(now()) || !session.get("client").equals(client)) {
-                throw denied();
-            }
-            reputationLedger.reconcileExpiredTemporaryLock(uid);
-            var row = one("select * from thanh_viens where user_id=?", uid);
-            if (row == null) throw denied();
-            String status = row.get("trang_thai_tai_khoan").toString();
-            if ("VO_HIEU_HOA".equals(status)) throw denied();
-            if ("admin-web".equals(client) && "BI_KHOA".equals(status)) throw accountRestricted(row);
-            if (Boolean.TRUE.equals(session.get("revoked")) ||
+            if (session == null || !instant(session,"expires_at").isAfter(now()) || !session.get("client").equals(client) ||
+                    Boolean.TRUE.equals(session.get("revoked")) ||
                     ((Number)session.get("generation")).intValue() != ((Number)jwt.getClaims().get("generation")).intValue()) {
                 throw denied();
             }
+            var row = one("select * from thanh_viens where user_id=?", uid);
+            if (row == null) throw denied();
+            if (isExpiredTemporaryLock(row) && reputationLedger.reconcileExpiredTemporaryLock(uid)) {
+                row = one("select * from thanh_viens where user_id=?", uid);
+            }
+            String status = row.get("trang_thai_tai_khoan").toString();
+            if ("VO_HIEU_HOA".equals(status)) throw denied();
+            if ("admin-web".equals(client) && "BI_KHOA".equals(status)) throw accountRestricted(row);
             return row;
         } catch (IllegalArgumentException | NullPointerException e) { throw denied(); }
     }
@@ -365,7 +377,7 @@ public class AuthService {
         var initial = requireSession(jwt); lock(initial.get("email").toString());
         var row = requireSession(jwt);
         if ("BI_KHOA".equals(row.get("trang_thai_tai_khoan").toString())) throw accountRestricted(row);
-        db.update("update thanh_viens set ho_ten=?,updated_at=? where user_id=?",required(name,150),at(now()),row.get("user_id"));
+        db.update("update thanh_viens set ho_ten=?,updated_at=?,version=version+1 where user_id=?",required(name,150),at(now()),row.get("user_id"));
         return user(account(row.get("email").toString()),jwt.getClaimAsString("client"));
     }
     private String randomToken() { byte[] bytes = new byte[32]; random.nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }

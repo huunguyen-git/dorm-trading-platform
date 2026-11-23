@@ -357,5 +357,39 @@ class UserManagementApiTest extends BaseIntegrationTest {
         assertThat(logsResp.jsonPath().getString("items[0].details.after.studentStatus")).isEqualTo("DA_TOT_NGHIEP");
         assertThat(logsResp.jsonPath().getString("items[0].details.after.studentCardFront"))
                 .isEqualTo("https://cdn.dorm.edu.vn/cards/front-2252.jpg");
+        assertThat(logsResp.jsonPath().getString("items[0].details.after.studentCardBack"))
+                .startsWith("data:image/png;base64[sha256=");
+        assertThat(logsResp.jsonPath().getString("items[0].details.after.studentCardBack"))
+                .doesNotContain("iVBORw0KGgo=");
+        assertThat(logsResp.jsonPath().getBoolean("items[0].details.studentCardFrontChanged")).isTrue();
+        assertThat(logsResp.jsonPath().getBoolean("items[0].details.studentCardBackChanged")).isTrue();
+
+        // Detail endpoint still serves the full student card payload for moderator inspection
+        assertThat(given().auth().oauth2(modToken)
+                .get("/api/v1/admin/users/" + studentA.id())
+                .jsonPath().getString("studentCardBack"))
+                .isEqualTo("data:image/png;base64,iVBORw0KGgo=");
+
+        // 11) Mobile profile update bumps version so stale admin PATCH fails with 409 STATE_CONFLICT
+        long versionBeforeMobileEdit = updated.jsonPath().getLong("version");
+        given().auth().oauth2(studentAMobileToken)
+                .contentType("application/json")
+                .body(Map.of("name", "Nguyễn Văn Tự Sửa Mobile"))
+                .patch("/api/v1/auth/profile")
+                .then()
+                .statusCode(200)
+                .body("name", equalTo("Nguyễn Văn Tự Sửa Mobile"));
+
+        Map<String, Object> staleAfterMobilePatch = new LinkedHashMap<>(validPatch);
+        staleAfterMobilePatch.put("fullName", "Ghi đè nhầm");
+        staleAfterMobilePatch.put("expectedVersion", versionBeforeMobileEdit);
+        given().auth().oauth2(modToken)
+                .header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(staleAfterMobilePatch)
+                .patch("/api/v1/admin/users/" + studentA.id())
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("STATE_CONFLICT"));
     }
 }
