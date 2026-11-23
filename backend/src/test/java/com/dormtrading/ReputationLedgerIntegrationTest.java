@@ -94,17 +94,23 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         assertThat(first.scoreBefore()).isEqualTo(0);
         assertThat(first.scoreAfter()).isEqualTo(100);
         assertThat(first.delta()).isEqualTo(100);
-        assertThat(((Number) fetchUser(newUserId).get("diem_uy_tin")).intValue()).isEqualTo(100);
+        var afterInitRow = fetchUser(newUserId);
+        assertThat(((Number) afterInitRow.get("diem_uy_tin")).intValue()).isEqualTo(100);
+        assertThat(((Number) afterInitRow.get("version")).longValue()).isEqualTo(1L);
 
         // Deduct 15 points via active penalty scale, then call initializeActivationScore again
         ledger.applyPenaltyScale(newUserId, "TP_BO_HEN_TAI_PHAM", "Bỏ hẹn lần 2", "PEN:" + newUserId, actorId);
-        assertThat(((Number) fetchUser(newUserId).get("diem_uy_tin")).intValue()).isEqualTo(85);
+        var afterPenaltyRow = fetchUser(newUserId);
+        assertThat(((Number) afterPenaltyRow.get("diem_uy_tin")).intValue()).isEqualTo(85);
+        assertThat(((Number) afterPenaltyRow.get("version")).longValue()).isEqualTo(2L);
 
         var replay = ledger.initializeActivationScore(newUserId, actorId);
         assertThat(replay.idempotentReplay()).isTrue();
         assertThat(replay.id()).isEqualTo(first.id());
-        // Must NOT overwrite 85 back to 100
-        assertThat(((Number) fetchUser(newUserId).get("diem_uy_tin")).intValue()).isEqualTo(85);
+        // Must NOT overwrite 85 back to 100 or bump version
+        var afterReplayRow = fetchUser(newUserId);
+        assertThat(((Number) afterReplayRow.get("diem_uy_tin")).intValue()).isEqualTo(85);
+        assertThat(((Number) afterReplayRow.get("version")).longValue()).isEqualTo(2L);
 
         Integer activationCount = db.queryForObject(
                 "SELECT count(*) FROM lich_su_diem_uy_tin WHERE user_id = ? AND loai_bien_dong = 'KHOI_TAO_KICH_HOAT'",
@@ -139,6 +145,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         var row50 = fetchUser(u50);
         assertThat(row50.get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
         assertThat(row50.get("loai_han_che")).isEqualTo("KHOA_TAM_THOI");
+        assertThat(((Number) row50.get("version")).longValue()).isEqualTo(1L);
         assertThat(row50.get("cho_phep_khieu_nai")).isEqualTo(false);
         assertThat(((Number) row50.get("diem_da_khoa_tam")).intValue()).isEqualTo(50);
         assertThat(((Timestamp) row50.get("khoa_den_ngay")).toInstant())
@@ -261,5 +268,52 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         assertThat(permanent.get("khoa_den_ngay")).isNull();
         assertThat(permanent.get("cho_phep_khieu_nai")).isEqualTo(true);
         assertThat(((Number) permanent.get("diem_uy_tin")).intValue()).isEqualTo(27);
+    }
+
+    @Test
+    @DisplayName("FR-12 bảo vệ VO_HIEU_HOA: Trừ điểm muộn rơi ngưỡng <=50 và <=30 vẫn giữ nguyên VO_HIEU_HOA, không tự khóa hoặc tự mở lại")
+    void deletedAccountNeverTransitionsToLockedOrActiveOnLatePenaltyDeductions() {
+        UUID deletedUser = createActiveMember(60);
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'VO_HIEU_HOA' WHERE user_id = ?", deletedUser);
+
+        // 1) Late deduction into temporary-lock band (60 - 15 = 45)
+        var tempBandEntry = ledger.applyPenaltyScale(
+                deletedUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm muộn sau khi xóa (45)", "DEL-45:" + deletedUser, null
+        );
+        assertThat(tempBandEntry.scoreAfter()).isEqualTo(45);
+        assertThat(tempBandEntry.triggeredLockType()).isNull();
+
+        var afterFirst = fetchUser(deletedUser);
+        assertThat(afterFirst.get("trang_thai_tai_khoan")).isEqualTo("VO_HIEU_HOA");
+        assertThat(afterFirst.get("loai_han_che")).isNull();
+        assertThat(afterFirst.get("khoa_den_ngay")).isNull();
+        assertThat(afterFirst.get("cho_phep_khieu_nai")).isEqualTo(false);
+        assertThat(((Number) afterFirst.get("version")).longValue()).isEqualTo(1L);
+
+        // Even after 14+ days, reconcileExpiredTemporaryLock must NOT resurrect VO_HIEU_HOA to HOAT_DONG
+        currentTime.set(currentTime.get().plus(Duration.ofDays(15)));
+        assertThat(ledger.reconcileExpiredTemporaryLock(deletedUser)).isFalse();
+        assertThat(fetchUser(deletedUser).get("trang_thai_tai_khoan")).isEqualTo("VO_HIEU_HOA");
+
+        // 2) Late deduction into permanent-lock band (45 - 30 = 15 <= 30)
+        var permBandEntry = ledger.applyPenaltyScale(
+                deletedUser, "TP_KHONG_BAN_GIAO", "Trừ điểm muộn sau khi xóa (15)", "DEL-15:" + deletedUser, null
+        );
+        assertThat(permBandEntry.scoreAfter()).isEqualTo(15);
+        assertThat(permBandEntry.triggeredLockType()).isNull();
+
+        var afterSecond = fetchUser(deletedUser);
+        assertThat(afterSecond.get("trang_thai_tai_khoan")).isEqualTo("VO_HIEU_HOA");
+        assertThat(afterSecond.get("loai_han_che")).isNull();
+        assertThat(afterSecond.get("khoa_den_ngay")).isNull();
+        assertThat(afterSecond.get("cho_phep_khieu_nai")).isEqualTo(false);
+        assertThat(((Number) afterSecond.get("version")).longValue()).isEqualTo(2L);
+
+        Integer auditCount = db.queryForObject(
+                "SELECT count(*) FROM nhat_ky_kiem_duyet WHERE target_user_id = ?",
+                Integer.class,
+                deletedUser
+        );
+        assertThat(auditCount).isZero();
     }
 }

@@ -82,6 +82,19 @@ public class ReputationLedgerService {
         return value.strip();
     }
 
+    private boolean isExpiredTemporaryLock(Map<String, Object> row, Instant currentTime) {
+        if (row == null) {
+            return false;
+        }
+        String status = (String) row.get("trang_thai_tai_khoan");
+        String lockType = (String) row.get("loai_han_che");
+        Instant lockedUntil = toInstant(row.get("khoa_den_ngay"));
+        return "BI_KHOA".equals(status)
+                && "KHOA_TAM_THOI".equals(lockType)
+                && lockedUntil != null
+                && !lockedUntil.isAfter(currentTime);
+    }
+
     /**
      * Reconciles an expired temporary lock lazily using injected Clock and row-level lock.
      * Per FR-12: after 14 days, unlocks the account while keeping the existing reputation score
@@ -89,6 +102,14 @@ public class ReputationLedgerService {
      */
     public boolean reconcileExpiredTemporaryLock(UUID userId) {
         if (userId == null) {
+            return false;
+        }
+        // Fast lock-free check avoids serializing concurrent requests via FOR UPDATE when not expired.
+        var quickCheck = one(
+                "SELECT trang_thai_tai_khoan, loai_han_che, khoa_den_ngay FROM thanh_viens WHERE user_id = ?",
+                userId
+        );
+        if (!isExpiredTemporaryLock(quickCheck, now())) {
             return false;
         }
         var userRow = one("SELECT * FROM thanh_viens WHERE user_id = ? FOR UPDATE", userId);
@@ -99,17 +120,12 @@ public class ReputationLedgerService {
     }
 
     private boolean reconcileLockedRow(Map<String, Object> userRow) {
-        String status = (String) userRow.get("trang_thai_tai_khoan");
-        String lockType = (String) userRow.get("loai_han_che");
-        Instant lockedUntil = toInstant(userRow.get("khoa_den_ngay"));
         Instant currentTime = now();
-
-        if (!"BI_KHOA".equals(status)
-                || !"KHOA_TAM_THOI".equals(lockType)
-                || lockedUntil == null
-                || lockedUntil.isAfter(currentTime)) {
+        if (!isExpiredTemporaryLock(userRow, currentTime)) {
             return false;
         }
+        String status = (String) userRow.get("trang_thai_tai_khoan");
+        Instant lockedUntil = toInstant(userRow.get("khoa_den_ngay"));
 
         UUID userId = (UUID) userRow.get("user_id");
         boolean fullyVerified = Boolean.TRUE.equals(userRow.get("email_verified"))
@@ -181,7 +197,7 @@ public class ReputationLedgerService {
         UUID entryId = UUID.randomUUID();
 
         db.update(
-                "UPDATE thanh_viens SET diem_uy_tin = ?, updated_at = ? WHERE user_id = ?",
+                "UPDATE thanh_viens SET diem_uy_tin = ?, updated_at = ?, version = version + 1 WHERE user_id = ?",
                 scoreAfter,
                 at(createdAt),
                 userId
@@ -235,6 +251,32 @@ public class ReputationLedgerService {
             String idempotencyKey,
             UUID actorId
     ) {
+        return applyPenaltyScaleInternal(userId, penaltyCode, reason, idempotencyKey, actorId, true, true);
+    }
+
+    /**
+     * Applies an active penalty scale inside an existing manual lock flow so AccountRestrictionService
+     * performs the single version bump and writes one unified moderation audit entry.
+     */
+    public ReputationLedgerEntry applyPenaltyScaleForManualLock(
+            UUID userId,
+            String penaltyCode,
+            String reason,
+            String idempotencyKey,
+            UUID actorId
+    ) {
+        return applyPenaltyScaleInternal(userId, penaltyCode, reason, idempotencyKey, actorId, false, false);
+    }
+
+    private ReputationLedgerEntry applyPenaltyScaleInternal(
+            UUID userId,
+            String penaltyCode,
+            String reason,
+            String idempotencyKey,
+            UUID actorId,
+            boolean evaluateThresholdLock,
+            boolean incrementVersion
+    ) {
         String normalizedCode = requiredText(penaltyCode, 50, "Mã thang phạt không hợp lệ.");
         var scaleRow = one(
                 "SELECT ma_thang_phat, ten, diem_tru, trang_thai FROM thang_phats WHERE ma_thang_phat = ?",
@@ -248,7 +290,7 @@ public class ReputationLedgerService {
                 ? scaleRow.get("ten").toString()
                 : reason.strip();
 
-        return recordScoreChange(
+        return recordScoreChangeInternal(
                 userId,
                 CHANGE_PENALTY_SCALE,
                 -penaltyPoints,
@@ -256,7 +298,9 @@ public class ReputationLedgerService {
                 "PENALTY_SCALE",
                 normalizedCode,
                 idempotencyKey,
-                actorId
+                actorId,
+                evaluateThresholdLock,
+                incrementVersion
         );
     }
 
@@ -273,6 +317,32 @@ public class ReputationLedgerService {
             String referenceId,
             String idempotencyKey,
             UUID actorId
+    ) {
+        return recordScoreChangeInternal(
+                userId,
+                changeType,
+                requestedDelta,
+                reason,
+                referenceSource,
+                referenceId,
+                idempotencyKey,
+                actorId,
+                true,
+                true
+        );
+    }
+
+    private ReputationLedgerEntry recordScoreChangeInternal(
+            UUID userId,
+            String changeType,
+            int requestedDelta,
+            String reason,
+            String referenceSource,
+            String referenceId,
+            String idempotencyKey,
+            UUID actorId,
+            boolean evaluateThresholdLock,
+            boolean incrementVersion
     ) {
         if (userId == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Thiếu định danh người dùng.");
@@ -309,12 +379,76 @@ public class ReputationLedgerService {
         Instant currentTime = now();
         UUID entryId = UUID.randomUUID();
 
-        db.update(
-                "UPDATE thanh_viens SET diem_uy_tin = ?, updated_at = ? WHERE user_id = ?",
-                scoreAfter,
-                at(currentTime),
-                userId
-        );
+        String previousStatus = (String) userRow.get("trang_thai_tai_khoan");
+        String existingLockType = (String) userRow.get("loai_han_che");
+        boolean canApplyThresholdLock = evaluateThresholdLock
+                && requestedDelta < 0
+                && !"VO_HIEU_HOA".equals(previousStatus);
+
+        String triggeredLockType = null;
+        Instant triggeredLockedUntil = null;
+        String lockReason = null;
+        String auditAction = null;
+
+        if (canApplyThresholdLock && scoreAfter <= PERMANENT_LOCK_MAX_SCORE) {
+            triggeredLockType = "KHOA_VINH_VIEN";
+            lockReason = "Khóa vĩnh viễn tự động theo ngưỡng điểm uy tín (điểm = " + scoreAfter + " ≤ 30): " + cleanReason;
+            auditAction = "THRESHOLD_LOCK_PERMANENT";
+        } else if (canApplyThresholdLock
+                && scoreAfter <= TEMPORARY_LOCK_MAX_SCORE
+                && !("BI_KHOA".equals(previousStatus) && "KHOA_VINH_VIEN".equals(existingLockType))) {
+            triggeredLockType = "KHOA_TAM_THOI";
+            triggeredLockedUntil = currentTime.plus(TEMPORARY_LOCK_DURATION);
+            lockReason = "Khóa tạm thời 14 ngày tự động theo ngưỡng điểm uy tín (30 < điểm = " + scoreAfter + " ≤ 50): " + cleanReason;
+            auditAction = "THRESHOLD_LOCK_TEMPORARY";
+        }
+
+        String versionClause = incrementVersion ? ", version = version + 1" : "";
+        if ("KHOA_VINH_VIEN".equals(triggeredLockType)) {
+            db.update(
+                    "UPDATE thanh_viens " +
+                    "SET diem_uy_tin = ?, " +
+                    "    trang_thai_tai_khoan = 'BI_KHOA', " +
+                    "    loai_han_che = 'KHOA_VINH_VIEN', " +
+                    "    khoa_den_ngay = NULL, " +
+                    "    cho_phep_khieu_nai = TRUE, " +
+                    "    ly_do_han_che = ?, " +
+                    "    updated_at = ?" +
+                    versionClause + " " +
+                    "WHERE user_id = ?",
+                    scoreAfter,
+                    lockReason,
+                    at(currentTime),
+                    userId
+            );
+        } else if ("KHOA_TAM_THOI".equals(triggeredLockType)) {
+            db.update(
+                    "UPDATE thanh_viens " +
+                    "SET diem_uy_tin = ?, " +
+                    "    trang_thai_tai_khoan = 'BI_KHOA', " +
+                    "    loai_han_che = 'KHOA_TAM_THOI', " +
+                    "    khoa_den_ngay = ?, " +
+                    "    cho_phep_khieu_nai = FALSE, " +
+                    "    diem_da_khoa_tam = ?, " +
+                    "    ly_do_han_che = ?, " +
+                    "    updated_at = ?" +
+                    versionClause + " " +
+                    "WHERE user_id = ?",
+                    scoreAfter,
+                    at(triggeredLockedUntil),
+                    scoreAfter,
+                    lockReason,
+                    at(currentTime),
+                    userId
+            );
+        } else {
+            db.update(
+                    "UPDATE thanh_viens SET diem_uy_tin = ?, updated_at = ?" + versionClause + " WHERE user_id = ?",
+                    scoreAfter,
+                    at(currentTime),
+                    userId
+            );
+        }
 
         db.update(
                 "INSERT INTO lich_su_diem_uy_tin(" +
@@ -335,102 +469,36 @@ public class ReputationLedgerService {
                 at(currentTime)
         );
 
-        String triggeredLockType = null;
-        Instant triggeredLockedUntil = null;
+        if (triggeredLockType != null) {
+            db.update("UPDATE auth_session SET revoked = TRUE WHERE user_id = ? AND client = 'admin-web'", userId);
 
-        if (requestedDelta < 0) {
-            String previousStatus = (String) userRow.get("trang_thai_tai_khoan");
-            String existingLockType = (String) userRow.get("loai_han_che");
-
-            if (scoreAfter <= PERMANENT_LOCK_MAX_SCORE) {
-                triggeredLockType = "KHOA_VINH_VIEN";
-                String lockReason = "Khóa vĩnh viễn tự động theo ngưỡng điểm uy tín (điểm = " + scoreAfter + " ≤ 30): " + cleanReason;
-                db.update(
-                        "UPDATE thanh_viens " +
-                        "SET trang_thai_tai_khoan = 'BI_KHOA', " +
-                        "    loai_han_che = 'KHOA_VINH_VIEN', " +
-                        "    khoa_den_ngay = NULL, " +
-                        "    cho_phep_khieu_nai = TRUE, " +
-                        "    ly_do_han_che = ?, " +
-                        "    updated_at = ?, " +
-                        "    version = version + 1 " +
-                        "WHERE user_id = ?",
-                        lockReason,
-                        at(currentTime),
-                        userId
-                );
-                db.update("UPDATE auth_session SET revoked = TRUE WHERE user_id = ? AND client = 'admin-web'", userId);
-
-                Map<String, Object> details = new LinkedHashMap<>();
-                details.put("scoreBefore", scoreBefore);
-                details.put("scoreAfter", scoreAfter);
-                details.put("ledgerEntryId", entryId.toString());
-                details.put("referenceSource", cleanSource);
-                if (cleanRefId != null) {
-                    details.put("referenceId", cleanRefId);
-                }
-
-                db.update(
-                        "INSERT INTO nhat_ky_kiem_duyet(" +
-                        "id, target_user_id, actor_user_id, action_type, reason, previous_status, new_status, " +
-                        "lock_type, locked_until, appealable, details, created_at) " +
-                        "VALUES (?, ?, ?, 'THRESHOLD_LOCK_PERMANENT', ?, ?, 'BI_KHOA', 'KHOA_VINH_VIEN', NULL, TRUE, CAST(? AS jsonb), ?)",
-                        UUID.randomUUID(),
-                        userId,
-                        actorId,
-                        lockReason,
-                        previousStatus,
-                        toJson(details),
-                        at(currentTime)
-                );
-            } else if (scoreAfter <= TEMPORARY_LOCK_MAX_SCORE
-                    && !("BI_KHOA".equals(previousStatus) && "KHOA_VINH_VIEN".equals(existingLockType))) {
-                triggeredLockType = "KHOA_TAM_THOI";
-                triggeredLockedUntil = currentTime.plus(TEMPORARY_LOCK_DURATION);
-                String lockReason = "Khóa tạm thời 14 ngày tự động theo ngưỡng điểm uy tín (30 < điểm = " + scoreAfter + " ≤ 50): " + cleanReason;
-                db.update(
-                        "UPDATE thanh_viens " +
-                        "SET trang_thai_tai_khoan = 'BI_KHOA', " +
-                        "    loai_han_che = 'KHOA_TAM_THOI', " +
-                        "    khoa_den_ngay = ?, " +
-                        "    cho_phep_khieu_nai = FALSE, " +
-                        "    diem_da_khoa_tam = ?, " +
-                        "    ly_do_han_che = ?, " +
-                        "    updated_at = ?, " +
-                        "    version = version + 1 " +
-                        "WHERE user_id = ?",
-                        at(triggeredLockedUntil),
-                        scoreAfter,
-                        lockReason,
-                        at(currentTime),
-                        userId
-                );
-                db.update("UPDATE auth_session SET revoked = TRUE WHERE user_id = ? AND client = 'admin-web'", userId);
-
-                Map<String, Object> details = new LinkedHashMap<>();
-                details.put("scoreBefore", scoreBefore);
-                details.put("scoreAfter", scoreAfter);
-                details.put("ledgerEntryId", entryId.toString());
-                details.put("referenceSource", cleanSource);
-                if (cleanRefId != null) {
-                    details.put("referenceId", cleanRefId);
-                }
-
-                db.update(
-                        "INSERT INTO nhat_ky_kiem_duyet(" +
-                        "id, target_user_id, actor_user_id, action_type, reason, previous_status, new_status, " +
-                        "lock_type, locked_until, appealable, details, created_at) " +
-                        "VALUES (?, ?, ?, 'THRESHOLD_LOCK_TEMPORARY', ?, ?, 'BI_KHOA', 'KHOA_TAM_THOI', ?, FALSE, CAST(? AS jsonb), ?)",
-                        UUID.randomUUID(),
-                        userId,
-                        actorId,
-                        lockReason,
-                        previousStatus,
-                        at(triggeredLockedUntil),
-                        toJson(details),
-                        at(currentTime)
-                );
+            boolean appealable = "KHOA_VINH_VIEN".equals(triggeredLockType);
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("scoreBefore", scoreBefore);
+            details.put("scoreAfter", scoreAfter);
+            details.put("ledgerEntryId", entryId.toString());
+            details.put("referenceSource", cleanSource);
+            if (cleanRefId != null) {
+                details.put("referenceId", cleanRefId);
             }
+
+            db.update(
+                    "INSERT INTO nhat_ky_kiem_duyet(" +
+                    "id, target_user_id, actor_user_id, action_type, reason, previous_status, new_status, " +
+                    "lock_type, locked_until, appealable, details, created_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, 'BI_KHOA', ?, ?, ?, CAST(? AS jsonb), ?)",
+                    UUID.randomUUID(),
+                    userId,
+                    actorId,
+                    auditAction,
+                    lockReason,
+                    previousStatus,
+                    triggeredLockType,
+                    at(triggeredLockedUntil),
+                    appealable,
+                    toJson(details),
+                    at(currentTime)
+            );
         }
 
         return new ReputationLedgerEntry(

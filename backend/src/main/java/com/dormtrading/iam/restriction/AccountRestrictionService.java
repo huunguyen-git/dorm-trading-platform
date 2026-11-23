@@ -3,6 +3,7 @@ package com.dormtrading.iam.restriction;
 import com.dormtrading.iam.auth.AuthFailure;
 import com.dormtrading.iam.management.UserManagementDtos.UserDetail;
 import com.dormtrading.iam.management.UserManagementService;
+import com.dormtrading.review.reputation.ReputationLedgerEntry;
 import com.dormtrading.review.reputation.ReputationLedgerService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -178,10 +179,13 @@ public class AccountRestrictionService {
         }
         String previousStatus = (String) lockedRow.get("trang_thai_tai_khoan");
 
+        ReputationLedgerEntry penaltyEntry = null;
+        String normalizedPenaltyCode = null;
         if (request.penaltyCode() != null && !request.penaltyCode().isBlank()) {
-            reputationLedger.applyPenaltyScale(
+            normalizedPenaltyCode = request.penaltyCode().strip();
+            penaltyEntry = reputationLedger.applyPenaltyScaleForManualLock(
                     targetUserId,
-                    request.penaltyCode().strip(),
+                    normalizedPenaltyCode,
                     reason,
                     "MOD_LOCK:" + UUID.randomUUID(),
                     actorId
@@ -190,25 +194,62 @@ public class AccountRestrictionService {
         }
 
         int currentScore = ((Number) lockedRow.get("diem_uy_tin")).intValue();
+        boolean penaltyTriggeredPermanent = penaltyEntry != null
+                && currentScore <= ReputationLedgerService.PERMANENT_LOCK_MAX_SCORE;
+        boolean penaltyTriggeredTemp = penaltyEntry != null
+                && currentScore > ReputationLedgerService.PERMANENT_LOCK_MAX_SCORE
+                && currentScore <= ReputationLedgerService.TEMPORARY_LOCK_MAX_SCORE;
+
         String dbLockType;
         Instant lockedUntil;
         boolean appealable;
         String auditAction;
+        String effectiveReason = reason;
         Integer tempLockedScore = (Integer) lockedRow.get("diem_da_khoa_tam");
 
-        if ("TEMPORARY".equals(lockTypeInput)) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reputationScore", currentScore);
+        if (normalizedPenaltyCode != null) {
+            details.put("penaltyCode", normalizedPenaltyCode);
+        }
+        if (penaltyEntry != null) {
+            details.put("ledgerEntryId", penaltyEntry.id().toString());
+        }
+
+        if ("PERMANENT".equals(lockTypeInput)) {
+            dbLockType = "KHOA_VINH_VIEN";
+            lockedUntil = null;
+            appealable = penaltyTriggeredPermanent
+                    ? true
+                    : (request.appealable() == null ? true : request.appealable());
+            auditAction = "LOCK_PERMANENT";
+        } else if (penaltyTriggeredPermanent) {
+            // FR-12 escalation: NEVER allow a manual TEMPORARY request to downgrade score <= 30 permanent lock.
+            dbLockType = "KHOA_VINH_VIEN";
+            lockedUntil = null;
+            appealable = true;
+            auditAction = "THRESHOLD_LOCK_PERMANENT";
+            effectiveReason = "Khóa vĩnh viễn theo ngưỡng điểm uy tín (điểm = " + currentScore + " ≤ 30): " + reason;
+            details.put("requestedLockType", "TEMPORARY");
+            details.put("requestedDurationDays", durationDays);
+            details.put("escalatedByReputationThreshold", true);
+        } else {
+            int minimumThresholdDays = (int) ReputationLedgerService.TEMPORARY_LOCK_DURATION.toDays();
+            int effectiveDurationDays = penaltyTriggeredTemp
+                    ? Math.max(durationDays, minimumThresholdDays)
+                    : durationDays;
             dbLockType = "KHOA_TAM_THOI";
-            lockedUntil = currentTime.plus(Duration.ofDays(durationDays));
+            lockedUntil = currentTime.plus(Duration.ofDays(effectiveDurationDays));
             appealable = Boolean.TRUE.equals(request.appealable());
             auditAction = "LOCK_TEMPORARY";
             if (currentScore <= ReputationLedgerService.TEMPORARY_LOCK_MAX_SCORE) {
                 tempLockedScore = Integer.valueOf(currentScore);
             }
-        } else {
-            dbLockType = "KHOA_VINH_VIEN";
-            lockedUntil = null;
-            appealable = request.appealable() == null ? true : request.appealable();
-            auditAction = "LOCK_PERMANENT";
+            details.put("durationDays", effectiveDurationDays);
+            if (effectiveDurationDays != durationDays) {
+                details.put("requestedDurationDays", durationDays);
+                details.put("enforcedMinimumThresholdDays", true);
+            }
         }
 
         db.update(
@@ -224,7 +265,7 @@ public class AccountRestrictionService {
                 "WHERE user_id = ?",
                 dbLockType,
                 at(lockedUntil),
-                reason,
+                effectiveReason,
                 appealable,
                 tempLockedScore,
                 at(currentTime),
@@ -233,15 +274,6 @@ public class AccountRestrictionService {
 
         // Revoke admin-web sessions immediately; mobile sessions lose ROLE_MEMBER on next DB check (UC-03 3.2)
         db.update("UPDATE auth_session SET revoked = TRUE WHERE user_id = ? AND client = 'admin-web'", targetUserId);
-
-        Map<String, Object> details = new LinkedHashMap<>();
-        details.put("reputationScore", currentScore);
-        if ("TEMPORARY".equals(lockTypeInput)) {
-            details.put("durationDays", durationDays);
-        }
-        if (request.penaltyCode() != null && !request.penaltyCode().isBlank()) {
-            details.put("penaltyCode", request.penaltyCode().strip());
-        }
 
         db.update(
                 "INSERT INTO nhat_ky_kiem_duyet(" +
@@ -252,7 +284,7 @@ public class AccountRestrictionService {
                 targetUserId,
                 actorId,
                 auditAction,
-                reason,
+                effectiveReason,
                 previousStatus,
                 dbLockType,
                 at(lockedUntil),
@@ -299,6 +331,11 @@ public class AccountRestrictionService {
                     "STATE_CONFLICT",
                     "Trạng thái tài khoản vừa bị thay đổi đồng thời. Vui lòng tải lại dữ liệu mới nhất."
             );
+        }
+
+        if (reputationLedger.reconcileExpiredTemporaryLock(targetUserId)) {
+            lockedRow = one("SELECT * FROM thanh_viens WHERE user_id = ?", targetUserId);
+            currentStatus = (String) lockedRow.get("trang_thai_tai_khoan");
         }
 
         if (!"BI_KHOA".equals(currentStatus)) {
