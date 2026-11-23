@@ -78,9 +78,8 @@ public class AuthService {
     private Map<String,Object> account(String email) { return one("select * from thanh_viens where lower(email)=?", email); }
     private void event(String subject, String kind) { db.update("insert into auth_event(subject,kind,happened_at) values (?,?,?)", subject, kind, at(now())); }
     private int count(String subject, String kind, long seconds) {
-        Integer res = db.queryForObject("select count(*) from auth_event where subject=? and kind=? and happened_at>?", Integer.class,
+        return db.queryForObject("select count(*) from auth_event where subject=? and kind=? and happened_at>?", Integer.class,
                 subject, kind, at(now().minusSeconds(seconds)));
-        return res != null ? res : 0;
     }
     private void ipLimit(String ip) {
         String subject = "ip:" + ip;
@@ -256,8 +255,7 @@ public class AuthService {
         db.update("update auth_refresh set used=true where session_id=?",sid);
         db.update("update auth_session set generation=generation+1 where id=?",sid);
         invalidateRecovery(row.get("user_id"),email);
-        Integer gen = db.queryForObject("select generation from auth_session where id=?",Integer.class,sid);
-        int generation = gen != null ? gen : 0;
+        int generation = db.queryForObject("select generation from auth_session where id=?",Integer.class,sid);
         return tokens(sid,generation,user(row,jwt.getClaimAsString("client")),jwt.getClaimAsString("client"));
     }
     public void reset(String grant, String password) {

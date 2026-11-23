@@ -1,5 +1,6 @@
 package com.dormtrading.catalog.inventory;
 
+import java.net.URI;
 import java.sql.Array;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -141,12 +142,16 @@ public class InventoryService {
         if (trimmed.length() > 1000) {
             throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được vượt quá 1000 ký tự.");
         }
-        String lower = trimmed.toLowerCase();
-        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải bắt đầu bằng http:// hoặc https://.");
-        }
-        if (lower.startsWith("javascript:") || lower.startsWith("data:")) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không hợp lệ.");
+        try {
+            URI uri = URI.create(trimmed);
+            String scheme = uri.getScheme();
+            String authority = uri.getRawAuthority();
+            if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+                    || authority == null || authority.isBlank()) {
+                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
         }
     }
 

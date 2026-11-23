@@ -90,7 +90,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
     } catch (err: any) {
       set({ items: prevItems });
       const rawMessage = err?.message || '';
-      const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || rawMessage.includes('409');
+      const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || err?.code === 'ITEM_LINKED_TO_LISTING' || err?.code === 'ITEM_STATUS_CONFLICT' || rawMessage.includes('409');
       const message = isConflict
         ? 'Xung đột dữ liệu hoặc đồ vật đã gắn vào tin đăng khác.'
         : (rawMessage || 'Không thể cập nhật đồ vật.');
@@ -109,18 +109,19 @@ export const useInventory = create<InventoryState>((set, get) => ({
       throw new Error(message);
     }
 
+    const effectiveVersion = version ?? existing?.version ?? (get().selectedItem?.id === id ? get().selectedItem?.version : undefined);
     set({ loading: true, error: null });
     const prevItems = get().items;
     set({ items: get().items.filter((i) => i.id !== id) });
     try {
-      await inventoryApi.deleteInventoryItem(id, version);
+      await inventoryApi.deleteInventoryItem(id, effectiveVersion);
       if (get().selectedItem?.id === id) {
         set({ selectedItem: null });
       }
     } catch (err: any) {
       set({ items: prevItems });
       const rawMessage = err?.message || '';
-      const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || err?.code === 'ITEM_LINKED_TO_LISTING' || rawMessage.includes('409');
+      const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || err?.code === 'ITEM_LINKED_TO_LISTING' || err?.code === 'ITEM_STATUS_CONFLICT' || rawMessage.includes('409');
       const message = isConflict
         ? 'Không thể xóa đồ vật đang gắn với tin đăng hoặc đang xử lý giao dịch.'
         : (rawMessage || 'Không thể xóa đồ vật.');

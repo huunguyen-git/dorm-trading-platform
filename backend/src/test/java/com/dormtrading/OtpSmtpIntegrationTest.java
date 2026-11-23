@@ -15,7 +15,6 @@ import static org.assertj.core.api.Assertions.*;
 
 @Testcontainers
 class OtpSmtpIntegrationTest extends BaseIntegrationTest {
-    @SuppressWarnings("resource")
     @Container static final GenericContainer<?> SMTP = new GenericContainer<>("maildev/maildev:2.1.0").withExposedPorts(1025,1080);
     @DynamicPropertySource static void smtp(DynamicPropertyRegistry properties) {
         properties.add("spring.mail.host",SMTP::getHost);

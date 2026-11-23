@@ -27,7 +27,7 @@ export default function InventoryDetailScreen() {
 
   const { items, selectedItem, loadItem, deleteItem, loading, error } = useInventory();
   const [localItem, setLocalItem] = useState<InventoryItem | null>(() => {
-    return items.find((i) => i.id === id) || (selectedItem?.id === id ? selectedItem : null);
+    return (selectedItem?.id === id ? selectedItem : null) || items.find((i) => i.id === id) || null;
   });
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -42,7 +42,7 @@ export default function InventoryDetailScreen() {
   );
 
   useEffect(() => {
-    const matched = items.find((i) => i.id === id) || (selectedItem?.id === id ? selectedItem : null);
+    const matched = (selectedItem?.id === id ? selectedItem : null) || items.find((i) => i.id === id) || null;
     if (matched) {
       setLocalItem(matched);
     }
