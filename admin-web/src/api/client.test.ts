@@ -101,6 +101,19 @@ describe('api client', () => {
     await expect(api('/admin/users')).rejects.toThrow('Tài khoản bị khóa vĩnh viễn.');
     expect(onExpire).toHaveBeenCalledOnce();
 
+    // 4) Preserves server error code on ApiError (e.g. 409 STUDENT_ID_CONFLICT)
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 'STUDENT_ID_CONFLICT', message: 'Mã số sinh viên đã tồn tại ở tài khoản khác.' },
+        { status: 409 },
+      ),
+    );
+    await expect(api('/admin/users/u-1', { method: 'PATCH' })).rejects.toMatchObject({
+      status: 409,
+      code: 'STUDENT_ID_CONFLICT',
+      message: 'Mã số sinh viên đã tồn tại ở tài khoản khác.',
+    });
+
     window.removeEventListener('session-expired', onExpire);
   });
 });

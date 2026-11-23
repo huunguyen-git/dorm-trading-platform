@@ -3,7 +3,13 @@ let refreshFlight: Promise<void> | null = null;
 let epoch = 0;
 export function setAccessToken(token: string | null) { accessToken = token; epoch++; sessionStorage.removeItem('session_token'); }
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) { super(message); }
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+  }
 }
 const baseUrl = () => { const url = import.meta.env.VITE_API_URL; if (!url) throw new Error('VITE_API_URL is required'); return url; };
 export async function refreshSession() {
@@ -13,13 +19,15 @@ export async function refreshSession() {
       const response = await fetch(`${baseUrl()}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'admin-web' }) });
       if (!response.ok) {
         let message = 'Phiên đã hết hạn. Vui lòng đăng nhập lại.';
+        let code: string | undefined;
         try {
           const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
+          code = parsed?.code;
           if (response.status === 403 && parsed?.code === 'ACCOUNT_RESTRICTED' && parsed.message) {
             message = parsed.message;
           }
         } catch { /* ignore */ }
-        throw new ApiError(response.status, message);
+        throw new ApiError(response.status, message, code);
       }
       const body = await response.json() as { token: string };
       if (epoch === generation) accessToken = body.token;
@@ -62,7 +70,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       setAccessToken(null);
       window.dispatchEvent(new Event('session-expired'));
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

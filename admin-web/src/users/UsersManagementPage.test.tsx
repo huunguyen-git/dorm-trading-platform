@@ -19,6 +19,7 @@ vi.mock('../api/client', () => ({
     constructor(
       public readonly status: number,
       message: string,
+      public readonly code?: string,
     ) {
       super(message);
     }
@@ -463,7 +464,7 @@ describe('UsersManagementPage', () => {
         return (detailCalls === 1 ? memberUserDetail : deletedDetail) as never;
       }
       if (path === '/admin/users/u-101' && init?.method === 'PATCH') {
-        throw new ApiError(409, 'Tài khoản mục tiêu vừa bị xóa hoặc thay đổi phiên bản.');
+        throw new ApiError(409, 'Tài khoản mục tiêu vừa bị xóa hoặc thay đổi phiên bản.', 'ACCOUNT_DELETED');
       }
       return {} as never;
     });
@@ -484,6 +485,71 @@ describe('UsersManagementPage', () => {
     expect(detailCalls).toBe(2);
     expect(screen.getByRole('button', { name: 'Sửa hồ sơ' })).toBeDisabled();
     expect(screen.getByText('Tài khoản đã bị xóa/vô hiệu hóa, không thể chỉnh sửa hồ sơ.')).toBeInTheDocument();
+  });
+
+  it('preserves edited form inputs without reloading detail when PATCH returns 409 STUDENT_ID_CONFLICT', async () => {
+    let detailCalls = 0;
+    let patchCalls = 0;
+    const savedDetail: AdminUserDetail = {
+      ...memberUserDetail,
+      fullName: 'Nguyễn Minh Khoa Mới',
+      studentId: '21129999',
+      cohort: 'K2020',
+      version: 3,
+    };
+
+    mockedApi.mockImplementation(async (path, init) => {
+      if (path === '/auth/me') return moderatorSession as never;
+      if (path.startsWith('/admin/users?')) return defaultListResponse as never;
+      if (path === '/admin/users/u-101' && (!init || !init.method)) {
+        detailCalls += 1;
+        return memberUserDetail as never;
+      }
+      if (path === '/admin/users/u-101' && init?.method === 'PATCH') {
+        patchCalls += 1;
+        if (patchCalls === 1) {
+          throw new ApiError(409, 'Mã số sinh viên đã tồn tại ở tài khoản khác.', 'STUDENT_ID_CONFLICT');
+        }
+        return savedDetail as never;
+      }
+      return {} as never;
+    });
+
+    renderUsersRoute();
+    await screen.findByText('Nguyễn Minh Khoa');
+
+    const rows = screen.getAllByRole('row');
+    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Chi tiết' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sửa hồ sơ' }));
+    fireEvent.change(screen.getByLabelText('Họ và tên *'), { target: { value: 'Nguyễn Minh Khoa Mới' } });
+    fireEvent.change(screen.getByLabelText('Mã số sinh viên (MSSV) *'), { target: { value: '21120002' } });
+    fireEvent.change(screen.getByLabelText('Khóa tuyển sinh'), { target: { value: 'K2020' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận lưu' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Mã số sinh viên đã tồn tại ở tài khoản khác.');
+    expect(alert).not.toHaveTextContent('Đã tải lại trạng thái tài khoản mới nhất.');
+
+    // Detail endpoint was NOT re-fetched, form stayed open, and all typed fields are preserved
+    expect(detailCalls).toBe(1);
+    expect((screen.getByLabelText('Họ và tên *') as HTMLInputElement).value).toBe('Nguyễn Minh Khoa Mới');
+    expect((screen.getByLabelText('Mã số sinh viên (MSSV) *') as HTMLInputElement).value).toBe('21120002');
+    expect((screen.getByLabelText('Khóa tuyển sinh') as HTMLInputElement).value).toBe('K2020');
+
+    // Fix only MSSV and resubmit -> saves with preserved edits
+    fireEvent.change(screen.getByLabelText('Mã số sinh viên (MSSV) *'), { target: { value: '21129999' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận lưu' }));
+
+    expect(await screen.findByText('Đã cập nhật thông tin định danh người dùng.')).toBeInTheDocument();
+    expect(patchCalls).toBe(2);
+    const secondPatch = mockedApi.mock.calls.filter(
+      ([url, opts]) => url === '/admin/users/u-101' && opts?.method === 'PATCH',
+    )[1];
+    const body = JSON.parse(secondPatch[1]!.body as string) as Record<string, unknown>;
+    expect(body.fullName).toBe('Nguyễn Minh Khoa Mới');
+    expect(body.studentId).toBe('21129999');
+    expect(body.cohort).toBe('K2020');
   });
 
   it('disables editing when moderator views a SENIOR_ADMIN profile', async () => {

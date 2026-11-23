@@ -498,18 +498,22 @@ export default function UsersManagementPage() {
       setEditSuccess('Đã cập nhật thông tin định danh người dùng.');
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
-        try {
-          const fresh = await getAdminUserDetail(detail.id);
-          if (fresh && typeof fresh.id === 'string') {
-            syncUserDetailIntoState(fresh);
-            if (fresh.version !== previousVersion || fresh.accountStatus === 'VO_HIEU_HOA') {
-              setIsEditingIdentity(false);
+        if (cause.code === 'STUDENT_ID_CONFLICT') {
+          setEditError(cause.message || 'Mã số sinh viên đã tồn tại ở tài khoản khác.');
+        } else {
+          try {
+            const fresh = await getAdminUserDetail(detail.id);
+            if (fresh && typeof fresh.id === 'string') {
+              syncUserDetailIntoState(fresh);
+              if (fresh.version !== previousVersion || fresh.accountStatus === 'VO_HIEU_HOA') {
+                setIsEditingIdentity(false);
+              }
             }
+          } catch {
+            // Keep original conflict error visible even if background reload fails
           }
-        } catch {
-          // Keep original conflict error visible even if background reload fails
+          setEditError(`${cause.message} Đã tải lại trạng thái tài khoản mới nhất.`);
         }
-        setEditError(`${cause.message} Đã tải lại trạng thái tài khoản mới nhất.`);
       } else {
         setEditError((cause as Error).message || 'Không thể cập nhật thông tin định danh.');
       }
