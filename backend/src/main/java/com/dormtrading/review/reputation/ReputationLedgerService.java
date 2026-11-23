@@ -381,6 +381,8 @@ public class ReputationLedgerService {
 
         String previousStatus = (String) userRow.get("trang_thai_tai_khoan");
         String existingLockType = (String) userRow.get("loai_han_che");
+        Instant existingLockedUntil = toInstant(userRow.get("khoa_den_ngay"));
+        boolean existingAppealable = Boolean.TRUE.equals(userRow.get("cho_phep_khieu_nai"));
         boolean canApplyThresholdLock = evaluateThresholdLock
                 && requestedDelta < 0
                 && !"VO_HIEU_HOA".equals(previousStatus);
@@ -389,6 +391,8 @@ public class ReputationLedgerService {
         Instant triggeredLockedUntil = null;
         String lockReason = null;
         String auditAction = null;
+        boolean tempAppealable = false;
+        Instant preservedExistingLockedUntil = null;
 
         if (canApplyThresholdLock && scoreAfter <= PERMANENT_LOCK_MAX_SCORE) {
             triggeredLockType = "KHOA_VINH_VIEN";
@@ -398,8 +402,21 @@ public class ReputationLedgerService {
                 && scoreAfter <= TEMPORARY_LOCK_MAX_SCORE
                 && !("BI_KHOA".equals(previousStatus) && "KHOA_VINH_VIEN".equals(existingLockType))) {
             triggeredLockType = "KHOA_TAM_THOI";
-            triggeredLockedUntil = currentTime.plus(TEMPORARY_LOCK_DURATION);
-            lockReason = "Khóa tạm thời 14 ngày tự động theo ngưỡng điểm uy tín (30 < điểm = " + scoreAfter + " ≤ 50): " + cleanReason;
+            Instant thresholdLockedUntil = currentTime.plus(TEMPORARY_LOCK_DURATION);
+            boolean alreadyTempLocked = "BI_KHOA".equals(previousStatus) && "KHOA_TAM_THOI".equals(existingLockType);
+            boolean preserveLongerLock = alreadyTempLocked
+                    && existingLockedUntil != null
+                    && existingLockedUntil.isAfter(thresholdLockedUntil);
+            triggeredLockedUntil = preserveLongerLock ? existingLockedUntil : thresholdLockedUntil;
+            tempAppealable = alreadyTempLocked && existingAppealable;
+            if (preserveLongerLock) {
+                preservedExistingLockedUntil = existingLockedUntil;
+                lockReason = "Khóa tạm thời tự động theo ngưỡng điểm uy tín (30 < điểm = " + scoreAfter
+                        + " ≤ 50; giữ nguyên thời hạn khóa dài hơn hiện hành): " + cleanReason;
+            } else {
+                lockReason = "Khóa tạm thời 14 ngày tự động theo ngưỡng điểm uy tín (30 < điểm = " + scoreAfter
+                        + " ≤ 50): " + cleanReason;
+            }
             auditAction = "THRESHOLD_LOCK_TEMPORARY";
         }
 
@@ -428,7 +445,7 @@ public class ReputationLedgerService {
                     "    trang_thai_tai_khoan = 'BI_KHOA', " +
                     "    loai_han_che = 'KHOA_TAM_THOI', " +
                     "    khoa_den_ngay = ?, " +
-                    "    cho_phep_khieu_nai = FALSE, " +
+                    "    cho_phep_khieu_nai = ?, " +
                     "    diem_da_khoa_tam = ?, " +
                     "    ly_do_han_che = ?, " +
                     "    updated_at = ?" +
@@ -436,6 +453,7 @@ public class ReputationLedgerService {
                     "WHERE user_id = ?",
                     scoreAfter,
                     at(triggeredLockedUntil),
+                    tempAppealable,
                     scoreAfter,
                     lockReason,
                     at(currentTime),
@@ -472,7 +490,7 @@ public class ReputationLedgerService {
         if (triggeredLockType != null) {
             db.update("UPDATE auth_session SET revoked = TRUE WHERE user_id = ? AND client = 'admin-web'", userId);
 
-            boolean appealable = "KHOA_VINH_VIEN".equals(triggeredLockType);
+            boolean appealable = "KHOA_VINH_VIEN".equals(triggeredLockType) || tempAppealable;
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("scoreBefore", scoreBefore);
             details.put("scoreAfter", scoreAfter);
@@ -480,6 +498,9 @@ public class ReputationLedgerService {
             details.put("referenceSource", cleanSource);
             if (cleanRefId != null) {
                 details.put("referenceId", cleanRefId);
+            }
+            if (preservedExistingLockedUntil != null) {
+                details.put("preservedExistingLockedUntil", preservedExistingLockedUntil.toString());
             }
 
             db.update(

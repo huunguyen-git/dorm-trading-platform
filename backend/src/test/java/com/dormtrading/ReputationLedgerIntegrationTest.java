@@ -316,4 +316,58 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         );
         assertThat(auditCount).isZero();
     }
+
+    @Test
+    @DisplayName("FR-12 bảo lưu hạn khóa dài hơn: Trừ điểm rơi 30 < điểm <= 50 giữ nguyên khóa > 14 ngày và nâng khóa ngắn < 14 ngày lên 14 ngày")
+    void preservesLongerTemporaryLockAndExtendsShorterTemporaryLockOnThresholdDeduction() {
+        Instant baseTime = currentTime.get().truncatedTo(ChronoUnit.MILLIS);
+
+        // Case A: Account already temporarily locked for 60 days -> penalty 60 -> 45 MUST keep 60-day expiry
+        UUID longLockUser = createActiveMember(60);
+        Instant sixtyDaysLater = baseTime.plus(Duration.ofDays(60));
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', " +
+                "khoa_den_ngay = ?, ly_do_han_che = 'Khóa tạm thủ công 60 ngày', cho_phep_khieu_nai = FALSE " +
+                "WHERE user_id = ?",
+                Timestamp.from(sixtyDaysLater),
+                longLockUser
+        );
+
+        var longEntry = ledger.applyPenaltyScale(
+                longLockUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm khi đang khóa 60 ngày", "LONG-LOCK:" + longLockUser, null
+        );
+        assertThat(longEntry.scoreAfter()).isEqualTo(45);
+        assertThat(longEntry.triggeredLockType()).isEqualTo("KHOA_TAM_THOI");
+        assertThat(longEntry.lockedUntil()).isEqualTo(sixtyDaysLater);
+
+        var longRow = fetchUser(longLockUser);
+        assertThat(longRow.get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
+        assertThat(longRow.get("loai_han_che")).isEqualTo("KHOA_TAM_THOI");
+        assertThat(((Timestamp) longRow.get("khoa_den_ngay")).toInstant()).isEqualTo(sixtyDaysLater);
+        assertThat(((Number) longRow.get("diem_uy_tin")).intValue()).isEqualTo(45);
+        assertThat(((Number) longRow.get("version")).longValue()).isEqualTo(1L);
+
+        // Case B: Account temporarily locked for only 5 days -> penalty 60 -> 45 MUST extend expiry to 14 days
+        UUID shortLockUser = createActiveMember(60);
+        Instant fiveDaysLater = baseTime.plus(Duration.ofDays(5));
+        Instant fourteenDaysLater = baseTime.plus(Duration.ofDays(14));
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', " +
+                "khoa_den_ngay = ?, ly_do_han_che = 'Khóa tạm thủ công 5 ngày', cho_phep_khieu_nai = FALSE " +
+                "WHERE user_id = ?",
+                Timestamp.from(fiveDaysLater),
+                shortLockUser
+        );
+
+        var shortEntry = ledger.applyPenaltyScale(
+                shortLockUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm khi đang khóa 5 ngày", "SHORT-LOCK:" + shortLockUser, null
+        );
+        assertThat(shortEntry.scoreAfter()).isEqualTo(45);
+        assertThat(shortEntry.triggeredLockType()).isEqualTo("KHOA_TAM_THOI");
+        assertThat(shortEntry.lockedUntil()).isEqualTo(fourteenDaysLater);
+
+        var shortRow = fetchUser(shortLockUser);
+        assertThat(((Timestamp) shortRow.get("khoa_den_ngay")).toInstant()).isEqualTo(fourteenDaysLater);
+        assertThat(((Number) shortRow.get("diem_uy_tin")).intValue()).isEqualTo(45);
+    }
 }

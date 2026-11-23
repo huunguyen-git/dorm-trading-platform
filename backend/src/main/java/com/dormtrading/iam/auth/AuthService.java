@@ -276,13 +276,15 @@ public class AuthService {
         if (row == null) throw denied();
         lock(row.get("email").toString());
         found = one("select s.*,r.used from auth_refresh r join auth_session s on s.id=r.session_id where r.secret_hash=?",digest(token));
-        if (!client.equals(found.get("client")) || !instant(found,"expires_at").isAfter(now())) throw denied();
+        if (found == null || !client.equals(found.get("client")) || !instant(found,"expires_at").isAfter(now())) throw denied();
         if (Boolean.TRUE.equals(found.get("used"))) {
             db.update("update auth_session set revoked=true where id=?",found.get("id")); throw denied();
         }
         if (Boolean.TRUE.equals(found.get("revoked"))) throw denied();
+        row = one("select * from thanh_viens where user_id=?", found.get("user_id"));
+        if (row == null) throw denied();
         if (isExpiredTemporaryLock(row) && reputationLedger.reconcileExpiredTemporaryLock((UUID) row.get("user_id"))) {
-            row = account(row.get("email").toString());
+            row = one("select * from thanh_viens where user_id=?", found.get("user_id"));
         }
         String status = row.get("trang_thai_tai_khoan").toString();
         if ("VO_HIEU_HOA".equals(status)) throw denied();
