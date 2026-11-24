@@ -593,7 +593,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         String staleGenToken = modWebLogin.jsonPath().getString("token");
         String staleGenCookie = modWebLogin.getCookie("dorm_refresh");
 
-        // Rotate session generation via password change, then keep the new active session
+        // UC-07 revokes every session; sign in again to obtain a session for the lock test.
         String newPassword = "three mountains over clear valley";
         var rotated = given()
                 .header("Origin", ALLOWED_ORIGIN)
@@ -601,9 +601,17 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .contentType("application/json")
                 .body(Map.of("currentPassword", PASSWORD, "password", newPassword))
                 .post("/api/v1/auth/password/change");
-        assertThat(rotated.statusCode()).isEqualTo(200);
-        String modWebToken = rotated.jsonPath().getString("token");
-        String refreshCookie = rotated.getCookie("dorm_refresh");
+        assertThat(rotated.statusCode()).isEqualTo(204);
+        var signedInAgain = given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", newPassword, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(signedInAgain.statusCode()).isEqualTo(200);
+        String modWebToken = signedInAgain.jsonPath().getString("token");
+        String refreshCookie = signedInAgain.getCookie("dorm_refresh");
+
+        // Keep a stale-generation fixture independently of UC-07 revocation.
+        db.update("UPDATE auth_session SET generation = generation + 1 WHERE user_id = ? AND revoked = TRUE", modTarget.id());
 
         // Senior admin permanently locks modTarget (revokes all admin-web sessions immediately)
         given().auth().oauth2(seniorToken)

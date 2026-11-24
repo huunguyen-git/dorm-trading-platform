@@ -38,13 +38,70 @@ class ApiSecurityTest extends BaseIntegrationTest {
         @PostMapping("/api/v1/orders/probe") String write() { return "ok"; }
     }
     @BeforeEach void setup() {
-        time.set(Instant.now()); when(clock.instant()).thenAnswer(i -> time.get());
+        time.set(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS)); when(clock.instant()).thenAnswer(i -> time.get());
         student = UUID.randomUUID().toString().substring(0,12); email = "u" + student + "@student.edu.vn";
         doAnswer(i -> { var message=(SimpleMailMessage)i.getArgument(0); var matcher=Pattern.compile("[0-9]{6}").matcher(message.getText());
             if(matcher.find()) codes.put(message.getTo()[0],matcher.group()); return null; }).when(mail).send(any(SimpleMailMessage.class));
     }
     private String code() { delivery.deliver(); return codes.get(email); }
     private AuthService.Challenge register() { return auth.register("Test",student,email,PASSWORD,student); }
+    private void events(String subject, String kind, int count, long ageSeconds) {
+        for (int i=0; i<count; i++) db.update("insert into auth_event(subject,kind,happened_at) values (?,?,?)",
+                subject,kind,java.sql.Timestamp.from(time.get().minusSeconds(ageSeconds)));
+    }
+    private void waitsFor(long seconds, org.assertj.core.api.ThrowableAssert.ThrowingCallable request) {
+        assertThatThrownBy(request).isInstanceOf(AuthFailure.class)
+                .satisfies(error -> {
+                    var failure = (AuthFailure) error;
+                    assertThat(failure.status).isEqualTo(429);
+                    assertThat(failure.retryAfter).isEqualTo(seconds);
+                });
+    }
+    @Test void sendWaitCombinesIpAndDailyEmailLimitsInBothDirections() {
+        // IP has only 10 seconds left; the email daily window still has 7200 seconds.
+        events("ip:"+student,"REQUEST",100,3590);
+        events(email,"SEND",10,79200);
+        waitsFor(7200, () -> auth.requestOtp(email,"REGISTER",student));
+        waitsFor(7200, () -> auth.register("Test",student,email,PASSWORD,student));
+        time.set(time.get().plusSeconds(7200));
+        assertThat(register().challengeId()).isNotNull();
+        // Conversely, IP remains blocked longer than the 60-second resend cooldown.
+        events("ip:"+student,"REQUEST",100,0);
+        waitsFor(3600, () -> auth.requestOtp(email,"REGISTER",student));
+        time.set(time.get().plusSeconds(3600));
+        assertThat(auth.requestOtp(email,"REGISTER",student).challengeId()).isNotNull();
+    }
+    @Test void verifyWaitCombinesIpAndWrongAttemptWindow() {
+        var challenge=register(); String otp=code();
+        events("ip:"+student,"REQUEST",100,3590);
+        events(email,"WRONG",10,3480);
+        waitsFor(120, () -> auth.verify(challenge.challengeId(),email,"REGISTER",otp,student));
+        time.set(time.get().plusSeconds(120));
+        assertThat(auth.verify(challenge.challengeId(),email,"REGISTER",otp,student).emailVerified()).isTrue();
+    }
+    @Test void emailRejectedAttemptThatFillsIpQuotaReportsTheNewIpWait() {
+        events("ip:"+student,"REQUEST",99,0);
+        events(email,"SEND",1,50);
+        waitsFor(3600, () -> auth.requestOtp(email,"REGISTER",student));
+        time.set(time.get().plusSeconds(3600));
+        assertThat(auth.requestOtp(email,"REGISTER",student).challengeId()).isNotNull();
+    }
+    @Test void loginWaitCombinesIpAndBackoffAndAllowsRetryAtReportedTime() {
+        register(); events("ip:"+student,"REQUEST",100,3590);
+        db.update("insert into auth_login_guard(email,failures,blocked_until) values (?,5,?)",email,
+                java.sql.Timestamp.from(time.get().plusSeconds(120)));
+        waitsFor(120, () -> auth.login(email,PASSWORD,"mobile",student));
+        time.set(time.get().plusSeconds(120));
+        assertThat(auth.login(email,PASSWORD,"mobile",student).user().email()).isEqualTo(email);
+    }
+    @Test void retryAfterRoundsUpSubMillisecondDatabaseTimestamps() {
+        register();
+        db.update("insert into auth_login_guard(email,failures,blocked_until) values (?,5,?)",email,
+                java.sql.Timestamp.from(time.get().plusSeconds(120).plusNanos(100_000)));
+        waitsFor(121, () -> auth.login(email,PASSWORD,"mobile",student));
+        time.set(time.get().plusSeconds(121));
+        assertThat(auth.login(email,PASSWORD,"mobile",student).user().email()).isEqualTo(email);
+    }
     private void verify(AuthService.Challenge c) { auth.verify(c.challengeId(),email,"REGISTER",code(),student); }
     private void activate() { db.update("update thanh_viens set profile_approved=true,trang_thai_tai_khoan='HOAT_DONG',diem_uy_tin=100 where email=?",email); }
     private int get(String token,String path) { return given().auth().oauth2(token).get(path).statusCode(); }
@@ -76,17 +133,17 @@ class ApiSecurityTest extends BaseIntegrationTest {
         assertThat(get(b.token(),"/api/v1/auth/me")).isEqualTo(200);
         assertThatThrownBy(() -> auth.refresh(a.refreshToken(),"mobile")).isInstanceOf(AuthFailure.class);
     }
-    @Test void changePasswordRotatesCurrentAndRevokesOthers() {
+    @Test void changePasswordRevokesEverySession() {
         register(); var a=auth.login(email,PASSWORD,"mobile",student); var b=auth.login(email,PASSWORD,"mobile",student);
-        var changed=auth.changePassword(jwt(a.token()),PASSWORD,NEW_PASSWORD);
+        auth.changePassword(jwt(a.token()),PASSWORD,NEW_PASSWORD);
         assertThat(get(a.token(),"/api/v1/auth/me")).isEqualTo(401);
         assertThat(get(b.token(),"/api/v1/auth/me")).isEqualTo(401);
-        assertThat(get(changed.token(),"/api/v1/auth/me")).isEqualTo(200);
-        assertThat(auth.refresh(changed.refreshToken(),"mobile").user().email()).isEqualTo(email);
+        assertThatThrownBy(() -> auth.refresh(a.refreshToken(),"mobile")).isInstanceOf(AuthFailure.class);
+        assertThat(auth.login(email,NEW_PASSWORD,"mobile",student).user().email()).isEqualTo(email);
         assertThat(db.queryForObject("select count(*) from auth_notice where email=?",Integer.class,email)).isEqualTo(1);
     }
     @Test void resetHasOneTimeGrantAndRevokesEveryDevice() {
-        register(); var a=auth.login(email,PASSWORD,"mobile",student); var b=auth.login(email,PASSWORD,"mobile",student);
+        verify(register()); var a=auth.login(email,PASSWORD,"mobile",student); var b=auth.login(email,PASSWORD,"mobile",student);
         time.set(time.get().plusSeconds(61)); var c=auth.requestOtp(email,"RESET",student);
         assertThatThrownBy(() -> auth.verify(c.challengeId(),email,"REGISTER",code(),student)).isInstanceOf(AuthFailure.class);
         var grant=auth.verify(c.challengeId(),email,"RESET",code(),student).resetToken(); auth.reset(grant,NEW_PASSWORD);
@@ -95,6 +152,62 @@ class ApiSecurityTest extends BaseIntegrationTest {
         assertThatThrownBy(() -> auth.reset(grant,PASSWORD)).isInstanceOf(AuthFailure.class);
         assertThatThrownBy(() -> auth.login(email,PASSWORD,"mobile",student)).isInstanceOf(AuthFailure.class);
         assertThat(auth.login(email,NEW_PASSWORD,"mobile",student).user().id()).isNotNull();
+    }
+    @Test void recoveryRequiresVerifiedAndEnabledAccountAtEveryStage() {
+        var registration = register();
+        time.set(time.get().plusSeconds(61));
+        var unavailable = auth.requestOtp(email,"RESET",student);
+        assertThat(db.queryForObject("select count(*) from auth_challenge where id=?",Integer.class,unavailable.challengeId())).isZero();
+        verify(registration);
+        time.set(time.get().plusSeconds(61));
+        var challenge = auth.requestOtp(email,"RESET",student); String otp = code();
+        db.update("update thanh_viens set trang_thai_tai_khoan='VO_HIEU_HOA' where email=?",email);
+        assertThatThrownBy(() -> auth.verify(challenge.challengeId(),email,"RESET",otp,student)).isInstanceOf(AuthFailure.class);
+        time.set(time.get().plusSeconds(61));
+        var disabled = auth.requestOtp(email,"RESET",student);
+        assertThat(db.queryForObject("select count(*) from auth_challenge where id=?",Integer.class,disabled.challengeId())).isZero();
+        db.update("update thanh_viens set trang_thai_tai_khoan='CHO_KICH_HOAT' where email=?",email);
+        time.set(time.get().plusSeconds(61));
+        var next = auth.requestOtp(email,"RESET",student);
+        String grant = auth.verify(next.challengeId(),email,"RESET",code(),student).resetToken();
+        String oldHash = db.queryForObject("select mat_khau_hash from thanh_viens where email=?",String.class,email);
+        db.update("update thanh_viens set email_verified=false where email=?",email);
+        assertThatThrownBy(() -> auth.reset(grant,NEW_PASSWORD)).isInstanceOf(AuthFailure.class);
+        assertThat(db.queryForObject("select mat_khau_hash from thanh_viens where email=?",String.class,email)).isEqualTo(oldHash);
+        db.update("update thanh_viens set email_verified=true where email=?",email);
+        assertThatThrownBy(() -> auth.reset(grant,NEW_PASSWORD)).isInstanceOf(AuthFailure.class);
+    }
+    @Test void lockedMemberCanManageSessionButCannotTradeAndDisabledCannotLogin() {
+        verify(register()); activate();
+        var active = auth.login(email,PASSWORD,"mobile",student);
+        db.update("update thanh_viens set trang_thai_tai_khoan='BI_KHOA' where email=?",email);
+        assertThat(get(active.token(),"/api/v1/auth/me")).isEqualTo(200);
+        assertThat(post(active.token(),"/api/v1/orders/probe")).isEqualTo(403);
+        var locked = auth.login(email,PASSWORD,"mobile",student);
+        assertThat(locked.user().roles()).isEmpty();
+        assertThat(auth.refresh(locked.refreshToken(),"mobile").user().accountStatus()).isEqualTo("BI_KHOA");
+        assertThat(get(locked.token(),"/api/v1/admin/probe")).isEqualTo(403);
+        db.update("update thanh_viens set trang_thai_tai_khoan='VO_HIEU_HOA' where email=?",email);
+        assertThatThrownBy(() -> auth.login(email,PASSWORD,"mobile",student)).isInstanceOf(AuthFailure.class);
+        assertThat(get(locked.token(),"/api/v1/auth/me")).isEqualTo(401);
+    }
+    @Test void rateLimitReportsRemainingWaitThroughHttp() {
+        register(); time.set(time.get().plusSeconds(10));
+        given().contentType("application/json").body(Map.of("email",email,"purpose","REGISTER"))
+                .post("/api/v1/auth/otp/resend").then().statusCode(429)
+                .header("Retry-After","50").body("retryAfter",org.hamcrest.Matchers.equalTo(50));
+        time.set(time.get().plusSeconds(50));
+        assertThat(auth.requestOtp(email,"REGISTER",student).challengeId()).isNotNull();
+    }
+    @Test void passwordChangeHttpReturnsNoSessionAndRevokesRefresh() {
+        register(); var session=auth.login(email,PASSWORD,"mobile",student);
+        given().auth().oauth2(session.token()).contentType("application/json")
+                .body(Map.of("currentPassword",PASSWORD,"password","River!82"))
+                .post("/api/v1/auth/password/change").then().statusCode(204)
+                .header("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0"));
+        assertThat(get(session.token(),"/api/v1/auth/me")).isEqualTo(401);
+        assertThatThrownBy(() -> auth.refresh(session.refreshToken(),"mobile")).isInstanceOf(AuthFailure.class);
+        assertThat(auth.login(email,"River!82","mobile",student).user().email()).isEqualTo(email);
     }
     @Test void refreshRotationDetectsReplayAndRejectsOtherClient() {
         register(); var a=auth.login(email,PASSWORD,"mobile",student);
@@ -141,8 +254,15 @@ class ApiSecurityTest extends BaseIntegrationTest {
         assertThat(response.jsonPath().getString("refreshToken")).isNull(); String token=response.jsonPath().getString("token");
         assertThat(get(token,"/api/v1/admin/probe")).isEqualTo(200);
         assertThat(get(token,"/api/v1/admin/senior/probe")).isEqualTo(403);
+        db.update("update thanh_viens set trang_thai_tai_khoan='BI_KHOA' where user_id=?",id);
+        assertThatThrownBy(() -> auth.login(email,PASSWORD,"admin-web",student))
+                .isInstanceOf(com.dormtrading.iam.auth.AccountRestrictedFailure.class);
+        assertThat(get(token,"/api/v1/auth/me")).isEqualTo(403);
+        assertThat(get(token,"/api/v1/admin/probe")).isEqualTo(403);
+        db.update("update thanh_viens set trang_thai_tai_khoan='HOAT_DONG' where user_id=?",id);
         db.update("update vai_tro_quan_tri set trang_thai_hieu_luc=false where user_id=?",id);
         assertThat(get(token,"/api/v1/admin/probe")).isEqualTo(403);
+        assertThatThrownBy(() -> auth.login(email,PASSWORD,"admin-web",student)).isInstanceOf(AuthFailure.class);
     }
     @Test void smtpFailureRetainsEncryptedDeliveryForRetry() {
         doThrow(new org.springframework.mail.MailSendException("test unavailable")).when(mail).send(any(SimpleMailMessage.class));

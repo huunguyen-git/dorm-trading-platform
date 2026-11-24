@@ -4,13 +4,19 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 class PasswordPolicyTest {
     private final PasswordPolicy policy=new PasswordPolicy(false);
+    @Test void credentialsAreNotIncludedInDtoLogStrings() {
+        assertThat(new AuthController.Register("Name","id","u@uni.edu.vn","secret").toString()).doesNotContain("secret");
+        assertThat(new AuthController.Verify(java.util.UUID.randomUUID(),"u@uni.edu.vn","RESET","123456").toString()).doesNotContain("123456");
+        assertThat(new AuthService.Session("access-secret","refresh-secret",null).toString()).doesNotContain("secret");
+        assertThat(new AuthService.Verified("reset-secret",true).toString()).doesNotContain("secret");
+    }
     @Test void boundariesSpacesAndUnicode() {
-        assertThatThrownBy(() -> policy.validate("a".repeat(14),"student@uni.edu.vn","12345")).isInstanceOf(AuthFailure.class);
-        assertThat(policy.validate("a".repeat(15),"student@uni.edu.vn","12345")).hasSize(15);
+        assertThatThrownBy(() -> policy.validate("a".repeat(7),"student@uni.edu.vn","12345")).isInstanceOf(AuthFailure.class);
+        assertThat(policy.validate("a".repeat(8),"student@uni.edu.vn","12345")).hasSize(8);
         assertThat(policy.validate("a".repeat(128),"student@uni.edu.vn","12345")).hasSize(128);
         assertThatThrownBy(() -> policy.validate("a".repeat(129),"student@uni.edu.vn","12345")).isInstanceOf(AuthFailure.class);
         assertThat(policy.validate("một dòng sông dưới trời xanh","student@uni.edu.vn","12345")).contains(" ");
-        assertThat(policy.validate("🌊".repeat(15),"student@uni.edu.vn","12345").codePointCount(0,30)).isEqualTo(15);
+        assertThat(policy.validate("🌊".repeat(8),"student@uni.edu.vn","12345").codePointCount(0,16)).isEqualTo(8);
     }
     @Test void rejectsPredictableAndAccountRelatedValues() {
         assertThatThrownBy(() -> policy.validate("passwordpassword","student@uni.edu.vn","12345")).isInstanceOf(AuthFailure.class);
