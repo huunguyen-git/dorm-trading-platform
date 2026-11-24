@@ -80,7 +80,7 @@ test('pending account can browse and open profile but cannot publish', async () 
   ).toBeTruthy();
 });
 
-test('requires title, description and positive price before creating listing', async () => {
+test('requires inventory item, title, description, price and photo before publishing listing', async () => {
   useSession.setState({
     token: 'token',
     user: {
@@ -98,9 +98,13 @@ test('requires title, description and positive price before creating listing', a
   });
   render(<App />);
   fireEvent.press(screen.getByRole('button', { name: 'Đăng tin' }));
-  await waitFor(() => expect(screen.getByPlaceholderText('Tiêu đề')).toBeTruthy());
-  fireEvent.press(screen.getAllByRole('button', { name: 'Đăng tin' }).at(-1)!);
-  expect(await screen.findByText('Nhập tiêu đề, mô tả và giá hợp lệ.')).toBeTruthy();
+  await waitFor(() => expect(screen.getByTestId('listing-title-input')).toBeTruthy());
+  await waitFor(() => expect(screen.getByTestId('inventory-picker-empty')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('submit-publish-listing'));
+  expect(
+    await screen.findByText('Vui lòng chọn ít nhất 1 đồ vật khả dụng từ Kho đồ cá nhân.'),
+  ).toBeTruthy();
+  expect(screen.getByText('Vui lòng nhập tiêu đề tin đăng.')).toBeTruthy();
 });
 
 test('signup blocks mismatched passwords then verifies OTP with an explicit success screen', async () => {
