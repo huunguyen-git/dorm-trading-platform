@@ -64,6 +64,17 @@ test('mobile registration → real SMTP OTP → login → pending profile → lo
   fireEvent.changeText(screen.getByLabelText('Họ tên'), 'Mobile Updated');
   fireEvent.press(screen.getByRole('button', { name: 'Lưu họ tên' }));
   expect(await screen.findByText('Đã lưu hồ sơ.')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Đổi mật khẩu' }));
+  fireEvent.changeText(await screen.findByLabelText('Mật khẩu hiện tại'), 'violet island brass telescope 7629');
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'violet cedar telescope lantern 9627');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'violet cedar telescope lantern 9627');
+  fireEvent.press(screen.getByRole('button', { name: 'Lưu mật khẩu' }));
+  expect(await screen.findByText('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('auth-success-continue'));
+  fireEvent.changeText(await screen.findByLabelText('Email'), email);
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu'), 'violet cedar telescope lantern 9627');
+  fireEvent.press(screen.getByRole('button', { name: 'Đăng nhập' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Hồ sơ' }));
   fireEvent.press(screen.getByRole('button', { name: 'Đăng xuất thiết bị này' }));
   expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeTruthy();
 }, 60000);
