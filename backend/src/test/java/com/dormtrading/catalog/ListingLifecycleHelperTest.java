@@ -1,11 +1,16 @@
 package com.dormtrading.catalog;
 
 import com.dormtrading.iam.auth.AuthFailure;
+import java.sql.Array;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCreator;
+import org.springframework.jdbc.core.RowCallbackHandler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,6 +27,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -109,11 +117,43 @@ class ListingLifecycleHelperTest {
     }
 
     @Test
-    void reconcilesOnlyPublicExpiredListingsAndLoadsQuota() {
+    void reconcilesOnlyPublicExpiredListingsWithSkipLockedBumpsItemVersionAndLoadsQuota() throws Exception {
         UUID sellerId = UUID.randomUUID();
-        when(db.update(anyString(), any(), any(), eq(sellerId), any())).thenReturn(2);
+        UUID expiredListingId = UUID.randomUUID();
+        UUID linkedItemId = UUID.randomUUID();
+        List<String> executedSql = new ArrayList<>();
+
+        Connection conn = Mockito.mock(Connection.class);
+        PreparedStatement ps = Mockito.mock(PreparedStatement.class);
+        Array sqlArray = Mockito.mock(Array.class);
+        when(conn.createArrayOf(eq("uuid"), any(Object[].class))).thenReturn(sqlArray);
+        when(conn.prepareStatement(anyString())).thenAnswer(inv -> {
+            executedSql.add(inv.getArgument(0, String.class));
+            return ps;
+        });
+
+        when(db.queryForList(anyString(), eq(UUID.class), eq(sellerId), eq(Timestamp.from(FIXED_NOW))))
+                .thenReturn(List.of(expiredListingId));
+        when(db.update(any(PreparedStatementCreator.class))).thenAnswer(inv -> {
+            PreparedStatementCreator psc = inv.getArgument(0);
+            psc.createPreparedStatement(conn);
+            return 1;
+        });
+        doAnswer(inv -> {
+            PreparedStatementCreator psc = inv.getArgument(0);
+            RowCallbackHandler rch = inv.getArgument(1);
+            psc.createPreparedStatement(conn);
+            String lastSql = executedSql.getLast();
+            if (lastSql.contains("FROM tin_dang_do_vat")) {
+                ResultSet rs = Mockito.mock(ResultSet.class);
+                when(rs.getObject("ma_vat", UUID.class)).thenReturn(linkedItemId);
+                rch.processRow(rs);
+            }
+            return null;
+        }).when(db).query(any(PreparedStatementCreator.class), any(RowCallbackHandler.class));
         when(db.queryForList(anyString(), eq(Integer.class), eq(sellerId))).thenReturn(List.of(125));
-        when(db.queryForObject(anyString(), eq(Integer.class), eq(sellerId))).thenReturn(4);
+        when(db.queryForObject(anyString(), eq(Integer.class), eq(sellerId), eq(Timestamp.from(FIXED_NOW))))
+                .thenReturn(4);
 
         ListingDtos.ListingQuotaDto quota = helper.loadQuota(sellerId);
 
@@ -123,18 +163,29 @@ class ListingLifecycleHelperTest {
         assertThat(quota.remaining()).isEqualTo(6);
         assertThat(quota.canPublish()).isTrue();
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(db).update(
-                sqlCaptor.capture(),
-                eq(Timestamp.from(FIXED_NOW)),
-                eq(Timestamp.from(FIXED_NOW)),
+        ArgumentCaptor<String> selectSqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(db).queryForList(
+                selectSqlCaptor.capture(),
+                eq(UUID.class),
                 eq(sellerId),
                 eq(Timestamp.from(FIXED_NOW))
         );
-        assertThat(sqlCaptor.getValue())
-                .contains("SET trang_thai = 'HET_HAN'")
+        assertThat(selectSqlCaptor.getValue())
                 .contains("trang_thai = 'CONG_KHAI'")
+                .contains("ORDER BY ma_tin ASC")
+                .contains("FOR UPDATE SKIP LOCKED")
                 .doesNotContain("GIU_CHO");
+
+        assertThat(executedSql).anySatisfy(sql -> assertThat(sql)
+                .contains("UPDATE tin_dangs")
+                .contains("SET trang_thai = 'HET_HAN'")
+                .contains("version = version + 1"));
+        assertThat(executedSql).anySatisfy(sql -> assertThat(sql)
+                .contains("FROM do_vats")
+                .contains("ORDER BY ma_vat ASC")
+                .contains("FOR UPDATE"));
+        assertThat(executedSql).anySatisfy(sql -> assertThat(sql)
+                .contains("UPDATE do_vats SET version = version + 1"));
     }
 
     @Test

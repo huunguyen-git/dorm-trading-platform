@@ -295,4 +295,72 @@ class ListingConcurrencyTest extends BaseIntegrationTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void nfr02_concurrentWithdrawUpdateAndOverdueReconciliationSharingItemCompleteWithoutDeadlock() throws Exception {
+        SellerAccount seller = createActiveSeller(120);
+        UUID sharedItem = createItem(seller.token(), "Vật phẩm chia sẻ kiểm thử AB-BA");
+
+        String withdrawTargetId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(publishPayload("Tin rút đồng thời", List.of(sharedItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        String updateTargetId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(publishPayload("Tin sửa đồng thời", List.of(sharedItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        String overdueId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(publishPayload("Tin quá hạn cùng vật phẩm", List.of(sharedItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+        db.update(
+                "UPDATE tin_dangs SET published_at = CURRENT_TIMESTAMP - INTERVAL '31 days', expires_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE ma_tin = ?",
+                UUID.fromString(overdueId)
+        );
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Integer> withdrawFuture = pool.submit(() -> {
+                ready.countDown();
+                assertThat(start.await(15, TimeUnit.SECONDS)).isTrue();
+                return given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                        .body(Map.of("version", 0))
+                        .post("/api/v1/listings/{id}/withdraw", withdrawTargetId)
+                        .statusCode();
+            });
+            Future<Integer> updateFuture = pool.submit(() -> {
+                ready.countDown();
+                assertThat(start.await(15, TimeUnit.SECONDS)).isTrue();
+                var body = publishPayload("Tin sửa không deadlock", List.of(sharedItem));
+                body.put("action", "KEEP");
+                body.put("version", 0);
+                return given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                        .body(body)
+                        .put("/api/v1/listings/{id}", updateTargetId)
+                        .statusCode();
+            });
+
+            assertThat(ready.await(15, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(withdrawFuture.get(30, TimeUnit.SECONDS)).isEqualTo(200);
+            assertThat(updateFuture.get(30, TimeUnit.SECONDS)).isEqualTo(200);
+
+            assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(withdrawTargetId)))
+                    .isEqualTo("DA_RUT");
+            assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(overdueId)))
+                    .isEqualTo("HET_HAN");
+            assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, sharedItem))
+                    .isEqualTo("KHA_DUNG");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
 }

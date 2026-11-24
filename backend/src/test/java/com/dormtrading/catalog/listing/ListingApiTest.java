@@ -17,14 +17,18 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.stereotype.Component;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import static io.restassured.RestAssured.given;
@@ -37,7 +41,26 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
+@Import(ListingApiTest.PendingRequestEventCapture.class)
 class ListingApiTest extends BaseIntegrationTest {
+
+    @Component
+    static class PendingRequestEventCapture {
+        private final List<ListingUpdatedWithPendingRequestsEvent> events = new CopyOnWriteArrayList<>();
+
+        @EventListener
+        void onListingUpdated(ListingUpdatedWithPendingRequestsEvent event) {
+            events.add(event);
+        }
+
+        List<ListingUpdatedWithPendingRequestsEvent> events() {
+            return List.copyOf(events);
+        }
+
+        void clear() {
+            events.clear();
+        }
+    }
 
     private static final String PASSWORD = "a quiet river beneath stars";
 
@@ -49,6 +72,9 @@ class ListingApiTest extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate db;
+
+    @Autowired
+    private PendingRequestEventCapture eventCapture;
 
     @MockitoBean
     private JavaMailSender mail;
@@ -64,6 +90,7 @@ class ListingApiTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setup() {
+        eventCapture.clear();
         currentTime.set(Instant.now().truncatedTo(ChronoUnit.MILLIS));
         when(clock.instant()).thenAnswer(inv -> currentTime.get());
         doAnswer(invocation -> {
@@ -636,6 +663,17 @@ class ListingApiTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemB))
                 .isEqualTo("KHA_DUNG");
 
+        // UC-17 Alt 2 / ADR §2 domain event hook fired when pendingRequestCount > 0
+        assertThat(eventCapture.events())
+                .hasSize(1)
+                .first()
+                .satisfies(evt -> {
+                    assertThat(evt.listingId()).isEqualTo(UUID.fromString(draftId));
+                    assertThat(evt.sellerId()).isEqualTo(seller.id());
+                    assertThat(evt.pendingRequestCount()).isEqualTo(1);
+                    assertThat(evt.occurredAt()).isNotNull();
+                });
+
         // Stale version -> 409 VERSION_CONFLICT
         editBody.put("version", 1);
         given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
@@ -945,5 +983,189 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("listing.closedAt", nullValue())
                 .body("listing.expiresAt", equalTo(currentTime.get().plus(30, ChronoUnit.DAYS).toString()))
                 .body("quota.activeCount", equalTo(5));
+    }
+
+    @Test
+    void fr13_directInventoryAccessAfterDay30UnlocksAndBumpsVersionAndPreservesHiddenEvidence() {
+        TestUser seller = createUser("Người Bán Kho FR13", true, 100);
+        UUID itemForGetPutDelete = createInventoryItem(seller.token(), "Đèn bàn hết hạn 30 ngày");
+        UUID itemForDirectDelete = createInventoryItem(seller.token(), "Ghế gấp xóa thẳng sau 30 ngày");
+        UUID itemOnHiddenListing = createInventoryItem(seller.token(), "Vật chứng tin bị ẩn");
+
+        Instant day0 = currentTime.get();
+
+        String listingAId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin A hết hạn", 40000, List.of(itemForGetPutDelete)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        String listingBId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin B hết hạn", 45000, List.of(itemForDirectDelete)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        String hiddenListingId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin vi phạm sẽ bị ẩn", 50000, List.of(itemOnHiddenListing)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+        db.update("UPDATE tin_dangs SET trang_thai = 'AN', ly_do_an = 'Vi phạm nội quy' WHERE ma_tin = ?",
+                UUID.fromString(hiddenListingId));
+
+        // Verify locked on Day 0 (version = 1 after publish)
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemForGetPutDelete))
+                .isEqualTo(1L);
+        given().auth().oauth2(seller.token())
+                .get("/api/v1/inventory/{id}", itemForGetPutDelete)
+                .then().statusCode(200)
+                .body("canEdit", equalTo(false))
+                .body("canDelete", equalTo(false));
+
+        // Advance Clock +30 days + 1 minute WITHOUT hitting ANY listing endpoint first!
+        currentTime.set(day0.plus(30, ChronoUnit.DAYS).plus(1, ChronoUnit.MINUTES));
+        String tokenDay31 = relogin(seller);
+
+        // 1. Direct GET /api/v1/inventory/{id} immediately reconciles expiry, unlocks canEdit/canDelete, and bumps do_vats.version (1 -> 2)
+        given().auth().oauth2(tokenDay31)
+                .get("/api/v1/inventory/{id}", itemForGetPutDelete)
+                .then()
+                .statusCode(200)
+                .body("linkedListingCount", equalTo(0))
+                .body("canEdit", equalTo(true))
+                .body("canDelete", equalTo(true))
+                .body("version", equalTo(2));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(listingAId)))
+                .isEqualTo("HET_HAN");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(listingBId)))
+                .isEqualTo("HET_HAN");
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemForGetPutDelete))
+                .isEqualTo(2L);
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemForDirectDelete))
+                .isEqualTo(2L);
+
+        // 2. Direct PUT /api/v1/inventory/{id} with reconciled version=2 succeeds -> version=3
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of(
+                        "tinhTrang", "Đã cập nhật sau khi tin hết hạn",
+                        "hinhAnh", List.of("https://cdn.example.edu.vn/updated-after-expiry.jpg"),
+                        "version", 2
+                ))
+                .put("/api/v1/inventory/{id}", itemForGetPutDelete)
+                .then()
+                .statusCode(200)
+                .body("version", equalTo(3));
+
+        // 3. Direct DELETE /api/v1/inventory/{id}?version=3 succeeds -> 204
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}?version=3", itemForGetPutDelete)
+                .then()
+                .statusCode(204);
+
+        // 4. Direct DELETE on second expired item also succeeds
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}?version=2", itemForDirectDelete)
+                .then()
+                .statusCode(204);
+
+        // 5. Deleting item linked to moderation-hidden (AN) listing MUST be blocked (409) & preserve evidence link
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}", itemOnHiddenListing)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("ITEM_LINKED_TO_LISTING"));
+        Integer evidenceLinks = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_tin = ? AND ma_vat = ?",
+                Integer.class,
+                UUID.fromString(hiddenListingId),
+                itemOnHiddenListing
+        );
+        assertThat(evidenceLinks).isEqualTo(1);
+    }
+
+    @Test
+    void fr13_putKeepOnOverduePublicReconcilesToHetHanAndStaleWithdrawRenewReturnVersionConflict() {
+        TestUser seller = createUser("Người Bán Overdue Keep", true, 100);
+        UUID overdueItem = createInventoryItem(seller.token(), "Sách quá hạn KEEP");
+        UUID retryItem = createInventoryItem(seller.token(), "Sách kiểm thử retry version");
+
+        Instant day0 = currentTime.get();
+
+        // Publish listing 1 (will become overdue CONG_KHAI)
+        String overdueId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin quá hạn chờ PUT KEEP", 65000, List.of(overdueItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        // Verify ListingAssembler coordinate fallback when t.vi_do/t.kinh_do are NULL on a SQL-seeded row
+        db.update("UPDATE tin_dangs SET vi_do = NULL, kinh_do = NULL, ma_khu_vuc = 'UIT' WHERE ma_tin = ?",
+                UUID.fromString(overdueId));
+        given().auth().oauth2(seller.token())
+                .get("/api/v1/listings/mine")
+                .then().statusCode(200)
+                .body("items.find { it.id == '" + overdueId + "' }.latitude", equalTo(10.87f))
+                .body("items.find { it.id == '" + overdueId + "' }.longitude", equalTo(106.8031f));
+
+        // Advance Clock +30 days + 1 minute WITHOUT hitting any other endpoint first
+        currentTime.set(day0.plus(30, ChronoUnit.DAYS).plus(1, ChronoUnit.MINUTES));
+        String tokenDay31 = relogin(seller);
+
+        // PUT KEEP on overdue CONG_KHAI MUST NOT remain CONG_KHAI — reconciles to HET_HAN & bumps do_vats.version
+        var keepBody = validPublishPayload("Tin quá hạn đã sửa tiêu đề", 55000, List.of(overdueItem));
+        keepBody.put("action", "KEEP");
+        keepBody.put("version", 0);
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(keepBody)
+                .put("/api/v1/listings/{id}", overdueId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("HET_HAN"))
+                .body("listing.closedAt", notNullValue())
+                .body("listing.version", equalTo(1))
+                .body("quota.activeCount", equalTo(0));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(overdueId)))
+                .isEqualTo("HET_HAN");
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, overdueItem))
+                .isEqualTo(2L);
+
+        // Stale-version retry checks on POST /renew and POST /withdraw -> 409 VERSION_CONFLICT
+        String retryId = given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin kiểm thử stale version", 50000, List.of(retryItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        // Renew v0 -> v1 succeeds
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 0))
+                .post("/api/v1/listings/{id}/renew", retryId)
+                .then().statusCode(200)
+                .body("listing.version", equalTo(1));
+
+        // Retry POST /renew with stale v0 -> 409 VERSION_CONFLICT
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 0))
+                .post("/api/v1/listings/{id}/renew", retryId)
+                .then().statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
+        // POST /withdraw with stale v0 -> 409 VERSION_CONFLICT
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 0))
+                .post("/api/v1/listings/{id}/withdraw", retryId)
+                .then().statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
+        // POST /withdraw with current v1 -> 200 OK (DA_RUT)
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 1))
+                .post("/api/v1/listings/{id}/withdraw", retryId)
+                .then().statusCode(200)
+                .body("listing.status", equalTo("DA_RUT"))
+                .body("listing.version", equalTo(2));
     }
 }

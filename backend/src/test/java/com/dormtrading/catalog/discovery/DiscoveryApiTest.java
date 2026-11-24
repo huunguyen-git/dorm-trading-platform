@@ -525,6 +525,25 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .statusCode(200)
                 .body("items.id", containsInAnyOrder(freeSingle.toString(), freeCombo.toString()));
 
+        // Vietnamese enum aliases: BAN_LE -> SINGLE, BAN_COMBO -> COMBO, CHO_TANG -> FREE
+        given().queryParam("q", tag).queryParam("type", "BAN_LE")
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("items.id", containsInAnyOrder(paidSingle.toString(), freeSingle.toString()));
+
+        given().queryParam("q", tag).queryParam("type", "BAN_COMBO")
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("items.id", containsInAnyOrder(paidCombo.toString(), freeCombo.toString()));
+
+        given().queryParam("q", tag).queryParam("type", "CHO_TANG")
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("items.id", containsInAnyOrder(freeSingle.toString(), freeCombo.toString()));
+
         // Validation errors
         given().queryParam("minPrice", 200000).queryParam("maxPrice", 100000)
                 .get("/api/v1/listings")
@@ -624,6 +643,39 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(200)
                 .body("items.id", contains(atKtxA.toString(), atBachKhoa.toString(), atUit.toString()));
+
+        // Cross-zone FR-06: sending locationCode + lat + lng + radiusKm together (Mobile filter contract)
+        // must use the zone as origin center and include neighboring zones within 2.0 km (excluding distant KTX_KHU_B/UEL)
+        given()
+                .queryParam("q", tag)
+                .queryParam("locationCode", "KTX_KHU_A")
+                .queryParam("lat", 10.8782)
+                .queryParam("lng", 106.8063)
+                .queryParam("radiusKm", 2.0)
+                .queryParam("sort", "distance_asc")
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("items.id", contains(atKtxA.toString(), atBachKhoa.toString(), atUit.toString()));
+
+        // Cross-zone FR-06: sending locationCode + lat + lng + sort=distance_asc (no radiusKm) sorts across zones
+        given()
+                .queryParam("q", tag)
+                .queryParam("locationCode", "KTX_KHU_A")
+                .queryParam("lat", 10.8782)
+                .queryParam("lng", 106.8063)
+                .queryParam("sort", "distance_asc")
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("items.id", contains(
+                        atKtxA.toString(),
+                        atBachKhoa.toString(),
+                        atUit.toString(),
+                        atKtxB.toString(),
+                        atUel.toString(),
+                        freeTextOnly.toString()
+                ));
 
         // FR-06: arbitrary positive radiusKm works without hardcoded 2/3 km limit (0.5km vs 10km)
         given()
@@ -903,8 +955,8 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 "BAN_LE", "CONG_KHAI", "GIAO_TRINH", null, null, null, "UIT", "UIT", null, null,
                 List.of("https://img.example/e.jpg"), now.minus(31, ChronoUnit.DAYS), pastExpiry, null, List.of(item1));
 
-        // Guest, pending, locked, and active buyer can read CONG_KHAI with full combo details & CHAP_NHAN rating average
-        for (String token : java.util.Arrays.asList(null, pendingUser.token(), lockedUser.token(), buyer.token())) {
+        // Guest and active buyer can read CONG_KHAI with full combo details, CHAP_NHAN rating average, and active buyer flags
+        for (String token : java.util.Arrays.asList(null, buyer.token())) {
             var req = given();
             if (token != null) {
                 req = req.auth().oauth2(token);
@@ -940,6 +992,26 @@ class DiscoveryApiTest extends BaseIntegrationTest {
             assertThat(detailRes.jsonPath().getDouble("seller.averageRating")).isCloseTo(4.5, within(0.001));
 
             // NFR-01 PII Audit on detail response
+            assertNoSellerPii(detailRes.body().asString(), seller);
+        }
+
+        // Authenticated CHO_KICH_HOAT and BI_KHOA accounts can read CONG_KHAI but MUST get buyer interaction flags = false
+        for (String restrictedToken : List.of(pendingUser.token(), lockedUser.token())) {
+            var detailRes = given().auth().oauth2(restrictedToken)
+                    .get("/api/v1/listings/{id}", publicCombo)
+                    .then()
+                    .statusCode(200)
+                    .body("id", equalTo(publicCombo.toString()))
+                    .body("viewer.isOwner", equalTo(false))
+                    .body("viewer.canEdit", equalTo(false))
+                    .body("viewer.canWithdraw", equalTo(false))
+                    .body("viewer.canDelete", equalTo(false))
+                    .body("viewer.canPublish", equalTo(false))
+                    .body("viewer.canRenew", equalTo(false))
+                    .body("viewer.canMessage", equalTo(false))
+                    .body("viewer.canMakeOffer", equalTo(false))
+                    .body("viewer.canReserve", equalTo(false))
+                    .extract();
             assertNoSellerPii(detailRes.body().asString(), seller);
         }
 
@@ -1063,6 +1135,71 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .body("viewer.canDelete", equalTo(false))
                 .body("viewer.canPublish", equalTo(false))
                 .body("viewer.canRenew", equalTo(false));
+
+        // Owner reading own CONG_KHAI with active transaction (DANG_GIAO) -> canPublish & canRenew MUST also be false (parity with ListingAssembler)
+        UUID publicWithActiveTx = createListing(seller.id(), "Tin có giao dịch đang chạy", "Desc", "Mới", 120000,
+                "BAN_LE", "CONG_KHAI", "GIAO_TRINH", null, null, null, "UIT", "UIT", null, null,
+                List.of("https://img.example/act.jpg"), now, futureExpiry, null, List.of(item1));
+        createTransaction(publicWithActiveTx, seller.id(), buyer.id(), 120000, "DANG_GIAO");
+        given().auth().oauth2(seller.token())
+                .get("/api/v1/listings/{id}", publicWithActiveTx)
+                .then()
+                .statusCode(200)
+                .body("viewer.isOwner", equalTo(true))
+                .body("viewer.canEdit", equalTo(false))
+                .body("viewer.canWithdraw", equalTo(false))
+                .body("viewer.canDelete", equalTo(false))
+                .body("viewer.canPublish", equalTo(false))
+                .body("viewer.canRenew", equalTo(false));
+
+        // Explicit MODERATOR non-owner authorization test (admin-web token with ROLE_MODERATOR + ROLE_MEMBER)
+        TestUser moderator = createUser("Kiểm Duyệt Viên", "HOAT_DONG", 120);
+        db.update(
+                "INSERT INTO vai_tro_quan_tri(user_id, loai_vai_tro, bat_dau) VALUES (?, 'KIEM_DUYET_VIEN', ?)",
+                moderator.id(),
+                Timestamp.from(now.minusSeconds(60))
+        );
+        String moderatorToken = given()
+                .header("Origin", "http://localhost:5173")
+                .contentType("application/json")
+                .body(java.util.Map.of("email", moderator.email(), "password", PASSWORD, "client", "admin-web"))
+                .post("/api/v1/auth/login")
+                .then()
+                .statusCode(200)
+                .extract().jsonPath().getString("token");
+
+        // MODERATOR cannot read another member's NHAP detail (404)
+        given().auth().oauth2(moderatorToken)
+                .get("/api/v1/listings/{id}", draftListing)
+                .then()
+                .statusCode(404)
+                .body("code", equalTo("LISTING_NOT_FOUND"));
+
+        // MODERATOR cannot PUT or DELETE another member's listing (403 FORBIDDEN)
+        given().auth().oauth2(moderatorToken)
+                .contentType("application/json")
+                .body(java.util.Map.of(
+                        "action", "KEEP",
+                        "title", "Moderator hijack attempt",
+                        "description", "Blocked",
+                        "condition", "Tốt",
+                        "priceVnd", 100000,
+                        "categoryId", "GIAO_TRINH",
+                        "locationCode", "UIT",
+                        "images", List.of("https://img.example/mod.jpg"),
+                        "itemIds", List.of(item1),
+                        "version", 0
+                ))
+                .put("/api/v1/listings/{id}", publicCombo)
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("FORBIDDEN"));
+
+        given().auth().oauth2(moderatorToken)
+                .delete("/api/v1/listings/{id}?version=0", publicCombo)
+                .then()
+                .statusCode(403)
+                .body("code", equalTo("FORBIDDEN"));
     }
 
     private void assertNoSellerPii(String responseBody, TestUser seller) {

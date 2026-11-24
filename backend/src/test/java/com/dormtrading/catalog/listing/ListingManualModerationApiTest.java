@@ -184,7 +184,7 @@ class ListingManualModerationApiTest {
                 .statusCode(200)
                 .body("listing.status", equalTo("DA_RUT"));
 
-        // 4. Republish DA_RUT via POST /publish -> CHO_DUYET, then hard delete CHO_DUYET -> 204
+        // 4. Republish DA_RUT via POST /publish -> CHO_DUYET
         given()
                 .auth().oauth2(token)
                 .contentType(ContentType.JSON)
@@ -195,10 +195,44 @@ class ListingManualModerationApiTest {
                 .statusCode(200)
                 .body("listing.status", equalTo("CHO_DUYET"));
 
+        // 5. FR-05 / FR-13: Reopening HET_HAN via POST /renew under MANUAL_QUEUE MUST go to CHO_DUYET (not CONG_KHAI)
+        db.update(
+                """
+                UPDATE tin_dangs
+                SET trang_thai = 'HET_HAN',
+                    published_at = CURRENT_TIMESTAMP - INTERVAL '31 days',
+                    expires_at = CURRENT_TIMESTAMP - INTERVAL '1 day',
+                    closed_at = CURRENT_TIMESTAMP - INTERVAL '1 day'
+                WHERE ma_tin = ?
+                """,
+                UUID.fromString(pendingId)
+        );
+        Long itemVersionBeforeRenew = db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, item);
+
+        given()
+                .auth().oauth2(token)
+                .contentType(ContentType.JSON)
+                .body(Map.of("version", 3))
+                .when()
+                .post("/api/v1/listings/{id}/renew", pendingId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("CHO_DUYET"))
+                .body("listing.publishedAt", nullValue())
+                .body("listing.expiresAt", nullValue())
+                .body("listing.closedAt", nullValue())
+                .body("listing.renewalCount", equalTo(1))
+                .body("listing.version", equalTo(4))
+                .body("quota.activeCount", equalTo(0));
+
+        Long itemVersionAfterRenew = db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, item);
+        org.assertj.core.api.Assertions.assertThat(itemVersionAfterRenew).isEqualTo(itemVersionBeforeRenew + 1);
+
+        // 6. Hard delete CHO_DUYET -> 204
         given()
                 .auth().oauth2(token)
                 .when()
-                .delete("/api/v1/listings/{id}?version=3", pendingId)
+                .delete("/api/v1/listings/{id}?version=4", pendingId)
                 .then()
                 .statusCode(204);
     }

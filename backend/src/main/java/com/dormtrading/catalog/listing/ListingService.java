@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -60,17 +61,20 @@ public class ListingService {
     private final ListingLifecycleHelper lifecycleHelper;
     private final ReputationLedgerService reputationLedger;
     private final ListingAssembler assembler;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ListingService(
             JdbcTemplate db,
             ListingLifecycleHelper lifecycleHelper,
             ReputationLedgerService reputationLedger,
-            ListingAssembler assembler
+            ListingAssembler assembler,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.db = db;
         this.lifecycleHelper = lifecycleHelper;
         this.reputationLedger = reputationLedger;
         this.assembler = assembler;
+        this.eventPublisher = eventPublisher;
     }
 
     private record LockedSeller(
@@ -160,8 +164,10 @@ public class ListingService {
                     .orElseThrow(() -> new AuthFailure(400, "INVALID_INPUT", "Trạng thái tin đăng không hợp lệ."));
         }
 
-        lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
+        // Stamp 7-day reminders (tin_dangs only) before expiry reconciliation (tin_dangs -> do_vats)
+        // so tin_dangs is never locked after do_vats.
         lifecycleHelper.markRenewalRemindersForSeller(sellerId);
+        lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
 
         long totalElements = countSellerListings(sellerId, statusFilter);
         Instant currentTime = lifecycleHelper.now();
@@ -209,11 +215,15 @@ public class ListingService {
                 isPublish
         );
 
+        Instant now = lifecycleHelper.now();
         LockedSeller seller;
+        List<UUID> expiredItemIds = List.of();
         if (isPublish) {
             // Lock order (1): thanh_viens FOR UPDATE
             seller = lockAndVerifyActiveSeller(sellerId);
-            lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
+            // Lock order (2): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
+            List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
+            expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
             ListingDtos.ListingQuotaDto preQuota = lifecycleHelper.loadQuotaForScore(sellerId, seller.reputationScore());
             if (!preQuota.canPublish()) {
                 throw new AuthFailure(
@@ -227,13 +237,16 @@ public class ListingService {
             seller = verifyActiveSellerReadOnly(sellerId);
         }
 
-        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE
-        if (!fields.itemIds().isEmpty()) {
-            Map<UUID, LockedItem> lockedItems = lockItemsSorted(fields.itemIds());
-            verifyOwnedAndAvailable(fields.itemIds(), lockedItems, sellerId);
+        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE (union of new + expired listing items)
+        LinkedHashSet<UUID> allItemsToLock = new LinkedHashSet<>(fields.itemIds());
+        allItemsToLock.addAll(expiredItemIds);
+        if (!allItemsToLock.isEmpty()) {
+            Map<UUID, LockedItem> lockedItems = lockItemsSorted(allItemsToLock);
+            if (!fields.itemIds().isEmpty()) {
+                verifyOwnedAndAvailable(fields.itemIds(), lockedItems, sellerId);
+            }
         }
 
-        Instant now = lifecycleHelper.now();
         UUID listingId = UUID.randomUUID();
         String targetStatus = isPublish ? lifecycleHelper.targetPublishStatus() : ListingDtos.ListingStatus.NHAP.name();
         Instant publishedAt = ListingDtos.ListingStatus.CONG_KHAI.name().equals(targetStatus) ? now : null;
@@ -243,7 +256,9 @@ public class ListingService {
         insertListing(listingId, sellerId, fields, listingType, targetStatus, publishedAt, expiresAt, now);
         if (!fields.itemIds().isEmpty()) {
             insertListingItems(listingId, fields.itemIds());
-            bumpItemsVersion(fields.itemIds(), now);
+        }
+        if (!allItemsToLock.isEmpty()) {
+            bumpItemsVersion(allItemsToLock, now);
         }
 
         ListingDtos.ListingDetailDto detail = assembler.loadDetailForOwner(listingId, now);
@@ -265,16 +280,14 @@ public class ListingService {
         String action = parseUpdateAction(req.action());
         boolean wantsPublish = ACTION_PUBLISH.equals(action);
 
-        LockedSeller seller;
-        if (wantsPublish) {
-            // Lock order (1): thanh_viens FOR UPDATE before tin_dangs
-            seller = lockAndVerifyActiveSeller(sellerId);
-            lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
-        } else {
-            seller = verifyActiveSellerReadOnly(sellerId);
-        }
+        Instant now = lifecycleHelper.now();
 
-        // Lock order (2): tin_dangs FOR UPDATE
+        // Lock order (1): thanh_viens FOR UPDATE before tin_dangs for both KEEP and PUBLISH
+        LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
+        // Lock order (2a): expire seller's other overdue CONG_KHAI listings before locking target tin_dangs
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSellerExcluding(sellerId, listingId, now);
+
+        // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
         assertOwner(current, sellerId);
         assertNotLocked(current);
@@ -287,11 +300,16 @@ public class ListingService {
         List<UUID> effectiveItemIds = req.itemIds() != null ? req.itemIds() : oldItemIds;
 
         String currentStatus = current.status();
-        boolean currentlyActivePublicOrPending = ListingDtos.ListingStatus.CONG_KHAI.name().equals(currentStatus)
-                || ListingDtos.ListingStatus.CHO_DUYET.name().equals(currentStatus);
+        boolean targetOverduePublic = ListingLifecycleHelper.isExpired(currentStatus, current.expiresAt(), now);
+        String effectiveStatus = targetOverduePublic
+                ? ListingDtos.ListingStatus.HET_HAN.name()
+                : currentStatus;
+
+        boolean currentlyActivePublicOrPending = ListingDtos.ListingStatus.CONG_KHAI.name().equals(effectiveStatus)
+                || ListingDtos.ListingStatus.CHO_DUYET.name().equals(effectiveStatus);
         boolean transitioningFromInactiveToPublish = wantsPublish && !currentlyActivePublicOrPending;
         boolean transitioningFromPendingToPublic = wantsPublish
-                && ListingDtos.ListingStatus.CHO_DUYET.name().equals(currentStatus)
+                && ListingDtos.ListingStatus.CHO_DUYET.name().equals(effectiveStatus)
                 && lifecycleHelper.moderationMode() == ListingDtos.ModerationMode.AUTO_PRECHECK;
         boolean requiresQuotaCheck = transitioningFromInactiveToPublish || transitioningFromPendingToPublic;
         boolean requiresFullValidation = wantsPublish || currentlyActivePublicOrPending;
@@ -326,9 +344,11 @@ public class ListingService {
             }
         }
 
-        // Lock order (3): union of old + new do_vats sorted ascending FOR UPDATE
+        // Lock order (3): union of old + new + expired listings' do_vats sorted ascending FOR UPDATE
+        List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
         LinkedHashSet<UUID> allInvolvedItemIds = new LinkedHashSet<>(oldItemIds);
         allInvolvedItemIds.addAll(fields.itemIds());
+        allInvolvedItemIds.addAll(expiredItemIds);
         if (!allInvolvedItemIds.isEmpty()) {
             Map<UUID, LockedItem> lockedItems = lockItemsSorted(allInvolvedItemIds);
             Set<UUID> oldSet = Set.copyOf(oldItemIds);
@@ -351,8 +371,7 @@ public class ListingService {
             }
         }
 
-        Instant now = lifecycleHelper.now();
-        String nextStatus = resolveUpdatedStatus(currentStatus, wantsPublish);
+        String nextStatus = resolveUpdatedStatus(effectiveStatus, wantsPublish);
         Instant nextPublishedAt = current.publishedAt();
         Instant nextExpiresAt = current.expiresAt();
         Instant nextRenewalRemindedAt = current.renewalRemindedAt();
@@ -368,7 +387,11 @@ public class ListingService {
             }
             nextRenewalRemindedAt = null;
             nextClosedAt = null;
-        } else if (ListingDtos.ListingStatus.CONG_KHAI.name().equals(currentStatus)
+        } else if (targetOverduePublic) {
+            // FR-13: overdue CONG_KHAI listing reconciled to HET_HAN on KEEP edit
+            nextClosedAt = now;
+            nextRenewalRemindedAt = null;
+        } else if (ListingDtos.ListingStatus.CONG_KHAI.name().equals(effectiveStatus)
                 && ListingDtos.ListingStatus.CHO_DUYET.name().equals(nextStatus)) {
             // MANUAL_QUEUE re-moderation on editing a CONG_KHAI listing
             nextPublishedAt = null;
@@ -398,15 +421,27 @@ public class ListingService {
         Set<UUID> affectedItems = syncListingItems(listingId, oldItemIds, fields.itemIds());
         boolean becameInventoryActive = !ListingDtos.ListingStatus.isActiveForInventoryLink(currentStatus)
                 && ListingDtos.ListingStatus.isActiveForInventoryLink(nextStatus);
-        if (becameInventoryActive) {
+        boolean becameInventoryInactive = ListingDtos.ListingStatus.isActiveForInventoryLink(currentStatus)
+                && !ListingDtos.ListingStatus.isActiveForInventoryLink(nextStatus);
+        if (becameInventoryActive || becameInventoryInactive) {
+            affectedItems.addAll(oldItemIds);
             affectedItems.addAll(fields.itemIds());
         }
+        affectedItems.addAll(expiredItemIds);
         if (!affectedItems.isEmpty()) {
             bumpItemsVersion(affectedItems, now);
         }
 
         ListingDtos.ListingDetailDto detail = assembler.loadDetailForOwner(listingId, now);
         ListingDtos.ListingQuotaDto quota = lifecycleHelper.loadQuotaForScore(sellerId, seller.reputationScore());
+        if (detail.pendingRequestCount() > 0) {
+            eventPublisher.publishEvent(new ListingUpdatedWithPendingRequestsEvent(
+                    listingId,
+                    sellerId,
+                    detail.pendingRequestCount(),
+                    now
+            ));
+        }
         return new ListingDtos.ListingMutationResponse(detail, quota);
     }
 
@@ -419,11 +454,14 @@ public class ListingService {
             throw new AuthFailure(400, "INVALID_INPUT", "Thiếu thông tin phiên bản dữ liệu (version).");
         }
 
+        Instant now = lifecycleHelper.now();
+
         // Lock order (1): thanh_viens FOR UPDATE
         LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
-        lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
+        // Lock order (2a): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
 
-        // Lock order (2): tin_dangs FOR UPDATE
+        // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
         assertOwner(current, sellerId);
         assertNotLocked(current);
@@ -468,11 +506,13 @@ public class ListingService {
             );
         }
 
-        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE
-        Map<UUID, LockedItem> lockedItems = lockItemsSorted(validated.itemIds());
+        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE (union of published + expired listing items)
+        List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
+        LinkedHashSet<UUID> allItemsToLock = new LinkedHashSet<>(validated.itemIds());
+        allItemsToLock.addAll(expiredItemIds);
+        Map<UUID, LockedItem> lockedItems = lockItemsSorted(allItemsToLock);
         verifyOwnedAndAvailable(validated.itemIds(), lockedItems, sellerId);
 
-        Instant now = lifecycleHelper.now();
         String targetStatus = lifecycleHelper.targetPublishStatus();
         Instant publishedAt = ListingDtos.ListingStatus.CONG_KHAI.name().equals(targetStatus) ? now : null;
         Instant expiresAt = ListingLifecycleHelper.calculateExpiresAt(publishedAt);
@@ -504,7 +544,7 @@ public class ListingService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột đồng thời khi công khai tin đăng.");
         }
 
-        bumpItemsVersion(validated.itemIds(), now);
+        bumpItemsVersion(allItemsToLock, now);
 
         ListingDtos.ListingDetailDto detail = assembler.loadDetailForOwner(listingId, now);
         ListingDtos.ListingQuotaDto quota = lifecycleHelper.loadQuotaForScore(sellerId, seller.reputationScore());
@@ -520,14 +560,18 @@ public class ListingService {
             throw new AuthFailure(400, "INVALID_INPUT", "Thiếu thông tin phiên bản dữ liệu (version).");
         }
 
-        verifyActiveSellerReadOnly(sellerId);
+        Instant now = lifecycleHelper.now();
 
-        // Lock order (2): tin_dangs FOR UPDATE
+        // Lock order (1): thanh_viens FOR UPDATE
+        LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
+        // Lock order (2a): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
+
+        // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
         assertOwner(current, sellerId);
         assertNotLocked(current);
 
-        Instant now = lifecycleHelper.now();
         if (!WITHDRAWABLE_STATUSES.contains(current.status())
                 || ListingLifecycleHelper.isExpired(current.status(), current.expiresAt(), now)) {
             throw new AuthFailure(
@@ -540,10 +584,13 @@ public class ListingService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Tin đăng đã thay đổi bởi thao tác khác. Vui lòng làm mới.");
         }
 
-        // Lock order (3): linked do_vats ORDER BY ma_vat ASC FOR UPDATE (never mutate do_vats.trang_thai!)
+        // Lock order (3): linked + expired do_vats ORDER BY ma_vat ASC FOR UPDATE (never mutate do_vats.trang_thai!)
         List<UUID> linkedItemIds = loadLinkedItemIds(listingId);
-        if (!linkedItemIds.isEmpty()) {
-            lockItemsSorted(linkedItemIds);
+        List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
+        LinkedHashSet<UUID> allItemsToLock = new LinkedHashSet<>(linkedItemIds);
+        allItemsToLock.addAll(expiredItemIds);
+        if (!allItemsToLock.isEmpty()) {
+            lockItemsSorted(allItemsToLock);
         }
 
         int updated = db.update(
@@ -565,12 +612,12 @@ public class ListingService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột đồng thời khi rút tin đăng.");
         }
 
-        if (!linkedItemIds.isEmpty()) {
-            bumpItemsVersion(linkedItemIds, now);
+        if (!allItemsToLock.isEmpty()) {
+            bumpItemsVersion(allItemsToLock, now);
         }
 
         ListingDtos.ListingDetailDto detail = assembler.loadDetailForOwner(listingId, now);
-        ListingDtos.ListingQuotaDto quota = lifecycleHelper.loadQuota(sellerId);
+        ListingDtos.ListingQuotaDto quota = lifecycleHelper.loadQuotaForScore(sellerId, seller.reputationScore());
         return new ListingDtos.ListingMutationResponse(detail, quota);
     }
 
@@ -583,11 +630,14 @@ public class ListingService {
             throw new AuthFailure(400, "INVALID_INPUT", "Thiếu thông tin phiên bản dữ liệu (version).");
         }
 
+        Instant now = lifecycleHelper.now();
+
         // Lock order (1): thanh_viens FOR UPDATE
         LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
-        lifecycleHelper.reconcileExpiredListingsForSeller(sellerId);
+        // Lock order (2a): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
 
-        // Lock order (2): tin_dangs FOR UPDATE
+        // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
         assertOwner(current, sellerId);
         assertNotLocked(current);
@@ -637,18 +687,24 @@ public class ListingService {
             throw new AuthFailure(400, "INVALID_INPUT", "Tin đăng phải gắn ít nhất 1 đồ vật hợp lệ để gia hạn.");
         }
 
-        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE
-        Map<UUID, LockedItem> lockedItems = lockItemsSorted(linkedItemIds);
+        // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE (union of renewed + expired listing items)
+        List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
+        LinkedHashSet<UUID> allItemsToLock = new LinkedHashSet<>(linkedItemIds);
+        allItemsToLock.addAll(expiredItemIds);
+        Map<UUID, LockedItem> lockedItems = lockItemsSorted(allItemsToLock);
         verifyOwnedAndAvailable(linkedItemIds, lockedItems, sellerId);
 
-        Instant now = lifecycleHelper.now();
         Instant newExpiresAt = ListingLifecycleHelper.calculateExpiresAt(now);
         int updated;
         if (isReopeningExpired) {
+            String targetStatus = lifecycleHelper.targetPublishStatus();
+            boolean directPublic = ListingDtos.ListingStatus.CONG_KHAI.name().equals(targetStatus);
+            Instant nextPublishedAt = directPublic ? now : null;
+            Instant nextExpiresAt = directPublic ? newExpiresAt : null;
             updated = db.update(
                     """
                     UPDATE tin_dangs
-                    SET trang_thai = 'CONG_KHAI',
+                    SET trang_thai = ?,
                         published_at = ?,
                         expires_at = ?,
                         closed_at = NULL,
@@ -658,8 +714,9 @@ public class ListingService {
                         version = version + 1
                     WHERE ma_tin = ? AND nguoi_dang_id = ? AND version = ?
                     """,
-                    Timestamp.from(now),
-                    Timestamp.from(newExpiresAt),
+                    targetStatus,
+                    toTimestamp(nextPublishedAt),
+                    toTimestamp(nextExpiresAt),
                     Timestamp.from(now),
                     listingId,
                     sellerId,
@@ -687,8 +744,12 @@ public class ListingService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột đồng thời khi gia hạn tin đăng.");
         }
 
+        LinkedHashSet<UUID> itemsToBump = new LinkedHashSet<>(expiredItemIds);
         if (isReopeningExpired) {
-            bumpItemsVersion(linkedItemIds, now);
+            itemsToBump.addAll(linkedItemIds);
+        }
+        if (!itemsToBump.isEmpty()) {
+            bumpItemsVersion(itemsToBump, now);
         }
 
         ListingDtos.ListingDetailDto detail = assembler.loadDetailForOwner(listingId, now);
@@ -700,7 +761,9 @@ public class ListingService {
         if (listingId == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mã tin đăng không hợp lệ.");
         }
-        verifyActiveSellerReadOnly(sellerId);
+
+        // Lock order (1): thanh_viens FOR UPDATE
+        lockAndVerifyActiveSeller(sellerId);
 
         // Lock order (2): tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);

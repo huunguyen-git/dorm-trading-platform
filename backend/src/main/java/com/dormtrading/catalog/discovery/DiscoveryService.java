@@ -169,7 +169,7 @@ public class DiscoveryService {
         if (input.lat() != null && input.lng() != null) {
             originLat = input.lat();
             originLng = input.lng();
-            applyExactLocationCodeFilter = trimmedLocationCode != null;
+            applyExactLocationCodeFilter = trimmedLocationCode != null && !needsOriginCoords;
         } else if (needsOriginCoords) {
             if (trimmedLocationCode == null) {
                 throw new AuthFailure(
@@ -442,24 +442,9 @@ public class DiscoveryService {
             ListingValidation.validateCoordinates(lat, lng);
         }
 
-        Instant now = lifecycleHelper.now();
-        Timestamp nowTs = Timestamp.from(now);
-
         // Lazily expire this specific CONG_KHAI listing if expires_at <= now (never closes GIU_CHO)
-        db.update(
-                """
-                UPDATE tin_dangs
-                SET trang_thai = 'HET_HAN', closed_at = ?, updated_at = ?, version = version + 1
-                WHERE ma_tin = ?
-                  AND trang_thai = 'CONG_KHAI'
-                  AND expires_at IS NOT NULL
-                  AND expires_at <= ?
-                """,
-                nowTs,
-                nowTs,
-                listingId,
-                nowTs
-        );
+        lifecycleHelper.reconcileExpiredListingById(listingId);
+        Instant now = lifecycleHelper.now();
 
         List<DetailRow> rows = db.query(
                 """
@@ -638,17 +623,18 @@ public class DiscoveryService {
                 || ListingDtos.ListingStatus.KET_THUC.name().equals(row.status())
                 || ListingDtos.ListingStatus.AN.name().equals(row.status());
         boolean ownerCanMutate = isOwner && isActiveMember;
+        boolean buyerCanInteract = !isOwner && (jwt == null || isActiveMember);
 
         ListingDtos.ListingViewerContextDto viewer = new ListingDtos.ListingViewerContextDto(
                 isOwner,
                 ownerCanMutate && !isLockedStatus && !hasActiveTx,
-                ownerCanMutate && (isPublic || isPendingModeration) && !hasActiveTx,
+                ownerCanMutate && !isLockedStatus && (isPublic || isPendingModeration) && !hasActiveTx,
                 ownerCanMutate && !isLockedStatus && !hasActiveTx && totalTxCount == 0,
-                ownerCanMutate && (isDraft || isWithdrawn || isExpired),
-                ownerCanMutate && (isPublic || isExpired),
-                !isOwner && isPublic && !isFree && !hasUnavailableItems,
-                !isOwner && isPublic && !hasUnavailableItems,
-                !isOwner && (isPublic || isReserved)
+                ownerCanMutate && !isLockedStatus && !hasActiveTx && (isDraft || isWithdrawn || isExpired),
+                ownerCanMutate && !isLockedStatus && !hasActiveTx && (isPublic || isExpired),
+                buyerCanInteract && isPublic && !isFree && !hasUnavailableItems,
+                buyerCanInteract && isPublic && !hasUnavailableItems,
+                buyerCanInteract && (isPublic || isReserved)
         );
 
         String hiddenReason = isOwner ? row.hiddenReason() : null;
@@ -825,10 +811,16 @@ public class DiscoveryService {
             return null;
         }
         String upper = trimmed.toUpperCase(Locale.ROOT);
-        if (!"SINGLE".equals(upper) && !"COMBO".equals(upper) && !"FREE".equals(upper)) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Loại tin đăng không hợp lệ. Giá trị hợp lệ: SINGLE, COMBO, FREE.");
-        }
-        return upper;
+        return switch (upper) {
+            case "SINGLE", "BAN_LE" -> "SINGLE";
+            case "COMBO", "BAN_COMBO" -> "COMBO";
+            case "FREE", "CHO_TANG" -> "FREE";
+            default -> throw new AuthFailure(
+                    400,
+                    "INVALID_INPUT",
+                    "Loại tin đăng không hợp lệ. Giá trị hợp lệ: SINGLE, COMBO, FREE, BAN_LE, BAN_COMBO, CHO_TANG."
+            );
+        };
     }
 
     private static String normalizeSort(String sort) {
