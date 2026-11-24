@@ -58,8 +58,8 @@ Nghiệm thu từ đồ vật trong kho tới tin đăng, thương lượng, gi�
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P2-01 | Đăng tin, Sửa tin & Rút/Xóa tin ([UC-10](use-cases/UC-10.md), [UC-17](use-cases/UC-17.md), [UC-18](use-cases/UC-18.md)) | — | 24/11 | Chưa thực hiện | — |
-| P2-02 | Tìm kiếm, Khám phá & Xem chi tiết tin ([UC-19](use-cases/UC-19.md), [UC-20](use-cases/UC-20.md)) | — | 22/11 | Chưa thực hiện | — |
+| P2-01 | Đăng tin, Sửa tin & Rút/Xóa tin ([UC-10](use-cases/UC-10.md), [UC-17](use-cases/UC-17.md), [UC-18](use-cases/UC-18.md)) | — | 24/11 | Đang thực hiện | [Spec P2-01](specs/P2-01.md) · [Quyết định kỹ thuật P2-01/P2-02](decisions/P2-01-P2-02-tin-dang-tim-kiem-va-media.md) · Đã chốt hợp đồng API, lược đồ `V6`, media và tiêu chí nghiệm thu; đang triển khai backend & mobile. |
+| P2-02 | Tìm kiếm, Khám phá & Xem chi tiết tin ([UC-19](use-cases/UC-19.md), [UC-20](use-cases/UC-20.md)) | — | 22/11 | Đang thực hiện | [Spec P2-02](specs/P2-02.md) · [Quyết định kỹ thuật P2-01/P2-02](decisions/P2-01-P2-02-tin-dang-tim-kiem-va-media.md) · Đã chốt hợp đồng tìm kiếm/lọc phân cấp, chi tiết tin và kiểm quyền công khai; đang triển khai backend & mobile. |
 | P2-03 | Nhắn tin & Thương lượng giá ([UC-21](use-cases/UC-21.md)) | — | 28/11 | Chưa thực hiện | — |
 | P2-04 | Yêu cầu, Chấp nhận & Hủy giữ chỗ ([UC-22](use-cases/UC-22.md), [UC-23](use-cases/UC-23.md), [UC-24](use-cases/UC-24.md)) | — | 28/11 | Chưa thực hiện | — |
 | P2-05 | Hẹn lịch giao dịch & Báo bắt đầu giao ([UC-25](use-cases/UC-25.md), [UC-26](use-cases/UC-26.md)) | — | 28/11 | Chưa thực hiện | — |
