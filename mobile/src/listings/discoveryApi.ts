@@ -63,8 +63,15 @@ export function buildListingSearchQuery(filters: DiscoverySearchFilters = {}): s
   const normalizedType = normalizeSearchTypeParam(filters.type);
   if (normalizedType) pairs.push(['type', normalizedType]);
 
+  const hasOriginCoords = isFiniteNumber(filters.lat) && isFiniteNumber(filters.lng);
+  const hasRadius = isFiniteNumber(filters.radiusKm) && filters.radiusKm > 0;
+  const isCrossZoneDistanceQuery =
+    hasOriginCoords && (hasRadius || filters.sort === 'distance_asc');
+
   const locationCode = filters.locationCode?.trim();
-  if (locationCode) pairs.push(['locationCode', locationCode]);
+  if (locationCode && !isCrossZoneDistanceQuery) {
+    pairs.push(['locationCode', locationCode]);
+  }
 
   const location = filters.location?.trim();
   if (location) pairs.push(['location', location]);
@@ -75,7 +82,7 @@ export function buildListingSearchQuery(filters: DiscoverySearchFilters = {}): s
   if (isFiniteNumber(filters.lng)) {
     pairs.push(['lng', String(filters.lng)]);
   }
-  if (isFiniteNumber(filters.radiusKm) && filters.radiusKm > 0) {
+  if (hasRadius) {
     pairs.push(['radiusKm', String(filters.radiusKm)]);
   }
 
@@ -119,8 +126,25 @@ export async function searchListings(filters: DiscoverySearchFilters = {}): Prom
   return normalizeListingPage(raw);
 }
 
-export async function fetchListingDetail(id: string): Promise<ListingDetail> {
-  const raw = await api<unknown>(`/listings/${encodeURIComponent(id)}`);
+export interface ListingDetailCoords {
+  lat?: number | null;
+  lng?: number | null;
+}
+
+export async function fetchListingDetail(
+  id: string,
+  coords?: ListingDetailCoords,
+): Promise<ListingDetail> {
+  const pairs: Array<[string, string]> = [];
+  if (isFiniteNumber(coords?.lat) && isFiniteNumber(coords?.lng)) {
+    pairs.push(['lat', String(coords.lat)]);
+    pairs.push(['lng', String(coords.lng)]);
+  }
+  const query =
+    pairs.length > 0
+      ? `?${pairs.map(([key, val]) => `${encodeURIComponent(key)}=${encodeURIComponent(val)}`).join('&')}`
+      : '';
+  const raw = await api<unknown>(`/listings/${encodeURIComponent(id)}${query}`);
   return normalizeListingDetail(raw);
 }
 

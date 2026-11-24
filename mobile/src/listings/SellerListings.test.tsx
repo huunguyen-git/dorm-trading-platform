@@ -1,12 +1,13 @@
 import React from 'react';
 import { Alert } from 'react-native';
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { RestrictedAccountError } from '../api/client';
 import { useSession, type AccountRestriction } from '../auth/session';
 import * as inventoryApi from '../inventory/api';
 import type { InventoryItem } from '../inventory/types';
 import * as imagePicker from '../media/imagePicker';
+import { useDiscovery } from './discoveryStore';
 import * as sellerApi from './sellerApi';
 import { useSellerListings } from './sellerStore';
 import type {
@@ -20,23 +21,50 @@ import type {
 import CreateListingScreen from '../screens/CreateListingScreen';
 import EditListingScreen from '../screens/EditListingScreen';
 import MyListingsScreen from '../screens/MyListingsScreen';
+import InventoryPickerSection from '../components/InventoryPickerSection';
 
 jest.setTimeout(15000);
 
 const mockNavigate = jest.fn();
+const mockReplace = jest.fn();
 const mockGoBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
+const focusListeners = new Set<() => void>();
+const mockAddListener = jest.fn((event: string, cb: () => void) => {
+  if (event === 'focus') {
+    focusListeners.add(cb);
+  }
+  return () => {
+    focusListeners.delete(cb);
+  };
+});
+let mockThrowOnUseNavigation = false;
 const mockRouteParams: Record<string, unknown> = {};
+
+function emitFocusEvent() {
+  act(() => {
+    for (const listener of Array.from(focusListeners)) {
+      listener();
+    }
+  });
+}
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual<Record<string, unknown>>('@react-navigation/native');
   return {
     ...actual,
-    useNavigation: () => ({
-      navigate: mockNavigate,
-      goBack: mockGoBack,
-      canGoBack: mockCanGoBack,
-    }),
+    useNavigation: () => {
+      if (mockThrowOnUseNavigation) {
+        throw new Error('Couldn\'t find a navigation object.');
+      }
+      return {
+        navigate: mockNavigate,
+        replace: mockReplace,
+        goBack: mockGoBack,
+        canGoBack: mockCanGoBack,
+        addListener: mockAddListener,
+      };
+    },
     useRoute: () => ({
       params: mockRouteParams,
     }),
@@ -305,7 +333,10 @@ function setLockedSession() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockThrowOnUseNavigation = false;
+  focusListeners.clear();
   mockNavigate.mockReset();
+  mockReplace.mockReset();
   mockGoBack.mockReset();
   mockCanGoBack.mockReset();
   mockCanGoBack.mockReturnValue(true);
@@ -329,6 +360,7 @@ beforeEach(() => {
 
   setActiveMemberSession();
   useSellerListings.getState().reset();
+  useDiscovery.getState().reset();
 
   mockedInventoryApi.fetchInventoryItems.mockResolvedValue([...sampleInventory]);
   mockedSellerApi.fetchListingQuota.mockResolvedValue({ ...sampleQuota });
@@ -393,6 +425,57 @@ describe('Seller Store: Session Isolation & RestrictedAccountError', () => {
     );
     expect(useSellerListings.getState().error).toBeNull();
     expect(useSession.getState().restriction?.reason).toBe('Bị khóa');
+  });
+
+  test('marks discovery store stale after create, update, publish, withdraw, renew, and remove', async () => {
+    const baseDetail = makeListingDetail({ id: 'tin-sync-1', status: 'CONG_KHAI', version: 1 });
+    const mutationRes = { listing: baseDetail, quota: sampleQuota };
+    mockedSellerApi.createListing.mockResolvedValueOnce(mutationRes);
+    mockedSellerApi.updateListing.mockResolvedValueOnce(mutationRes);
+    mockedSellerApi.publishListing.mockResolvedValueOnce(mutationRes);
+    mockedSellerApi.withdrawListing.mockResolvedValueOnce(mutationRes);
+    mockedSellerApi.renewListing.mockResolvedValueOnce(mutationRes);
+    mockedSellerApi.deleteListing.mockResolvedValueOnce(undefined);
+
+    expect(useDiscovery.getState().stale).toBe(false);
+    expect(useDiscovery.getState().staleVersion).toBe(0);
+
+    await useSellerListings.getState().create({
+      action: 'PUBLISH',
+      title: 'Test',
+      description: 'Desc',
+      priceVnd: 10000,
+      categoryId: 'DO_GIA_DUNG',
+      images: ['https://example.com/1.jpg'],
+      itemIds: ['item-1'],
+    });
+    expect(useDiscovery.getState().stale).toBe(true);
+    expect(useDiscovery.getState().staleVersion).toBe(1);
+
+    await useSellerListings.getState().update('tin-sync-1', {
+      action: 'KEEP',
+      title: 'Updated',
+      description: 'Desc',
+      priceVnd: 20000,
+      categoryId: 'DO_GIA_DUNG',
+      images: ['https://example.com/1.jpg'],
+      itemIds: ['item-1'],
+      version: 1,
+    });
+    expect(useDiscovery.getState().staleVersion).toBe(2);
+
+    await useSellerListings.getState().publish('tin-sync-1', 2);
+    expect(useDiscovery.getState().staleVersion).toBe(3);
+
+    await useSellerListings.getState().withdraw('tin-sync-1', 3);
+    expect(useDiscovery.getState().staleVersion).toBe(4);
+
+    await useSellerListings.getState().renew('tin-sync-1', 4);
+    expect(useDiscovery.getState().staleVersion).toBe(5);
+
+    await useSellerListings.getState().remove('tin-sync-1', 5);
+    expect(useDiscovery.getState().staleVersion).toBe(6);
+    expect(useDiscovery.getState().stale).toBe(true);
   });
 });
 
@@ -485,7 +568,7 @@ describe('UC-10: CreateListingScreen', () => {
         images: ['https://cdn.dorm.vn/media/media-1.jpg'],
         itemIds: ['item-1'],
       });
-      expect(mockNavigate).toHaveBeenCalledWith('MyListings');
+      expect(mockReplace).toHaveBeenCalledWith('MyListings');
     });
   });
 
@@ -592,7 +675,7 @@ describe('UC-10: CreateListingScreen', () => {
           images: [],
         }),
       );
-      expect(mockNavigate).toHaveBeenCalledWith('MyListings');
+      expect(mockReplace).toHaveBeenCalledWith('MyListings');
     });
   });
 
@@ -684,6 +767,48 @@ describe('UC-10: CreateListingScreen', () => {
     expect(await screen.findByTestId('restricted-account-notice')).toBeTruthy();
     expect(screen.queryByTestId('listing-title-input')).toBeNull();
   });
+
+  test('refreshes empty InventoryPickerSection automatically on focus and via manual refresh button', async () => {
+    mockedInventoryApi.fetchInventoryItems
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([sampleInventory[0]]);
+
+    const { unmount } = render(<CreateListingScreen />);
+    expect(await screen.findByTestId('inventory-picker-empty')).toBeTruthy();
+    expect(screen.getByTestId('inventory-picker-refresh-empty')).toBeTruthy();
+
+    // Returning from InventoryForm triggers focus listener and loads newly added item
+    emitFocusEvent();
+    expect(await screen.findByTestId('inventory-picker-item-item-1')).toBeTruthy();
+    unmount();
+
+    // Manual "Tải lại kho đồ" button inside empty-inventory box also reloads items
+    mockedInventoryApi.fetchInventoryItems
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([sampleInventory[1]]);
+
+    render(<CreateListingScreen />);
+    expect(await screen.findByTestId('inventory-picker-empty')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('inventory-picker-refresh-empty'));
+    expect(await screen.findByTestId('inventory-picker-item-item-2')).toBeTruthy();
+  });
+
+  test('renders standalone InventoryPickerSection cleanly outside a NavigationContainer', async () => {
+    mockThrowOnUseNavigation = true;
+    mockedInventoryApi.fetchInventoryItems.mockResolvedValueOnce([sampleInventory[0]]);
+
+    render(
+      <InventoryPickerSection
+        selectedItemIds={[]}
+        onChangeSelectedItemIds={jest.fn()}
+        mode="single"
+        onChangeMode={jest.fn()}
+        onNavigateToInventoryCreate={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('inventory-picker-item-item-1')).toBeTruthy();
+  });
 });
 
 describe('UC-17: EditListingScreen', () => {
@@ -705,6 +830,11 @@ describe('UC-17: EditListingScreen', () => {
 
     expect(await screen.findByTestId('pending-requests-notice')).toBeTruthy();
     expect(screen.getByText('Đang có 2 yêu cầu mua chờ xử lý')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Tin đang có 2 yêu cầu chờ xử lý; hệ thống ghi nhận sự kiện cập nhật để đồng bộ thông báo ở giai đoạn P2-04.',
+      ),
+    ).toBeTruthy();
     expect(await screen.findByTestId('inventory-picker-item-item-2')).toBeTruthy();
 
     // Expand to combo with item-2 and update title
@@ -789,6 +919,102 @@ describe('UC-17: EditListingScreen', () => {
     expect(screen.getByText(/đang được giữ chỗ trong một giao dịch/)).toBeTruthy();
     expect(screen.getByTestId('listing-title-input').props.editable).toBe(false);
     expect(screen.getByTestId('submit-save-listing').props.accessibilityState.disabled).toBe(true);
+  });
+
+  test('allows unchecking an already-selected unavailable item to resolve ITEM_STATUS_CONFLICT', async () => {
+    mockRouteParams.id = 'tin-combo-conflict';
+    mockedSellerApi.fetchSellerListingDetail.mockResolvedValueOnce(
+      makeListingDetail({
+        id: 'tin-combo-conflict',
+        status: 'CONG_KHAI',
+        isCombo: true,
+        itemCount: 2,
+        version: 4,
+        items: [
+          {
+            id: 'item-1',
+            name: 'Giáo trình Nhập môn CNPM',
+            condition: 'Mới 95%',
+            status: 'KHA_DUNG',
+            images: ['https://example.com/item1.jpg'],
+          },
+          {
+            id: 'item-3',
+            name: 'Nồi cơm điện mini',
+            condition: 'Đang giữ chỗ giao dịch',
+            status: 'DANG_GIU',
+            images: ['https://example.com/item3.jpg'],
+          },
+        ],
+      }),
+    );
+    mockedSellerApi.updateListing.mockResolvedValueOnce({
+      listing: makeListingDetail({ id: 'tin-combo-conflict', version: 5, isCombo: false, itemCount: 1 }),
+      quota: sampleQuota,
+    });
+
+    render(<EditListingScreen />);
+
+    const conflictedItem = await screen.findByTestId('inventory-picker-item-item-3');
+    expect(conflictedItem.props.accessibilityState.checked).toBe(true);
+    expect(conflictedItem.props.accessibilityState.disabled).toBe(false);
+    expect(screen.getByText('Đồ vật không còn khả dụng — chạm để bỏ chọn')).toBeTruthy();
+
+    // Uncheck the unavailable item; once unchecked, it becomes disabled so it cannot be re-selected
+    fireEvent.press(conflictedItem);
+    expect(screen.getByTestId('inventory-picker-item-item-3').props.accessibilityState.checked).toBe(
+      false,
+    );
+    expect(
+      screen.getByTestId('inventory-picker-item-item-3').props.accessibilityState.disabled,
+    ).toBe(true);
+
+    // Switch back to single mode and save cleanly without item-3
+    fireEvent.press(screen.getByTestId('listing-mode-single'));
+    fireEvent.press(screen.getByTestId('submit-save-listing'));
+
+    await waitFor(() => {
+      expect(mockedSellerApi.updateListing).toHaveBeenCalledWith(
+        'tin-combo-conflict',
+        expect.objectContaining({
+          action: 'KEEP',
+          itemIds: ['item-1'],
+          version: 4,
+        }),
+      );
+    });
+  });
+
+  test('shows tailored quota note without "Lưu nháp" promise when editing DA_RUT or HET_HAN with exhausted quota', async () => {
+    const fullQuota: ListingQuota = {
+      ...sampleQuota,
+      activeCount: 5,
+      remaining: 0,
+      canPublish: false,
+    };
+    mockRouteParams.id = 'tin-withdrawn';
+    mockedSellerApi.fetchListingQuota.mockResolvedValueOnce(fullQuota);
+    mockedSellerApi.fetchSellerListingDetail.mockResolvedValueOnce(
+      makeListingDetail({ id: 'tin-withdrawn', status: 'DA_RUT', version: 2 }),
+    );
+
+    const { unmount } = render(<EditListingScreen />);
+    expect(await screen.findByTestId('quota-exhausted-note')).toBeTruthy();
+    expect(screen.queryByTestId('quota-exhausted-banner')).toBeNull();
+    expect(screen.queryByText(/Lưu nháp/)).toBeNull();
+    expect(screen.getByTestId('submit-save-listing').props.accessibilityState.disabled).toBe(false);
+    unmount();
+
+    mockRouteParams.id = 'tin-expired';
+    mockedSellerApi.fetchListingQuota.mockResolvedValueOnce(fullQuota);
+    mockedSellerApi.fetchSellerListingDetail.mockResolvedValueOnce(
+      makeListingDetail({ id: 'tin-expired', status: 'HET_HAN', version: 3 }),
+    );
+
+    render(<EditListingScreen />);
+    expect(await screen.findByTestId('quota-exhausted-note')).toBeTruthy();
+    expect(screen.queryByTestId('quota-exhausted-banner')).toBeNull();
+    expect(screen.queryByText(/Lưu nháp/)).toBeNull();
   });
 });
 

@@ -4,6 +4,7 @@ import { api } from '../api/client';
 
 export const MAX_LISTING_IMAGES = 5;
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_IMAGE_URL_LENGTH = 1000;
 export const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type AllowedImageMimeType = (typeof ALLOWED_IMAGE_MIME_TYPES)[number];
 
@@ -146,8 +147,8 @@ export function validateImageUrl(url: string): ImageValidationResult {
   if (!trimmed) {
     return { valid: false, error: 'Vui lòng nhập đường dẫn ảnh.' };
   }
-  if (trimmed.length > 2048) {
-    return { valid: false, error: 'Đường dẫn ảnh quá dài (tối đa 2048 ký tự).' };
+  if (trimmed.length > MAX_IMAGE_URL_LENGTH) {
+    return { valid: false, error: `Đường dẫn ảnh quá dài (tối đa ${MAX_IMAGE_URL_LENGTH} ký tự).` };
   }
   if (!/^https?:\/\//i.test(trimmed)) {
     return { valid: false, error: 'Đường dẫn ảnh phải bắt đầu bằng http:// hoặc https://.' };

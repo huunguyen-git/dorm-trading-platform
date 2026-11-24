@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useSession } from '../auth/session';
+import { useDiscovery } from './discoveryStore';
 import * as sellerApi from './sellerApi';
 import type {
   CategoryTreeNode,
@@ -201,6 +202,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: added ? totalElements + 1 : totalElements,
         quota: response.quota,
       });
+      useDiscovery.getState().markStale();
       return response;
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
@@ -227,6 +229,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: removed ? Math.max(0, totalElements - 1) : totalElements,
         quota: response.quota,
       });
+      useDiscovery.getState().markStale();
       return response;
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
@@ -253,6 +256,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: removed ? Math.max(0, totalElements - 1) : totalElements,
         quota: response.quota,
       });
+      useDiscovery.getState().markStale();
       return response;
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
@@ -279,6 +283,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: removed ? Math.max(0, totalElements - 1) : totalElements,
         quota: response.quota,
       });
+      useDiscovery.getState().markStale();
       return response;
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
@@ -305,6 +310,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: removed ? Math.max(0, totalElements - 1) : totalElements,
         quota: response.quota,
       });
+      useDiscovery.getState().markStale();
       return response;
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
@@ -343,6 +349,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         totalElements: nextList.length < myListings.length ? Math.max(0, totalElements - 1) : totalElements,
         quota: nextQuota,
       });
+      useDiscovery.getState().markStale();
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
         set({ error: null });

@@ -7,6 +7,11 @@ import {
   Text,
   View,
 } from 'react-native';
+import {
+  useNavigation,
+  type NavigationProp,
+  type ParamListBase,
+} from '@react-navigation/native';
 import { fetchInventoryItems } from '../inventory/api';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
@@ -50,6 +55,14 @@ const ITEM_STATUS_STYLE: Record<
   },
 };
 
+function useOptionalNavigation(): NavigationProp<ParamListBase> | null {
+  try {
+    return useNavigation<NavigationProp<ParamListBase>>();
+  } catch {
+    return null;
+  }
+}
+
 export default function InventoryPickerSection({
   selectedItemIds,
   onChangeSelectedItemIds,
@@ -60,12 +73,15 @@ export default function InventoryPickerSection({
   preselectedItemId,
   onNavigateToInventoryCreate,
 }: InventoryPickerSectionProps) {
+  const navigation = useOptionalNavigation();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const appliedPreselectRef = useRef<string | null>(null);
+  const loadingRef = useRef(false);
 
   const loadInventory = useCallback(async () => {
+    loadingRef.current = true;
     setLoading(true);
     setLoadError('');
     try {
@@ -82,6 +98,7 @@ export default function InventoryPickerSection({
       const parsed = extractApiError(err, 'Không thể tải danh sách kho đồ cá nhân.');
       setLoadError(parsed.message);
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   }, []);
@@ -89,6 +106,15 @@ export default function InventoryPickerSection({
   useEffect(() => {
     void loadInventory();
   }, [loadInventory]);
+
+  useEffect(() => {
+    if (typeof navigation?.addListener !== 'function') return;
+    return navigation.addListener('focus', () => {
+      if (!loadingRef.current) {
+        void loadInventory();
+      }
+    });
+  }, [navigation, loadInventory]);
 
   // Automatically sync mode to combo whenever >= 2 items are selected
   useEffect(() => {
@@ -124,13 +150,15 @@ export default function InventoryPickerSection({
   };
 
   const handleToggleItem = (item: InventoryItem) => {
-    if (disabled || item.trangThai !== 'KHA_DUNG') return;
+    if (disabled) return;
 
     const alreadySelected = selectedItemIds.includes(item.id);
     if (alreadySelected) {
       onChangeSelectedItemIds(selectedItemIds.filter((id) => id !== item.id));
       return;
     }
+
+    if (item.trangThai !== 'KHA_DUNG') return;
 
     if (mode === 'single') {
       onChangeSelectedItemIds([item.id]);
@@ -237,6 +265,12 @@ export default function InventoryPickerSection({
               testID="go-to-inventory-cta"
               onPress={onNavigateToInventoryCreate}
             />
+            <Action
+              secondary
+              title="Tải lại kho đồ"
+              testID="inventory-picker-refresh-empty"
+              onPress={() => void loadInventory()}
+            />
           </View>
         </View>
       ) : (
@@ -254,14 +288,21 @@ export default function InventoryPickerSection({
                   testID="go-to-inventory-cta"
                   onPress={onNavigateToInventoryCreate}
                 />
+                <Action
+                  secondary
+                  title="Tải lại kho đồ"
+                  testID="inventory-picker-refresh-no-available"
+                  onPress={() => void loadInventory()}
+                />
               </View>
             </View>
           ) : null}
 
           {items.map((item) => {
             const statusMeta = ITEM_STATUS_STYLE[item.trangThai] ?? ITEM_STATUS_STYLE.KHA_DUNG;
-            const isSelectable = item.trangThai === 'KHA_DUNG' && !disabled;
             const isSelected = selectedItemIds.includes(item.id);
+            const isUnavailable = item.trangThai !== 'KHA_DUNG';
+            const canToggle = !disabled && (!isUnavailable || isSelected);
             const thumb = item.hinhAnh[0];
 
             return (
@@ -270,13 +311,14 @@ export default function InventoryPickerSection({
                 testID={`inventory-picker-item-${item.id}`}
                 accessibilityRole="checkbox"
                 accessibilityLabel={item.ten}
-                accessibilityState={{ checked: isSelected, disabled: !isSelectable }}
-                disabled={!isSelectable}
+                accessibilityState={{ checked: isSelected, disabled: !canToggle }}
+                disabled={!canToggle}
                 onPress={() => handleToggleItem(item)}
                 style={[
                   styles.itemCard,
                   isSelected && styles.itemCardSelected,
-                  !isSelectable && styles.itemCardDisabled,
+                  isSelected && isUnavailable && styles.itemCardSelectedWarning,
+                  !canToggle && styles.itemCardDisabled,
                 ]}
               >
                 <View style={styles.checkbox}>
@@ -284,7 +326,7 @@ export default function InventoryPickerSection({
                     style={[
                       styles.checkboxInner,
                       isSelected && styles.checkboxInnerSelected,
-                      !isSelectable && styles.checkboxInnerDisabled,
+                      !canToggle && styles.checkboxInnerDisabled,
                     ]}
                   >
                     {isSelected ? <Text style={styles.checkmark}>✓</Text> : null}
@@ -315,7 +357,14 @@ export default function InventoryPickerSection({
                     {item.tinhTrang}
                   </Text>
 
-                  {statusMeta.lockReason ? (
+                  {isUnavailable && isSelected ? (
+                    <Text
+                      style={styles.lockReason}
+                      testID={`inventory-picker-unselect-hint-${item.id}`}
+                    >
+                      Đồ vật không còn khả dụng — chạm để bỏ chọn
+                    </Text>
+                  ) : statusMeta.lockReason ? (
                     <Text style={styles.lockReason}>{statusMeta.lockReason}</Text>
                   ) : item.linkedListingCount > 0 ? (
                     <Text style={styles.sharedInfo}>
@@ -436,7 +485,8 @@ const styles = StyleSheet.create({
   emptyCtaWrap: {
     marginTop: space.xs,
     width: '100%',
-    maxWidth: 260,
+    maxWidth: 300,
+    gap: space.sm,
   },
   itemList: {
     gap: space.sm,
@@ -455,6 +505,10 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
     borderWidth: 1.5,
     backgroundColor: '#fdf8f6',
+  },
+  itemCardSelectedWarning: {
+    borderColor: colors.danger,
+    backgroundColor: '#fff5f3',
   },
   itemCardDisabled: {
     backgroundColor: '#f5f4ef',

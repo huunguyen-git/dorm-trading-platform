@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert } from 'react-native';
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { api } from '../api/client';
 import { useSession, type User } from '../auth/session';
 import * as discoveryApi from './discoveryApi';
@@ -13,7 +13,24 @@ import ListingScreen from '../screens/ListingScreen';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const focusListeners = new Set<() => void>();
+const mockAddListener = jest.fn((event: string, cb: () => void) => {
+  if (event === 'focus') {
+    focusListeners.add(cb);
+  }
+  return () => {
+    focusListeners.delete(cb);
+  };
+});
 const mockRouteParams: Record<string, unknown> = {};
+
+function emitFocusEvent() {
+  act(() => {
+    for (const listener of Array.from(focusListeners)) {
+      listener();
+    }
+  });
+}
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native') as Record<string, unknown>;
@@ -22,6 +39,7 @@ jest.mock('@react-navigation/native', () => {
     useNavigation: () => ({
       navigate: mockNavigate,
       goBack: mockGoBack,
+      addListener: mockAddListener,
     }),
     useRoute: () => ({
       params: mockRouteParams,
@@ -236,6 +254,7 @@ const initialLegacyLoad = useListings.getState().load;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  focusListeners.clear();
   for (const key of Object.keys(mockRouteParams)) {
     delete mockRouteParams[key];
   }
@@ -282,7 +301,8 @@ describe('discoveryApi helpers', () => {
     expect(query).toContain('type=COMBO');
     expect(discoveryApi.buildListingSearchQuery({ type: 'BAN_LE' })).toBe('?type=SINGLE');
     expect(discoveryApi.buildListingSearchQuery({ type: 'BAN_COMBO' })).toBe('?type=COMBO');
-    expect(query).toContain('locationCode=KTX_KHU_A');
+    // Cross-zone FR-06: when lat/lng + radiusKm or sort=distance_asc are active, omit locationCode so neighboring zones are included
+    expect(query).not.toContain('locationCode=');
     expect(query).toContain('lat=10.8782');
     expect(query).toContain('lng=106.8063');
     expect(query).toContain('radiusKm=1.5');
@@ -290,7 +310,42 @@ describe('discoveryApi helpers', () => {
     expect(query).toContain('page=1');
     expect(query).toContain('size=20');
 
+    // Exact zone filter WITHOUT radius/distance_asc keeps locationCode
+    const exactZoneQuery = discoveryApi.buildListingSearchQuery({
+      locationCode: 'KTX_KHU_A',
+      lat: 10.8782,
+      lng: 106.8063,
+      sort: 'newest',
+    });
+    expect(exactZoneQuery).toContain('locationCode=KTX_KHU_A');
+    expect(exactZoneQuery).toContain('lat=10.8782');
+    expect(exactZoneQuery).toContain('lng=106.8063');
+
+    // Distance sort without radiusKm still omits locationCode when lat/lng present
+    const distanceOnlyQuery = discoveryApi.buildListingSearchQuery({
+      locationCode: 'KTX_KHU_A',
+      lat: 10.8782,
+      lng: 106.8063,
+      sort: 'distance_asc',
+    });
+    expect(distanceOnlyQuery).not.toContain('locationCode=');
+    expect(distanceOnlyQuery).toContain('sort=distance_asc');
+
+    // Radius without lat/lng preserves locationCode so backend can resolve zone origin
+    const codeOnlyRadius = discoveryApi.buildListingSearchQuery({
+      locationCode: 'KTX_KHU_A',
+      radiusKm: 2,
+    });
+    expect(codeOnlyRadius).toContain('locationCode=KTX_KHU_A');
+    expect(codeOnlyRadius).toContain('radiusKm=2');
+
     expect(discoveryApi.buildListingSearchQuery({ q: '   ', radiusKm: -2, freeOnly: false })).toBe('');
+  });
+
+  test('fetchListingDetail appends lat/lng coords when provided', async () => {
+    mockedApi.mockResolvedValueOnce(sampleDetail1);
+    await discoveryApi.fetchListingDetail('listing-1', { lat: 10.8782, lng: 106.8063 });
+    expect(mockedApi).toHaveBeenCalledWith('/listings/listing-1?lat=10.8782&lng=106.8063');
   });
 
   test('searchListings handles both paged object and bare array responses', async () => {
@@ -390,7 +445,7 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     expect(screen.getByTestId('advanced-filter-panel')).toBeTruthy();
 
     fireEvent.changeText(screen.getByTestId('filter-course-code'), 'SE100');
-    fireEvent.changeText(screen.getByTestId('filter-max-price'), '150000');
+    fireEvent.changeText(screen.getByTestId('filter-max-price'), '150.000');
     fireEvent.press(screen.getByTestId('filter-type-combo'));
     fireEvent.press(screen.getByTestId('filter-location-KTX_KHU_A'));
     fireEvent.changeText(screen.getByTestId('filter-radius-km'), '1.5');
@@ -405,18 +460,25 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
       expect(latest).toContain('courseCode=SE100');
       expect(latest).toContain('maxPrice=150000');
       expect(latest).toContain('type=COMBO');
-      expect(latest).toContain('locationCode=KTX_KHU_A');
+      // Cross-zone FR-06: locationCode omitted from outgoing query while preserved in UI state
+      expect(latest).not.toContain('locationCode=');
       expect(latest).toContain('lat=10.8782');
       expect(latest).toContain('lng=106.8063');
       expect(latest).toContain('radiusKm=1.5');
       expect(latest).toContain('sort=distance_asc');
     });
 
+    // Selected origin zone remains preserved in store and highlighted in UI
+    expect(useDiscovery.getState().filters.locationCode).toBe('KTX_KHU_A');
+
     // Active filter count badge visible
     expect(screen.getByTestId('active-filter-count-badge')).toBeTruthy();
 
     // Toggle free-only & price_asc sort
     fireEvent.press(screen.getByTestId('toggle-advanced-filters'));
+    expect(
+      screen.getByTestId('filter-location-KTX_KHU_A').props.accessibilityState.selected,
+    ).toBe(true);
     fireEvent.press(screen.getByTestId('filter-free-only'));
     fireEvent.press(screen.getByTestId('sort-price_asc'));
     fireEvent.press(screen.getByTestId('apply-filters-button'));
@@ -503,6 +565,47 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
 
     expect(await screen.findByText('Tặng đèn bàn học LED chống cận')).toBeTruthy();
     expect(screen.queryByTestId('load-more-button')).toBeNull();
+  });
+
+  test('reloads ListingsScreen on focus ONLY when discovery store was marked stale', async () => {
+    let fetchCount = 0;
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path === '/categories') return { items: sampleCategories, tree: sampleCategoryTree };
+      if (path === '/locations') return { items: sampleLocations };
+      fetchCount += 1;
+      return {
+        items: [
+          {
+            ...sampleListing1,
+            title: fetchCount === 1 ? 'Tin đăng trước khi sửa' : 'Tin đăng sau khi cập nhật',
+          },
+        ],
+        page: 0,
+        size: 20,
+        totalElements: 1,
+        totalPages: 1,
+      };
+    });
+
+    render(<ListingsScreen />);
+    expect(await screen.findByText('Tin đăng trước khi sửa')).toBeTruthy();
+    expect(fetchCount).toBe(1);
+
+    // Focus without stale flag does not trigger redundant refetch
+    emitFocusEvent();
+    expect(fetchCount).toBe(1);
+
+    // Marking discovery stale (as sellerStore mutations do) triggers reload on focus
+    act(() => {
+      useDiscovery.getState().markStale();
+    });
+    expect(useDiscovery.getState().stale).toBe(true);
+    expect(useDiscovery.getState().staleVersion).toBe(1);
+
+    emitFocusEvent();
+    expect(await screen.findByText('Tin đăng sau khi cập nhật')).toBeTruthy();
+    expect(fetchCount).toBe(2);
+    expect(useDiscovery.getState().stale).toBe(false);
   });
 });
 
@@ -770,5 +873,122 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     await waitFor(() => {
       expect(useDiscovery.getState().selectedDetail?.viewer.isOwner).toBe(true);
     });
+  });
+
+  test('reloads ListingScreen detail on focus after returning from EditListing', async () => {
+    mockRouteParams.id = 'listing-1';
+    mockedApi
+      .mockResolvedValueOnce({ ...sampleDetail1, title: 'Tiêu đề cũ', priceVnd: 120000 })
+      .mockResolvedValueOnce({ ...sampleDetail1, title: 'Tiêu đề mới sau chỉnh sửa', priceVnd: 95000 });
+
+    render(<ListingScreen />);
+    expect(await screen.findByText('Tiêu đề cũ')).toBeTruthy();
+    expect(screen.getByText('120.000đ')).toBeTruthy();
+
+    emitFocusEvent();
+
+    expect(await screen.findByText('Tiêu đề mới sau chỉnh sửa')).toBeTruthy();
+    expect(screen.getByText('95.000đ')).toBeTruthy();
+  });
+
+  test('preserves distanceKm on detail load and forwards active filter lat/lng', async () => {
+    useDiscovery.setState({
+      items: [{ ...sampleListing1, distanceKm: 1.2 }],
+      filters: {
+        sort: 'distance_asc',
+        locationCode: 'KTX_KHU_A',
+        lat: 10.8782,
+        lng: 106.8063,
+        page: 0,
+        size: 20,
+      },
+    });
+    mockedApi.mockResolvedValueOnce({ ...sampleDetail1, distanceKm: null });
+
+    const loaded = await useDiscovery.getState().loadDetail('listing-1');
+    expect(mockedApi).toHaveBeenCalledWith('/listings/listing-1?lat=10.8782&lng=106.8063');
+    expect(loaded?.distanceKm).toBe(1.2);
+    expect(useDiscovery.getState().selectedDetail?.distanceKm).toBe(1.2);
+    expect(useDiscovery.getState().items[0].distanceKm).toBe(1.2);
+
+    // ListingScreen also keeps previewSummary distanceKm when detail response has null
+    useDiscovery.getState().reset();
+    mockRouteParams.id = 'listing-1';
+    mockRouteParams.listing = { ...sampleListing1, distanceKm: 1.2 };
+    mockedApi.mockResolvedValueOnce({ ...sampleDetail1, distanceKm: null });
+
+    render(<ListingScreen />);
+    expect(await screen.findByText('Khoảng cách ước tính: ~1.2 km')).toBeTruthy();
+  });
+
+  test('disables Report for CHO_KICH_HOAT and BI_KHOA users, and disables Make Offer for guests on GIU_CHO/unavailable listings', async () => {
+    // 1. Pending CHO_KICH_HOAT user cannot report or transact
+    useSession.setState({
+      token: 'pending-jwt',
+      user: {
+        ...activeMember,
+        roles: [],
+        profileApproved: false,
+        accountStatus: 'CHO_KICH_HOAT',
+      },
+      loading: false,
+    });
+    mockRouteParams.id = 'listing-1';
+    mockedApi.mockResolvedValueOnce(sampleDetail1);
+
+    const { unmount: unmountPending } = render(<ListingScreen />);
+    await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú');
+    expect(screen.getByTestId('report-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('reserve-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('message-button').props.accessibilityState.disabled).toBe(true);
+    unmountPending();
+
+    // 2. Locked BI_KHOA user cannot report
+    useDiscovery.getState().clearDetail();
+    useSession.setState({
+      token: 'locked-jwt',
+      user: {
+        ...activeMember,
+        roles: [],
+        accountStatus: 'BI_KHOA',
+      },
+      loading: false,
+    });
+    mockedApi.mockResolvedValueOnce(sampleDetail1);
+
+    const { unmount: unmountLocked } = render(<ListingScreen />);
+    await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú');
+    expect(screen.getByTestId('report-button').props.accessibilityState.disabled).toBe(true);
+    unmountLocked();
+
+    // 3. Guest on GIU_CHO listing sees Make Offer and Reserve disabled
+    useDiscovery.getState().clearDetail();
+    useSession.setState({ token: null, user: null, loading: false, restriction: null });
+    mockedApi.mockResolvedValueOnce({
+      ...sampleDetail1,
+      status: 'GIU_CHO',
+      viewer: { ...sampleDetail1.viewer, canReserve: false, canMakeOffer: false },
+    });
+
+    const { unmount: unmountReservedGuest } = render(<ListingScreen />);
+    expect(await screen.findByTestId('reserved-banner')).toBeTruthy();
+    expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('reserve-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('report-button').props.accessibilityState.disabled).toBe(false);
+    unmountReservedGuest();
+
+    // 4. Guest on listing with hasUnavailableItems=true sees Make Offer disabled
+    useDiscovery.getState().clearDetail();
+    mockedApi.mockResolvedValueOnce({
+      ...sampleDetail1,
+      hasUnavailableItems: true,
+      viewer: { ...sampleDetail1.viewer, canReserve: false, canMakeOffer: false },
+    });
+
+    render(<ListingScreen />);
+    expect(await screen.findByTestId('unavailable-items-banner')).toBeTruthy();
+    expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('reserve-button').props.accessibilityState.disabled).toBe(true);
   });
 });

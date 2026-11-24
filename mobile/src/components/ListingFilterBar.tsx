@@ -56,6 +56,14 @@ function findRootForCategory(
   return null;
 }
 
+function parseFilterPriceInput(raw: string): number {
+  const digitsOnly = raw.replace(/[.,\s]/g, '');
+  if (!digitsOnly || !/^-?\d+$/.test(digitsOnly)) {
+    return Number.NaN;
+  }
+  return Number(digitsOnly);
+}
+
 export function ListingFilterBar({
   filters,
   categories,
@@ -165,7 +173,7 @@ export function ListingFilterBar({
 
     let parsedMaxPrice: number | undefined;
     if (!freeOnly && maxPriceText.trim()) {
-      const normalized = Number(maxPriceText.replace(/[^\d.-]/g, ''));
+      const normalized = parseFilterPriceInput(maxPriceText);
       if (!Number.isFinite(normalized) || normalized < 0) {
         setValidationError('Giá tối đa phải là số không âm hợp lệ.');
         return;

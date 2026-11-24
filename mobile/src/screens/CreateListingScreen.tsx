@@ -71,7 +71,11 @@ export default function CreateListingScreen() {
 
     try {
       await create(payload);
-      navigation.navigate('MyListings');
+      if (typeof navigation.replace === 'function') {
+        navigation.replace('MyListings');
+      } else {
+        navigation.navigate('MyListings');
+      }
     } catch (err) {
       if (isRestrictedError(err)) {
         setSubmitError('');

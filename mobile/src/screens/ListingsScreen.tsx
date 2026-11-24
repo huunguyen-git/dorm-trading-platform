@@ -76,6 +76,17 @@ export default function ListingsScreen() {
     void search(true);
   }, [isLegacyStubbed, legacyLoad, loadReferences, search]);
 
+  useEffect(() => {
+    if (typeof navigation?.addListener !== 'function') return;
+    return navigation.addListener('focus', () => {
+      if (isLegacyStubbed) return;
+      const { stale, loading: isLoading } = useDiscovery.getState();
+      if (stale && !isLoading) {
+        void search({ resetPage: true });
+      }
+    });
+  }, [navigation, isLegacyStubbed, search]);
+
   const displayItems = useMemo<ListingSummary[]>(() => {
     if (items.length > 0) return items;
     if (isLegacyStubbed && legacyListings.length > 0) {

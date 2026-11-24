@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   MAX_IMAGE_SIZE_BYTES,
+  MAX_IMAGE_URL_LENGTH,
   MAX_LISTING_IMAGES,
   pickImagesFromLibrary,
   takePhotoWithCamera,
@@ -38,6 +39,7 @@ describe('constants & validators', () => {
   test('exports expected listing image limits and MIME types', () => {
     expect(MAX_LISTING_IMAGES).toBe(5);
     expect(MAX_IMAGE_SIZE_BYTES).toBe(5 * 1024 * 1024);
+    expect(MAX_IMAGE_URL_LENGTH).toBe(1000);
     expect(ALLOWED_IMAGE_MIME_TYPES).toEqual(['image/jpeg', 'image/png', 'image/webp']);
   });
 
@@ -109,7 +111,13 @@ describe('constants & validators', () => {
     expect(validateImageUrl('javascript:alert(1)').valid).toBe(false);
     expect(validateImageUrl('file:///etc/passwd').valid).toBe(false);
     expect(validateImageUrl('not-a-url').valid).toBe(false);
-    expect(validateImageUrl(`https://example.com/${'a'.repeat(2050)}`).valid).toBe(false);
+    const prefix = 'https://example.com/';
+    const maxLenUrl = `${prefix}${'a'.repeat(MAX_IMAGE_URL_LENGTH - prefix.length)}`;
+    expect(maxLenUrl.length).toBe(1000);
+    expect(validateImageUrl(maxLenUrl)).toEqual({ valid: true });
+    const overLimitResult = validateImageUrl(`${maxLenUrl}b`);
+    expect(overLimitResult.valid).toBe(false);
+    expect(overLimitResult.error).toContain('1000');
   });
 });
 

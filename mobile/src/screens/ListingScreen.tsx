@@ -73,8 +73,22 @@ export default function ListingScreen() {
     }
   }, [listingId, loadDetail, clearDetail]);
 
+  useEffect(() => {
+    if (typeof navigation?.addListener !== 'function') return;
+    return navigation.addListener('focus', () => {
+      if (listingId && !useDiscovery.getState().detailLoading) {
+        void loadDetail(listingId);
+      }
+    });
+  }, [navigation, listingId, loadDetail]);
+
   const detail = selectedDetail?.id === listingId ? selectedDetail : null;
-  const display: ListingSummary | null = detail ?? previewSummary;
+  const display: ListingSummary | null = detail
+    ? {
+        ...detail,
+        distanceKm: detail.distanceKm ?? previewSummary?.distanceKm ?? null,
+      }
+    : previewSummary;
 
   const images = useMemo(() => {
     if (!display) return [];
@@ -161,8 +175,14 @@ export default function ListingScreen() {
   const isFree = display.isFree || display.priceVnd === 0;
   const isReserved = display.status === 'GIU_CHO';
   const isAuthenticated = Boolean(token);
+  const isRestrictedOrPending = Boolean(
+    user?.accountStatus === 'CHO_KICH_HOAT' ||
+      user?.accountStatus === 'BI_KHOA' ||
+      restriction ||
+      (isAuthenticated && !user?.roles.includes('MEMBER')),
+  );
   const isActiveMember = Boolean(
-    token && user?.roles.includes('MEMBER') && user?.accountStatus !== 'BI_KHOA',
+    token && user?.roles.includes('MEMBER') && !isRestrictedOrPending,
   );
   const isOwner = Boolean(
     detail?.viewer.isOwner || (user?.id && display.seller.id && user.id === display.seller.id),
@@ -180,12 +200,14 @@ export default function ListingScreen() {
       (detail ? !detail.viewer.canReserve : display.status !== 'CONG_KHAI'));
   const reserveDisabled = isAuthenticated ? reserveDisabledForMember : reserveBlockedByListing;
 
-  const offerDisabled =
+  const offerDisabledForMember =
     isAuthenticated &&
     (!isActiveMember ||
       reserveBlockedByListing ||
       (detail ? !detail.viewer.canMakeOffer : display.status !== 'CONG_KHAI'));
+  const offerDisabled = isAuthenticated ? offerDisabledForMember : reserveBlockedByListing;
   const messageDisabled = isAuthenticated && (!isActiveMember || (detail ? !detail.viewer.canMessage : false));
+  const reportDisabled = isRestrictedOrPending;
 
   const showPhase2BNotice = (featureLabel: string) => {
     Alert.alert(
@@ -219,6 +241,7 @@ export default function ListingScreen() {
   };
 
   const handleReportPress = () => {
+    if (reportDisabled) return;
     if (!isAuthenticated) {
       navigation.navigate('Login');
       return;
@@ -592,6 +615,7 @@ export default function ListingScreen() {
                 title="Báo cáo tin"
                 secondary
                 testID="report-button"
+                disabled={reportDisabled}
                 onPress={handleReportPress}
               />
 

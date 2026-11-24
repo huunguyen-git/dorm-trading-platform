@@ -107,6 +107,8 @@ export interface DiscoveryState {
   locations: LocationZone[];
   referencesLoaded: boolean;
   hasLoadedOnce: boolean;
+  stale: boolean;
+  staleVersion: number;
   loading: boolean;
   loadingMore: boolean;
   refreshing: boolean;
@@ -121,6 +123,7 @@ export interface DiscoveryState {
   setFilter: (partial: Partial<DiscoverySearchFilters>) => void;
   resetFilters: () => Promise<ListingPage | null>;
   loadDetail: (id: string) => Promise<ListingDetail | null>;
+  markStale: () => void;
   clearDetail: () => void;
   reset: () => void;
 }
@@ -140,6 +143,8 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
   locations: [],
   referencesLoaded: false,
   hasLoadedOnce: false,
+  stale: false,
+  staleVersion: 0,
   loading: false,
   loadingMore: false,
   refreshing: false,
@@ -176,6 +181,7 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
     });
 
     const requestId = ++searchRequestSeq;
+    const startedStaleVersion = get().staleVersion;
     set({
       filters: nextFilters,
       loading: !isRefreshing,
@@ -186,15 +192,16 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
     try {
       const result = await discoveryApi.searchListings(nextFilters);
       if (requestId !== searchRequestSeq) return null;
-      set({
+      set((state) => ({
         items: result.items,
         page: result.page,
         size: result.size || nextFilters.size || 20,
         totalElements: result.totalElements,
         totalPages: result.totalPages,
         hasLoadedOnce: true,
+        stale: state.staleVersion !== startedStaleVersion,
         error: null,
-      });
+      }));
       return result;
     } catch (err: unknown) {
       if (requestId !== searchRequestSeq) return null;
@@ -286,22 +293,50 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
       return null;
     }
     const requestId = ++detailRequestSeq;
+    const { filters } = get();
+    const coords =
+      typeof filters.lat === 'number' &&
+      Number.isFinite(filters.lat) &&
+      typeof filters.lng === 'number' &&
+      Number.isFinite(filters.lng)
+        ? { lat: filters.lat, lng: filters.lng }
+        : undefined;
     set({
       detailLoading: true,
       detailError: null,
       detailNotFound: false,
     });
     try {
-      const detail = await discoveryApi.fetchListingDetail(trimmed);
+      const detail = await discoveryApi.fetchListingDetail(trimmed, coords);
       if (requestId !== detailRequestSeq) return null;
-      set((state) => ({
-        selectedDetail: detail,
-        detailLoading: false,
-        detailError: null,
-        detailNotFound: false,
-        items: state.items.map((item) => (item.id === detail.id ? { ...item, ...detail } : item)),
-      }));
-      return detail;
+      let mergedDetail = detail;
+      set((state) => {
+        const existingSummary = state.items.find((item) => item.id === detail.id);
+        const preservedDistance =
+          detail.distanceKm ??
+          existingSummary?.distanceKm ??
+          (state.selectedDetail?.id === detail.id ? state.selectedDetail.distanceKm : null);
+        mergedDetail =
+          preservedDistance !== detail.distanceKm
+            ? { ...detail, distanceKm: preservedDistance }
+            : detail;
+        return {
+          selectedDetail: mergedDetail,
+          detailLoading: false,
+          detailError: null,
+          detailNotFound: false,
+          items: state.items.map((item) =>
+            item.id === mergedDetail.id
+              ? {
+                  ...item,
+                  ...mergedDetail,
+                  distanceKm: mergedDetail.distanceKm ?? item.distanceKm,
+                }
+              : item,
+          ),
+        };
+      });
+      return mergedDetail;
     } catch (err: unknown) {
       if (requestId !== detailRequestSeq) return null;
       if (discoveryApi.isListingNotFoundError(err)) {
@@ -330,6 +365,13 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
     }
   },
 
+  markStale: () => {
+    set((state) => ({
+      stale: true,
+      staleVersion: state.staleVersion + 1,
+    }));
+  },
+
   clearDetail: () => {
     detailRequestSeq += 1;
     set({
@@ -355,6 +397,8 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
       locations: [],
       referencesLoaded: false,
       hasLoadedOnce: false,
+      stale: false,
+      staleVersion: 0,
       loading: false,
       loadingMore: false,
       refreshing: false,

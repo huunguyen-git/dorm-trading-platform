@@ -224,7 +224,9 @@ export default function ListingFormContent({
   const parsedPricePreview = isFree ? 0 : parsePriceInput(priceInput);
   const quotaExhausted = Boolean(quota && (quota.remaining <= 0 || !quota.canPublish));
   const publishDisabledByQuota =
-    quotaExhausted && (mode === 'create' || listingStatus === 'NHAP' || listingStatus === 'DA_RUT' || listingStatus === 'HET_HAN');
+    quotaExhausted && (mode === 'create' || listingStatus === 'NHAP');
+  const inactiveEditQuotaExhausted =
+    quotaExhausted && mode === 'edit' && (listingStatus === 'DA_RUT' || listingStatus === 'HET_HAN');
   const formDisabled = readOnly || submitting;
 
   const clearFieldError = (key: keyof FieldErrors) => {
@@ -438,6 +440,12 @@ export default function ListingFormContent({
                 <Text style={{ fontWeight: '700' }}>Lưu nháp</Text> (không tính vào hạn mức) hoặc rút bớt tin cũ để công khai tin mới.
               </Text>
             </View>
+          ) : inactiveEditQuotaExhausted ? (
+            <View style={styles.quotaWarningBox} testID="quota-exhausted-note">
+              <Text style={styles.quotaWarningText}>
+                Bạn đã dùng hết hạn mức {quota.activeCount}/{quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể lưu thay đổi cho tin này, nhưng cần rút bớt tin cũ trước khi công khai lại hoặc gia hạn.
+              </Text>
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -457,7 +465,7 @@ export default function ListingFormContent({
             Đang có {pendingRequestCount} yêu cầu mua chờ xử lý
           </Text>
           <Text style={styles.infoBannerText}>
-            Bạn vẫn có thể chỉnh sửa vì tin chưa ở trạng thái giữ chỗ. Sau khi lưu, người mua đang quan tâm sẽ nhận thông báo cập nhật.
+            Tin đang có {pendingRequestCount} yêu cầu chờ xử lý; hệ thống ghi nhận sự kiện cập nhật để đồng bộ thông báo ở giai đoạn P2-04.
           </Text>
         </View>
       ) : null}
