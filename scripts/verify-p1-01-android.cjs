@@ -8,7 +8,7 @@ const base = 'http://127.0.0.1:28082/api/v1';
 const folder = '.local/p1-native';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const adb = (...args) => execFileSync('adb', ['-s', serial, ...args], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-const decode = s => s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+const decode = s => s.replace(/&(quot|amp|lt|gt|apos);/g, (_, entity) => ({ quot: '"', amp: '&', lt: '<', gt: '>', apos: "'" })[entity]);
 function nodes() {
   adb('shell', 'uiautomator', 'dump', '/sdcard/p101-window.xml');
   const xml = adb('shell', 'cat', '/sdcard/p101-window.xml');
