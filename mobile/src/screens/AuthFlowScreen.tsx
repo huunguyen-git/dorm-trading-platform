@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { api } from '../api/client';
-import { useSession, type User } from '../auth/session';
+import { useSession } from '../auth/session';
 import { tokenStore } from '../auth/tokenStore';
 import { AuthScreen, Field, PasswordField, Action, Notice, Steps, ui } from '../components/AuthUI';
 type Challenge = { challengeId: string; expiresIn: number; resendAfter: number; message: string };
@@ -22,7 +22,7 @@ export default function AuthFlowScreen() {
   const post = <T,>(path: string, body: object) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
   function validatePassword() {
     const length = [...password.normalize('NFC')].length;
-    if (length < 15 || length > 128) throw new Error('Mật khẩu mới cần từ 15 đến 128 ký tự.');
+    if (length < 8 || length > 128) throw new Error('Mật khẩu mới cần từ 8 đến 128 ký tự.');
     if (password !== confirmation) throw new Error('Mật khẩu xác nhận chưa khớp.');
   }
   async function run(action: () => Promise<void>) { setBusy(true); setError(''); try { await action(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
@@ -43,9 +43,9 @@ export default function AuthFlowScreen() {
     if (mode === 'change' || grant) validatePassword();
     if (mode === 'change') {
       if (!currentPassword) throw new Error('Nhập mật khẩu hiện tại.');
-      const session = await post<{ token: string; refreshToken: string; user: User }>('/auth/password/change', { currentPassword, password });
-      await useSession.getState().setSession(session.token, session.user, session.refreshToken);
-      setMessage('Đã đổi mật khẩu và đăng xuất các phiên khác.');
+      await post<void>('/auth/password/change', { currentPassword, password });
+      await tokenStore.clear(); useSession.setState({ token: null, user: null, loading: false });
+      setMessage('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.');
     } else if (grant) {
       if (!remaining) throw new Error('Quyền đặt lại mật khẩu đã hết hạn. Hãy yêu cầu mã mới.');
       await post('/auth/password/reset', { resetToken: grant, password });
@@ -64,11 +64,11 @@ export default function AuthFlowScreen() {
   }
   function restart() { setGrant(''); setChallenge(null); setCode(''); setPassword(''); setConfirmation(''); setMessage(''); setError(''); }
   const title = mode === 'register' ? 'Tạo tài khoản' : mode === 'change' ? 'Đổi mật khẩu' : mode === 'verify' ? 'Xác minh email' : 'Khôi phục tài khoản';
-  const back = () => nav.replace(mode === 'change' || (mode === 'verify' && user) ? 'Profile' : 'Login');
+  const back = () => nav.replace((mode === 'change' && !done) || (mode === 'verify' && user) ? 'Profile' : 'Login');
   const labels = mode === 'reset' ? ['Email', 'Xác minh', 'Mật khẩu mới'] : ['Thông tin', 'Xác minh'];
   const stage = grant ? 2 : challenge ? 1 : 0;
   return <AuthScreen title={done ? 'Hoàn tất' : title} subtitle={done ? 'Thông tin tài khoản của bạn đã được cập nhật.' : 'Bảo vệ tài khoản để an tâm trao đổi cùng cộng đồng.'}>
-    {done ? <><Notice message={message} /><Action title={mode === 'change' || (mode === 'verify' && user) ? 'Về hồ sơ' : 'Đăng nhập'} onPress={back} testID="auth-success-continue" /></> : <>
+    {done ? <><Notice message={message} /><Action title={(mode === 'change' && !done) || (mode === 'verify' && user) ? 'Về hồ sơ' : 'Đăng nhập'} onPress={back} testID="auth-success-continue" /></> : <>
       {mode !== 'change' && <Steps current={stage} labels={labels} />}
       {mode !== 'change' && <Field label="Email" testID="auth-email" placeholder="ban@truong.edu.vn" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={email} onChangeText={setEmail} editable={!challenge && !grant && !registered && !busy} />}
       {mode === 'register' && !challenge && <><Field label="Họ tên" maxLength={150} value={name} onChangeText={setName} editable={!busy} /><Field label="MSSV" maxLength={20} value={studentId} onChangeText={setStudentId} editable={!busy} /></>}
@@ -76,7 +76,7 @@ export default function AuthFlowScreen() {
       {((mode === 'register' && !challenge) || mode === 'change' || !!grant) && <>
         <PasswordField label="Mật khẩu mới" value={password} onChangeText={setPassword} editable={!busy} textContentType="newPassword" />
         <PasswordField label="Xác nhận mật khẩu mới" value={confirmation} onChangeText={setConfirmation} editable={!busy} textContentType="newPassword" />
-        <Text style={ui.caption}>15–128 ký tự. Có thể dùng cụm từ có khoảng trắng; tránh mật khẩu phổ biến.</Text>
+        <Text style={ui.caption}>8–128 ký tự. Có thể dùng cụm từ có khoảng trắng; tránh mật khẩu phổ biến.</Text>
       </>}
       {challenge && !grant && <>
         <Field label="Mã OTP" testID="auth-otp" placeholder="000000" keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} value={code} onChangeText={(v) => setCode(v.replace(/[^0-9]/g, ''))} editable={!busy} />

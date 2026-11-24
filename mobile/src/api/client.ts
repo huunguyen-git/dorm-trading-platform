@@ -25,6 +25,15 @@ type RawRestrictionResponse = {
   } | null;
 };
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+  }
+}
 let refreshFlight: Promise<void> | null = null;
 
 const baseUrl = () => {
@@ -135,7 +144,7 @@ async function refresh() {
   if (!refreshFlight) {
     refreshFlight = (async () => {
       const refreshToken = await tokenStore.getRefresh();
-      if (!refreshToken) throw new Error('Phiên đã hết hạn.');
+      if (!refreshToken) throw new ApiError(401, 'Phiên đã hết hạn.');
       const response = await fetch(`${baseUrl()}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,7 +153,7 @@ async function refresh() {
       if (!response.ok) {
         const raw = await readResponseText(response);
         await handleRestrictedResponse(response, raw, true);
-        throw new Error('Phiên đã hết hạn.');
+        throw new ApiError(response.status, response.status === 401 ? 'Phiên đã hết hạn.' : 'Chưa thể làm mới phiên. Vui lòng thử lại.');
       }
       const session = await response.json();
       await useSession.getState().setSession(session.token, session.user, session.refreshToken);
@@ -184,11 +193,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       if ((await tokenStore.get()) === sentToken) await refresh();
       response = await send();
     } catch (error) {
-      if (error instanceof RestrictedAccountError) throw error;
-      /* handled below */
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
     }
   }
-  if (response.status === 401 && !publicCall && path !== '/auth/password/change') {
+  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || response.headers?.get('WWW-Authenticate')?.startsWith('Bearer'))) {
     await tokenStore.clear();
     useSession.setState({ token: null, user: null, loading: false });
   }
@@ -204,10 +212,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* plain response */
     }
-    const error = new Error(message) as Error & { status?: number; code?: string };
-    error.status = response.status;
-    error.code = code;
-    throw error;
+    throw new ApiError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
