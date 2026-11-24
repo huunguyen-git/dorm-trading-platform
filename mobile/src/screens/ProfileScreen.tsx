@@ -4,6 +4,8 @@ import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import type { Nav } from '../navigation';
 import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
+import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
+import { useSession } from '../auth/session';
 import { colors, space } from '../theme';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 
@@ -15,6 +17,7 @@ const locked = (p: Profile) => p.accountStatus === 'BI_KHOA' || p.accountStatus 
 
 export default function ProfileScreen() {
   const nav = useNavigation<Nav>();
+  const sessionUser = useSession((s) => s.user);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [cardUri, setCardUri] = useState<string | null>(null);
   const [pick, setPick] = useState<{ uri: string; name: string; type: string } | null>(null);
@@ -67,18 +70,20 @@ export default function ProfileScreen() {
 
   if (loading) return <AuthScreen title="Hồ sơ của bạn"><Text style={ui.caption}>Đang tải hồ sơ…</Text></AuthScreen>;
   if (!profile) return <AuthScreen title="Hồ sơ của bạn">
+    <RestrictedAccountNotice />
     <Notice message={error || 'Không tải được hồ sơ.'} error />
     <Action title="Thử lại" onPress={() => void load()} />
     <Action title="Về trang tin đăng" secondary onPress={() => nav.navigate('Listings')} />
   </AuthScreen>;
 
   const status = statusLabel(profile);
-  const readOnly = locked(profile);
+  const readOnly = locked(profile) || sessionUser?.accountStatus === 'BI_KHOA';
   const rows: [string, string | null][] = [
     ['Họ tên', profile.name], ['MSSV', profile.studentId], ['Email', profile.email], ['Số điện thoại', profile.phone],
     ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
   ];
   return <AuthScreen title="Hồ sơ của bạn">
+    <RestrictedAccountNotice />
     <View style={[ui.row, { alignItems: 'center' }]}>
       <Text style={[ui.badge, status.tone === 'ok' && { backgroundColor: '#eef3ec', color: '#36532c' }, status.tone === 'danger' && { backgroundColor: '#fff0ec', color: colors.danger }]}>{status.text}</Text>
       <Text style={ui.badge}>Điểm uy tín · {profile.reputation}</Text>
@@ -86,7 +91,7 @@ export default function ProfileScreen() {
     </View>
     {status.tone === 'danger' && <Notice message={`Lý do từ chối: ${status.note || 'Kiểm duyệt viên chưa ghi lý do.'}`} error />}
     {status.tone === 'warn' && <Notice message={status.note} />}
-    {!profile.profileApproved && <Notice message="Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch." />}
+    {!readOnly && !profile.profileApproved && <Notice message="Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch." />}
     {readOnly && <Notice message="Tài khoản đang bị khóa nên không thể lưu thay đổi hồ sơ." error />}
     {!profile.emailVerified && <Action title="Xác minh email" secondary disabled={busy} onPress={() => nav.navigate('AuthFlow', { mode: 'verify' })} />}
 
