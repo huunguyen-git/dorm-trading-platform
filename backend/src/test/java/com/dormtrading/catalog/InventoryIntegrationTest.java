@@ -673,4 +673,29 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
                 .statusCode(400)
                 .body("code", equalTo("INVALID_INPUT"));
     }
+
+    @Test
+    void testUpdateItem_MissingVersion_Returns400() {
+        var createBody = Map.of(
+                "ten", "Đèn học mini",
+                "tinhTrang", "Mới 90%",
+                "hinhAnh", List.of("https://img.jpg")
+        );
+        String itemIdStr = given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(createBody)
+                .post("/api/v1/inventory")
+                .then().statusCode(201).extract().jsonPath().getString("id");
+
+        given()
+                .auth().oauth2(userToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("ten", "Đèn học sửa", "tinhTrang", "Cũ hơn", "hinhAnh", List.of("https://img.jpg")))
+                .when()
+                .put("/api/v1/inventory/{id}", itemIdStr)
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+    }
 }

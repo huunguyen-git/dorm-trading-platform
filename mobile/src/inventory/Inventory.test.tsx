@@ -437,4 +437,75 @@ describe('Screen: InventoryFormScreen (Add & Edit)', () => {
       await screen.findByText('Xung đột dữ liệu hoặc đồ vật đã gắn vào tin đăng khác.'),
     ).toBeTruthy();
   });
+
+  test('clears shared store error when cancelling form after an error', async () => {
+    mockRouteParams.mode = 'create';
+    mockedApi.createInventoryItem.mockRejectedValue(new Error('Dữ liệu không hợp lệ'));
+
+    render(<InventoryFormScreen />);
+
+    fireEvent.changeText(screen.getByTestId('input-item-name'), 'Đồ test');
+    fireEvent.changeText(screen.getByTestId('input-item-condition'), 'Tình trạng');
+    fireEvent.changeText(screen.getByTestId('input-image-url'), 'https://example.com/1.jpg');
+    fireEvent.press(screen.getByTestId('add-image-url-button'));
+    fireEvent.press(screen.getByTestId('submit-inventory-form'));
+
+    expect(await screen.findByText('Dữ liệu không hợp lệ')).toBeTruthy();
+    expect(useInventory.getState().error).toBe('Dữ liệu không hợp lệ');
+
+    fireEvent.press(screen.getByTestId('cancel-inventory-form'));
+    expect(useInventory.getState().error).toBeNull();
+    expect(mockGoBack).toHaveBeenCalled();
+  });
+});
+
+describe('Store: Sync & Session Isolation', () => {
+  test('loadItem synchronizes updated item back into items list', async () => {
+    const refreshedItem: InventoryItem = {
+      ...sampleItems[0],
+      ten: 'Bàn học đã cập nhật',
+      version: 5,
+    };
+    mockedApi.fetchInventoryItem.mockResolvedValue(refreshedItem);
+
+    await useInventory.getState().loadItem('item-1');
+
+    const itemInList = useInventory.getState().items.find((i) => i.id === 'item-1');
+    expect(itemInList?.ten).toBe('Bàn học đã cập nhật');
+    expect(itemInList?.version).toBe(5);
+    expect(useInventory.getState().selectedItem?.version).toBe(5);
+  });
+
+  test('resets inventory store when user logs out or switches account', () => {
+    useInventory.setState({
+      items: [...sampleItems],
+      selectedItem: sampleItems[0],
+      error: 'Old error',
+    });
+
+    useSession.setState({ token: null, user: null });
+
+    expect(useInventory.getState().items).toEqual([]);
+    expect(useInventory.getState().selectedItem).toBeNull();
+    expect(useInventory.getState().error).toBeNull();
+
+    useInventory.setState({ items: [...sampleItems], selectedItem: sampleItems[0] });
+    useSession.setState({
+      token: 'token-u2',
+      user: {
+        id: 'u2',
+        name: 'User 2',
+        email: 'u2@dorm.vn',
+        studentId: '654321',
+        roles: ['MEMBER'],
+        emailVerified: true,
+        profileApproved: true,
+        accountStatus: 'HOAT_DONG',
+        role: 'member',
+      },
+    });
+
+    expect(useInventory.getState().items).toEqual([]);
+    expect(useInventory.getState().selectedItem).toBeNull();
+  });
 });

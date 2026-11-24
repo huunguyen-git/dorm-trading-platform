@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { Nav } from '../navigation';
 import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
@@ -26,10 +26,13 @@ export default function InventoryListScreen() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string>('');
 
-  useEffect(() => {
-    clearError();
-    void loadItems().catch(() => {});
-  }, [loadItems, clearError]);
+  useFocusEffect(
+    useCallback(() => {
+      setActionError('');
+      clearError();
+      void loadItems().catch(() => {});
+    }, [loadItems, clearError]),
+  );
 
   const handleRefresh = async () => {
     setActionError('');

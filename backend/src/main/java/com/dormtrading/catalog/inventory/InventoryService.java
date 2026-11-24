@@ -243,7 +243,10 @@ public class InventoryService {
                     "Đồ vật đã được liên kết với tin đăng, không thể chỉnh sửa.");
         }
 
-        if (req.version() != null && !req.version().equals(current.version())) {
+        if (req.version() == null) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Thiếu thông tin phiên bản dữ liệu (version).");
+        }
+        if (!req.version().equals(current.version())) {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Xung đột phiên bản dữ liệu. Vui lòng làm mới trang.");
         }
 

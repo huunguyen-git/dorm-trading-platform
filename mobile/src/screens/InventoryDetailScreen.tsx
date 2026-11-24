@@ -25,7 +25,7 @@ export default function InventoryDetailScreen() {
   const route = useRoute<RouteProps>();
   const { id } = route.params;
 
-  const { items, selectedItem, loadItem, deleteItem, loading, error } = useInventory();
+  const { items, selectedItem, loadItem, deleteItem, clearError, loading, error } = useInventory();
   const [localItem, setLocalItem] = useState<InventoryItem | null>(() => {
     return (selectedItem?.id === id ? selectedItem : null) || items.find((i) => i.id === id) || null;
   });
@@ -35,10 +35,12 @@ export default function InventoryDetailScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setActionError('');
+      clearError();
       void loadItem(id)
         .then((item) => setLocalItem(item))
         .catch((err) => setActionError(err?.message || 'Không thể tải chi tiết đồ vật.'));
-    }, [id, loadItem])
+    }, [id, loadItem, clearError])
   );
 
   useEffect(() => {

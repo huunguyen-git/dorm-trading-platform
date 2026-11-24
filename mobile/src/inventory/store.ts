@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useSession } from '../auth/session';
 import * as inventoryApi from './api';
 import type { CreateInventoryItemInput, InventoryItem, UpdateInventoryItemInput } from './types';
 
@@ -13,6 +14,7 @@ export interface InventoryState {
   updateItem: (id: string, input: UpdateInventoryItemInput) => Promise<InventoryItem>;
   deleteItem: (id: string, version?: number) => Promise<void>;
   clearError: () => void;
+  reset: () => void;
 }
 
 export const useInventory = create<InventoryState>((set, get) => ({
@@ -22,6 +24,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
   error: null,
 
   clearError: () => set({ error: null }),
+  reset: () => set({ items: [], selectedItem: null, loading: false, error: null }),
 
   loadItems: async () => {
     set({ loading: true, error: null });
@@ -41,7 +44,10 @@ export const useInventory = create<InventoryState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const item = await inventoryApi.fetchInventoryItem(id);
-      set({ selectedItem: item });
+      set({
+        selectedItem: item,
+        items: get().items.map((i) => (i.id === id ? item : i)),
+      });
       return item;
     } catch (err: any) {
       const message = err?.message || 'Không thể tải chi tiết đồ vật.';
@@ -132,3 +138,11 @@ export const useInventory = create<InventoryState>((set, get) => ({
     }
   },
 }));
+
+useSession.subscribe((state, prevState) => {
+  const prevUserId = prevState.user?.id ?? null;
+  const nextUserId = state.user?.id ?? null;
+  if ((!state.token && prevState.token) || prevUserId !== nextUserId) {
+    useInventory.getState().reset();
+  }
+});

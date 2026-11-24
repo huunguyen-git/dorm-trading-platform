@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -32,7 +32,13 @@ export default function InventoryFormScreen() {
       existingItem.trangThai !== 'KHA_DUNG' ||
       existingItem.linkedListingCount > 0);
 
-  const { addItem, updateItem } = useInventory();
+  const { addItem, updateItem, clearError } = useInventory();
+
+  useEffect(() => {
+    return () => {
+      clearError();
+    };
+  }, [clearError]);
 
   const [ten, setTen] = useState(existingItem?.ten || '');
   const [tinhTrang, setTinhTrang] = useState(existingItem?.tinhTrang || '');
@@ -239,7 +245,10 @@ export default function InventoryFormScreen() {
         title="Hủy thao tác"
         testID="cancel-inventory-form"
         disabled={busy}
-        onPress={() => navigation.goBack()}
+        onPress={() => {
+          clearError();
+          navigation.goBack();
+        }}
       />
     </AuthScreen>
   );
