@@ -11,9 +11,14 @@ it('requires OTP grant before submitting a password reset', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Gửi mã' }));
   const code = await screen.findByLabelText('Mã xác minh (hiệu lực 5 phút)');
   fireEvent.change(code, { target: { value: '123456' } }); fireEvent.click(screen.getByRole('button', { name: 'Xác minh' }));
-  fireEvent.change(await screen.findByLabelText('Mật khẩu mới (15–128 ký tự)'), { target: { value: 'a quiet river beneath stars' } });
-  fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu mới'), { target: { value: 'a quiet river beneath stars' } });
+  fireEvent.change(await screen.findByLabelText('Mật khẩu mới (8–128 ký tự)'), { target: { value: 'River!8' } });
+  fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu mới'), { target: { value: 'River!8' } });
   fireEvent.click(screen.getByRole('button', { name: 'Lưu mật khẩu' }));
-  await waitFor(() => expect(api).toHaveBeenLastCalledWith('/auth/password/reset', expect.objectContaining({ body: JSON.stringify({ resetToken: 'one-use-grant', password: 'a quiet river beneath stars' }) })));
+  expect(await screen.findByText('Mật khẩu mới cần từ 8 đến 128 ký tự.')).toBeInTheDocument();
+  expect(api).toHaveBeenCalledTimes(2);
+  fireEvent.change(screen.getByLabelText('Mật khẩu mới (8–128 ký tự)'), { target: { value: 'River!82' } });
+  fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu mới'), { target: { value: 'River!82' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu mật khẩu' }));
+  await waitFor(() => expect(api).toHaveBeenLastCalledWith('/auth/password/reset', expect.objectContaining({ body: JSON.stringify({ resetToken: 'one-use-grant', password: 'River!82' }) })));
   expect(await screen.findByText('Đã đặt lại mật khẩu. Hãy quay lại đăng nhập.')).toBeInTheDocument();
 });

@@ -18,7 +18,7 @@ export async function refreshSession() {
     const rotate = async () => {
       const response = await fetch(`${baseUrl()}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'admin-web' }) });
       if (!response.ok) {
-        let message = 'Phiên đã hết hạn. Vui lòng đăng nhập lại.';
+        let message = response.status === 401 ? 'Phiên đã hết hạn. Vui lòng đăng nhập lại.' : 'Chưa thể làm mới phiên. Vui lòng thử lại.';
         let code: string | undefined;
         try {
           const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
@@ -48,15 +48,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       // A security-filter 401 occurs before the controller; never replay other errors.
       response = await send();
     } catch (error) {
-      if (error instanceof ApiError && error.status === 403) {
+      if (error instanceof ApiError && error.status === 403 && error.code === 'ACCOUNT_RESTRICTED') {
         setAccessToken(null);
         window.dispatchEvent(new Event('session-expired'));
         throw error;
       }
-      /* handled below */
+      // Only an explicit refresh 401 proves the session is no longer usable.
+      // Network errors, 5xx and other rejections must leave credentials available for retry.
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
     }
   }
-  if (response.status === 401 && !publicCall && path !== '/auth/password/change') { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
+  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || response.headers?.get('WWW-Authenticate')?.startsWith('Bearer'))) { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
   if (!response.ok) {
     const raw = await response.text();
     let message = raw || `API ${response.status}`;

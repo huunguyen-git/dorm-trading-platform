@@ -22,10 +22,10 @@ export default function PasswordForm({ change = false, onClose }: { change?: boo
     await run(async () => {
       if (change || grant) {
         const length = [...password.normalize('NFC')].length;
-        if (length < 15 || length > 128) throw new Error('Mật khẩu mới cần từ 15 đến 128 ký tự.');
+        if (length < 8 || length > 128) throw new Error('Mật khẩu mới cần từ 8 đến 128 ký tự.');
         if (password !== confirmation) throw new Error('Mật khẩu xác nhận chưa khớp.');
         if (grant && !remaining) throw new Error('Quyền đặt lại mật khẩu đã hết hạn. Hãy yêu cầu mã mới.');
-        if (change) { await auth.change(currentPassword, password); setMessage('Đã đổi mật khẩu và đăng xuất các phiên khác.'); }
+        if (change) { await auth.change(currentPassword, password); setMessage('Đã đổi mật khẩu. Hãy đăng nhập lại.'); }
         else { await post('/auth/password/reset', { resetToken: grant, password }); setMessage('Đã đặt lại mật khẩu. Hãy quay lại đăng nhập.'); }
         setPassword(''); setConfirmation(''); setCurrent(''); setGrant(''); setCode(''); setDone(true);
       } else if (challenge) {
@@ -39,12 +39,12 @@ export default function PasswordForm({ change = false, onClose }: { change?: boo
   const labels = ['Email', 'Xác minh', 'Mật khẩu mới']; const step = grant ? 2 : challenge ? 1 : 0;
   if (done) return <section className="panel auth-form success-panel" data-testid="password-success"><span className="success-mark" aria-hidden="true">✓</span><h2>Hoàn tất</h2><p className="notice notice-success" role="status">{message}</p><button className="button button-primary" onClick={onClose}>{change ? 'Về tài khoản' : 'Về đăng nhập'}</button></section>;
   return <form className="panel auth-form" onSubmit={(e) => void submit(e)} aria-label={change ? 'Đổi mật khẩu' : 'Khôi phục tài khoản'} aria-busy={busy}>
-    <header className="form-heading"><p className="eyebrow">BẢO MẬT TÀI KHOẢN</p><h2>{change ? 'Đổi mật khẩu' : 'Quên mật khẩu'}</h2><p>{change ? 'Phiên này được giữ lại. Các phiên khác sẽ được đăng xuất.' : 'Xác minh email để lấy lại quyền truy cập tài khoản.'}</p></header>
+    <header className="form-heading"><p className="eyebrow">BẢO MẬT TÀI KHOẢN</p><h2>{change ? 'Đổi mật khẩu' : 'Quên mật khẩu'}</h2><p>{change ? 'Đổi mật khẩu sẽ đăng xuất tất cả thiết bị và yêu cầu đăng nhập lại.' : 'Xác minh email để lấy lại quyền truy cập tài khoản.'}</p></header>
     {!change && <ol className="form-steps" aria-label="Tiến trình khôi phục">{labels.map((label, i) => <li key={label} aria-current={step === i ? 'step' : undefined}><span>{i + 1}</span>{label}</li>)}</ol>}
     {!change && <label htmlFor="reset-email">Email<input id="reset-email" type="email" autoComplete="username" placeholder="ban@truong.edu.vn" required value={email} disabled={!!challenge || !!grant || busy} onChange={(e) => setEmail(e.target.value)} /></label>}
     {change && <label htmlFor="current-password">Mật khẩu hiện tại<input id="current-password" type={show ? 'text' : 'password'} autoComplete="current-password" required disabled={busy} value={currentPassword} onChange={(e) => setCurrent(e.target.value)} /></label>}
     {(change || grant) && <>
-      <label htmlFor="new-password">Mật khẩu mới (15–128 ký tự)<input id="new-password" type={show ? 'text' : 'password'} autoComplete="new-password" required disabled={busy} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+      <label htmlFor="new-password">Mật khẩu mới (8–128 ký tự)<input id="new-password" type={show ? 'text' : 'password'} autoComplete="new-password" required disabled={busy} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       <label htmlFor="confirm-password">Xác nhận mật khẩu mới<input id="confirm-password" type={show ? 'text' : 'password'} autoComplete="new-password" required disabled={busy} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} /></label>
       <div className="form-options"><span className="form-help">Có thể dùng cụm từ có khoảng trắng.</span><button className="text-button" type="button" aria-pressed={show} onClick={() => setShow(!show)}>{show ? 'Ẩn' : 'Hiện'} mật khẩu</button></div>
     </>}
