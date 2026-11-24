@@ -35,7 +35,7 @@
 
 **Bối cảnh.** UC-06 cần OTP nhưng `auth_challenge.purpose` chỉ cho `REGISTER`,`RESET` và không gắn người dùng.
 
-**Lựa chọn.** V5 mở rộng CHECK thêm `CHANGE_EMAIL` và thêm `user_id`. Dùng lại cooldown, đếm lỗi, HMAC digest và outbox mã hóa sẵn có — không tạo bảng OTP thứ hai. Xác minh bọc advisory lock theo email để hai tài khoản không cùng nhận một email.
+**Lựa chọn.** V6 (đổi từ V5 để không trùng `V5__user_management_and_reputation_ledger` của P1-04/P1-05) mở rộng CHECK thêm `CHANGE_EMAIL` và thêm `user_id`. Dùng lại cooldown, đếm lỗi, HMAC digest và outbox mã hóa sẵn có — không tạo bảng OTP thứ hai. Xác minh bọc advisory lock theo email để hai tài khoản không cùng nhận một email.
 
 **Hệ quả với P1-01.** Thay đổi nằm trong migration mới, không sửa code `AuthService`; `OtpDelivery` chỉ thêm nhánh subject `CHANGE_EMAIL`. Nguyễn Hữu Nguyên review phần này.
 
