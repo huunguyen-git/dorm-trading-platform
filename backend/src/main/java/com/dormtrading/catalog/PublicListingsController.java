@@ -1,25 +1,80 @@
 package com.dormtrading.catalog;
 
-import java.util.List;
+import com.dormtrading.catalog.discovery.DiscoveryService;
 import java.util.UUID;
-import com.dormtrading.iam.auth.AuthFailure;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-/** Minimal public read contract for pending accounts; publishing/search remain Phase 2. */
+/**
+ * Public discovery and listing detail endpoints (P2-02: UC-19, UC-20, FR-06, NFR-01).
+ */
 @RestController
 @RequestMapping("/api/v1/listings")
 public class PublicListingsController {
-    private final JdbcTemplate db;
-    public PublicListingsController(JdbcTemplate db) { this.db=db; }
-    public record Listing(UUID id,String title,String description,int price,String seller) {}
+
+    private final DiscoveryService discoveryService;
+
+    public PublicListingsController(DiscoveryService discoveryService) {
+        this.discoveryService = discoveryService;
+    }
+
     @GetMapping
-    public List<Listing> list(@RequestParam(defaultValue="0") int offset) {
-        if (offset < 0 || offset > 10000) throw new AuthFailure(400,"INVALID_OFFSET","Vị trí trang không hợp lệ.");
-        return db.query("""
-                select t.ma_tin,t.tieu_de,t.mo_ta,t.gia_vnd,u.ho_ten from tin_dangs t
-                join thanh_viens u on u.user_id=t.nguoi_dang_id
-                where t.trang_thai='CONG_KHAI' order by t.created_at desc,t.ma_tin limit 100 offset ?
-                """,(rs,i) -> new Listing(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getInt(4),rs.getString(5)),offset);
+    public ListingDtos.ListingPageDto searchListings(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String categoryId,
+            @RequestParam(required = false) String courseCode,
+            @RequestParam(required = false) Integer minPrice,
+            @RequestParam(required = false) Integer maxPrice,
+            @RequestParam(required = false) Boolean freeOnly,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String locationCode,
+            @RequestParam(required = false) String location,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) Double radiusKm,
+            @RequestParam(required = false, defaultValue = "newest") String sort,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) Integer offset
+    ) {
+        DiscoveryService.SearchCriteria criteria = new DiscoveryService.SearchCriteria(
+                q,
+                categoryId,
+                courseCode,
+                minPrice,
+                maxPrice,
+                freeOnly,
+                type,
+                locationCode,
+                location,
+                lat,
+                lng,
+                radiusKm,
+                sort,
+                page,
+                size,
+                offset
+        );
+        return discoveryService.searchListings(criteria);
+    }
+
+    @GetMapping("/{id:[0-9a-fA-F-]{36}}")
+    public ListingDtos.ListingDetailDto getListingDetail(
+            @PathVariable("id") UUID id,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @AuthenticationPrincipal Jwt jwt,
+            Authentication authentication
+    ) {
+        boolean isActiveMember = authentication != null
+                && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_MEMBER".equals(authority.getAuthority()));
+        return discoveryService.getListingDetail(id, jwt, isActiveMember, lat, lng);
     }
 }
