@@ -196,12 +196,18 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const raw = await readResponseText(response);
     await handleRestrictedResponse(response, raw, path === '/auth/login' || path === '/auth/refresh');
     let message = `API ${response.status}: ${raw}`;
+    let code: string | undefined;
     try {
-      message = JSON.parse(raw).message ?? message;
+      const parsed = JSON.parse(raw);
+      message = parsed.message ?? message;
+      code = parsed.code;
     } catch {
       /* plain response */
     }
-    throw new Error(message);
+    const error = new Error(message) as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = code;
+    throw error;
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
