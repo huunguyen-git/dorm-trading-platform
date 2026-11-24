@@ -33,8 +33,12 @@ npm run build    # tsc -b && vite build
 
 Đăng nhập bằng tài khoản đã xác minh/duyệt và được cấp vai trò quản trị trong backend. Access token chỉ ở bộ nhớ; refresh cookie HttpOnly/Secure/SameSite=Strict. Không còn dùng sessionStorage. Backend phải cho phép origin Vite qua CORS, credentials và expose WWW-Authenticate. Dùng localhost ở cả hai đầu khi thử; triển khai thật dùng HTTPS cùng site.
 
-Có quên mật khẩu bằng OTP và đổi mật khẩu trong phiên. Đăng xuất chỉ phiên hiện tại; đổi mật khẩu giữ phiên này và thu hồi phiên khác. Các menu nghiệp vụ chưa có API vẫn cần task tương ứng; xem [P1-01](../docs/specs/P1-01.md) để chạy live check và biết phần chưa nghiệm thu.
+Có quên mật khẩu bằng OTP và đổi mật khẩu trong phiên. Đăng xuất chỉ phiên hiện tại; đổi mật khẩu thu hồi tất cả phiên và yêu cầu đăng nhập lại. Các menu nghiệp vụ chưa có API vẫn cần task tương ứng; xem [P1-01](../docs/specs/P1-01.md) để chạy live check và biết phần chưa nghiệm thu.
 
 ## Kiểm thử GUI P1-01
 
 Giao diện xác thực đã có nhãn, trạng thái xử lý/lỗi/thành công và các bước OTP/mật khẩu. Xem [checklist GUI](../docs/specs/P1-01-gui-checklist.md) để mở từng luồng, phân biệt test fixture với API thật và phần cần thử trên thiết bị.
+
+Mật khẩu mới cần 8–128 code point sau NFC. HTTP 429 hiển thị số giây chờ từ server. Tài khoản quản trị bị khóa có màn bảo mật hạn chế; không gọi được API quản trị.
+
+Lượt 22/11 đã kiểm web/API/SMTP thật, gồm reset, change → đăng nhập lại, logout khi refresh offline/503 và tài khoản khóa. Dùng [bộ chạy live](../scripts/verify-p1-01-live.cjs) từ root theo [hướng dẫn chuẩn bị](../docs/specs/P1-01-gui-checklist.md#chạy-lại-bộ-live--22112026); bộ chạy tự mở/đóng API và Vite trên cổng thử riêng.

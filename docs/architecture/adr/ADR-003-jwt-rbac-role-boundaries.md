@@ -6,7 +6,7 @@ Người quyết định: Tô Thành Nguyên (P0-05); Liên quan: Nguyễn Hữu
 
 ## Cập nhật ngày 13/11/2026
 
-**Được thay thế một phần** bởi [quyết định P1-01 đã được người dùng duyệt](../../decisions/P1-01-hop-dong-xac-thuc.md): logout chỉ phiên hiện tại; đổi mật khẩu giữ phiên hiện tại bằng token mới và thu hồi phiên khác; reset thu hồi tất cả, đăng nhập lại. Phiên/token thu hồi bị từ chối từ request tiếp theo, không chờ access hết hạn. Người chờ duyệt được quản lý hồ sơ mình và xem mặt hàng công khai. Các phát biểu khác tương ứng bên dưới được giữ làm lịch sử, không dùng làm hợp đồng hiện hành. Chính sách OTP/mật khẩu và lựa chọn triển khai xem quyết định P1-01; bằng chứng ở spec P1-01.
+**Được thay thế một phần** bởi [quyết định P1-01 đã được người dùng duyệt](../../decisions/P1-01-hop-dong-xac-thuc.md): logout chỉ phiên hiện tại; đổi mật khẩu thu hồi mọi phiên theo [cập nhật 17/11](../../decisions/P1-01-cap-nhat-constraint.md); reset thu hồi tất cả, đăng nhập lại. Phiên/token thu hồi bị từ chối từ request tiếp theo, không chờ access hết hạn. Người chờ duyệt được quản lý hồ sơ mình và xem mặt hàng công khai. Các phát biểu khác tương ứng bên dưới được giữ làm lịch sử, không dùng làm hợp đồng hiện hành. Chính sách OTP/mật khẩu và lựa chọn triển khai xem quyết định P1-01; bằng chứng ở spec P1-01.
 
 ## Bối cảnh
 

@@ -2,6 +2,8 @@
 
 Ngày: **13/11/2026** · Trạng thái: **Đã duyệt bởi người dùng** qua yêu cầu “Duyệt toàn bộ”. Đã triển khai; kết quả kiểm chứng và giới hạn tại spec P1-01.
 
+**Cập nhật 17/11:** [Quyết định bổ sung](P1-01-cap-nhat-constraint.md) thay ngưỡng mật khẩu thành 8–128, đổi mật khẩu thu hồi mọi phiên và bổ sung các ràng buộc xác thực. Các lựa chọn 13/11 dưới đây được giữ để tra lịch sử.
+
 ## Phạm vi và căn cứ
 
 P1-01 → UC-01/03/04/07/08, Người dùng và phiên web quản trị → FR-01, FR-03, NFR-01. Người dùng đã chốt đăng xuất từng phiên và quyền tài khoản chờ duyệt, sau đó duyệt toàn bộ đề xuất OTP/mật khẩu. Các ngưỡng dưới đây là quyết định riêng của dự án, không lấy từ OTP bàn giao FR-09 và không khẳng định là ngưỡng nội bộ của sàn thương mại điện tử.
