@@ -43,6 +43,12 @@ export default function ListingsScreen() {
           disabled={!!token && !user?.roles.includes('MEMBER')}
           onPress={() => navigation.navigate(token ? 'CreateListing' : 'Login')}
         />
+        <Action
+          secondary
+          title="Kho đồ"
+          disabled={!!token && !user?.roles.includes('MEMBER')}
+          onPress={() => navigation.navigate(token ? 'InventoryList' : 'Login')}
+        />
         <Action secondary title="Hồ sơ" onPress={() => navigation.navigate(token ? 'Profile' : 'Login')} />
         {!token && <Action secondary title="Đăng nhập" onPress={() => navigation.navigate('Login')} />}
       </View>
