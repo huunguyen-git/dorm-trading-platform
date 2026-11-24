@@ -315,3 +315,147 @@ test('leaves session intact on ordinary non-restriction 403 error', async () => 
   expect(useSession.getState().token).toBe('valid-jwt');
   expect(useSession.getState().restriction).toBeNull();
 });
+
+test('omits Content-Type header for FormData uploads while preserving Bearer auth', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('upload-jwt');
+  const formData = new FormData();
+  formData.append('files', { uri: 'file:///photo.jpg', name: 'photo.jpg', type: 'image/jpeg' } as unknown as Blob);
+  const responseBody = {
+    items: [
+      {
+        id: 'm-1',
+        url: 'http://localhost:8082/api/v1/media/m-1',
+        contentType: 'image/jpeg',
+        sizeBytes: 12345,
+      },
+    ],
+  };
+  fetchMock.mockResolvedValueOnce({
+    status: 201,
+    ok: true,
+    json: async () => responseBody,
+  });
+
+  await expect(api('/media/images', { method: 'POST', body: formData })).resolves.toEqual(responseBody);
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [calledUrl, calledInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(calledUrl).toBe('http://localhost:8082/api/v1/media/images');
+  expect(calledInit.method).toBe('POST');
+  expect(calledInit.body).toBe(formData);
+  const headers = calledInit.headers as Record<string, string>;
+  expect(headers.Authorization).toBe('Bearer upload-jwt');
+  expect(headers['Content-Type']).toBeUndefined();
+  expect(headers['content-type']).toBeUndefined();
+});
+
+test('preserves Content-Type application/json for non-FormData JSON requests', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('json-jwt');
+  fetchMock.mockResolvedValueOnce({
+    status: 200,
+    ok: true,
+    json: async () => ({ ok: true }),
+  });
+
+  await expect(api('/listings', { method: 'POST', body: JSON.stringify({ title: 'Sách' }) })).resolves.toEqual({
+    ok: true,
+  });
+
+  const [, calledInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  const headers = calledInit.headers as Record<string, string>;
+  expect(headers['Content-Type']).toBe('application/json');
+  expect(headers.Authorization).toBe('Bearer json-jwt');
+});
+
+test('retries FormData upload after 401 Bearer single-flight refresh without injecting JSON Content-Type', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let currentToken = 'expired-upload-jwt';
+  store.get.mockImplementation(async () => currentToken);
+  store.getRefresh.mockResolvedValue('valid-refresh-token');
+  store.save.mockImplementation(async (nextToken) => {
+    currentToken = nextToken;
+  });
+
+  const formData = new FormData();
+  formData.append('files', { uri: 'file:///desk.png', name: 'desk.png', type: 'image/png' } as unknown as Blob);
+
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: { get: (name: string) => (name.toLowerCase() === 'www-authenticate' ? 'Bearer error="invalid_token"' : null) },
+      text: async () => '',
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        token: 'refreshed-upload-jwt',
+        refreshToken: 'next-refresh-token',
+        user: activeUser,
+      }),
+    })
+    .mockResolvedValueOnce({
+      status: 201,
+      ok: true,
+      json: async () => ({ items: [{ id: 'm-2', url: 'http://localhost:8082/api/v1/media/m-2', contentType: 'image/png', sizeBytes: 2048 }] }),
+    });
+
+  await expect(api('/media/images', { method: 'POST', body: formData })).resolves.toEqual({
+    items: [{ id: 'm-2', url: 'http://localhost:8082/api/v1/media/m-2', contentType: 'image/png', sizeBytes: 2048 }],
+  });
+
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const [, retryInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  const retryHeaders = retryInit.headers as Record<string, string>;
+  expect(retryHeaders.Authorization).toBe('Bearer refreshed-upload-jwt');
+  expect(retryHeaders['Content-Type']).toBeUndefined();
+  expect(retryInit.body).toBe(formData);
+});
+
+test('handles 403 ACCOUNT_RESTRICTED and preserves error status/code on FormData upload', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false, restriction: null });
+  store.get.mockResolvedValue('valid-jwt');
+  const formData = new FormData();
+  formData.append('files', { uri: 'file:///a.webp', name: 'a.webp', type: 'image/webp' } as unknown as Blob);
+
+  fetchMock.mockResolvedValueOnce({
+    status: 403,
+    ok: false,
+    text: async () =>
+      JSON.stringify({
+        code: 'ACCOUNT_RESTRICTED',
+        message: 'Tài khoản bị khóa tạm thời.',
+        restriction: {
+          accountStatus: 'BI_KHOA',
+          lockType: 'KHOA_TAM_THOI',
+          reason: 'Vi phạm nội quy',
+          lockedUntil: '2026-12-10T00:00:00Z',
+          appealable: false,
+          reputationScore: 40,
+        },
+      }),
+  });
+
+  await expect(api('/media/images', { method: 'POST', body: formData })).rejects.toBeInstanceOf(RestrictedAccountError);
+  expect(useSession.getState().restriction?.lockType).toBe('KHOA_TAM_THOI');
+
+  fetchMock.mockResolvedValueOnce({
+    status: 413,
+    ok: false,
+    text: async () => JSON.stringify({ code: 'FILE_TOO_LARGE', message: 'Ảnh vượt quá giới hạn 5MB.' }),
+  });
+
+  let mediaError: (Error & { status?: number; code?: string }) | undefined;
+  try {
+    await api('/media/images', { method: 'POST', body: formData });
+  } catch (err) {
+    mediaError = err as Error & { status?: number; code?: string };
+  }
+  expect(mediaError?.message).toBe('Ảnh vượt quá giới hạn 5MB.');
+  expect(mediaError?.status).toBe(413);
+  expect(mediaError?.code).toBe('FILE_TOO_LARGE');
+});

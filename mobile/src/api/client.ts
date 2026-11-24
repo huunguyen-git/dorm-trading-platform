@@ -155,6 +155,21 @@ async function refresh() {
   return refreshFlight;
 }
 
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    const result: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      result[key] = value;
+    });
+    return result;
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return headers as Record<string, string>;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const origin = baseUrl();
   const publicCall = [
@@ -164,14 +179,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     '/auth/otp/verify',
     '/auth/password/reset',
   ].includes(path);
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
   const send = async () => {
     const token = publicCall ? null : await tokenStore.get();
     return fetch(`${origin}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        ...(!isFormData ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...init.headers,
+        ...normalizeHeaders(init.headers),
       },
     });
   };
