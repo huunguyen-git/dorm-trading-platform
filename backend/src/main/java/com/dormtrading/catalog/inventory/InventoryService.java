@@ -82,9 +82,11 @@ public class InventoryService {
         checkUserActive(userId);
         String sql = """
                 SELECT v.ma_vat, v.user_id, v.ten, v.tinh_trang, v.hinh_anh, v.trang_thai, v.version, v.created_at, v.updated_at,
-                       COUNT(td.ma_tin) AS linked_count
+                       COUNT(t.ma_tin) AS linked_count
                 FROM do_vats v
                 LEFT JOIN tin_dang_do_vat td ON v.ma_vat = td.ma_vat
+                LEFT JOIN tin_dangs t ON td.ma_tin = t.ma_tin
+                    AND t.trang_thai IN ('NHAP', 'CHO_DUYET', 'CONG_KHAI', 'GIU_CHO')
                 WHERE v.user_id = ?
                 GROUP BY v.ma_vat, v.user_id, v.ten, v.tinh_trang, v.hinh_anh, v.trang_thai, v.version, v.created_at, v.updated_at
                 ORDER BY v.created_at DESC
@@ -124,6 +126,7 @@ public class InventoryService {
                 FROM tin_dang_do_vat td
                 JOIN tin_dangs t ON td.ma_tin = t.ma_tin
                 WHERE td.ma_vat = ?
+                  AND t.trang_thai IN ('NHAP', 'CHO_DUYET', 'CONG_KHAI', 'GIU_CHO')
                 ORDER BY t.created_at DESC
                 """;
 
@@ -236,7 +239,11 @@ public class InventoryService {
                     "Đồ vật không ở trạng thái khả dụng để chỉnh sửa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
+        Integer linkedCount = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat td " +
+                        "JOIN tin_dangs t ON td.ma_tin = t.ma_tin " +
+                        "WHERE td.ma_vat = ? AND t.trang_thai IN ('NHAP', 'CHO_DUYET', 'CONG_KHAI', 'GIU_CHO')",
+                Integer.class,
                 itemId);
         if (linkedCount != null && linkedCount > 0) {
             throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
@@ -334,7 +341,11 @@ public class InventoryService {
                     "Đồ vật không ở trạng thái khả dụng để xóa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
+        Integer linkedCount = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat td " +
+                        "JOIN tin_dangs t ON td.ma_tin = t.ma_tin " +
+                        "WHERE td.ma_vat = ? AND t.trang_thai IN ('NHAP', 'CHO_DUYET', 'CONG_KHAI', 'GIU_CHO')",
+                Integer.class,
                 itemId);
         if (linkedCount != null && linkedCount > 0) {
             throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
@@ -346,6 +357,11 @@ public class InventoryService {
         }
 
         try {
+            db.update(
+                    "DELETE FROM tin_dang_do_vat td USING tin_dangs t " +
+                            "WHERE td.ma_tin = t.ma_tin AND td.ma_vat = ? " +
+                            "AND t.trang_thai NOT IN ('NHAP', 'CHO_DUYET', 'CONG_KHAI', 'GIU_CHO')",
+                    itemId);
             int deleted = db.update("DELETE FROM do_vats WHERE ma_vat = ? AND user_id = ? AND version = ?", itemId,
                     userId, current.version());
             if (deleted == 0) {

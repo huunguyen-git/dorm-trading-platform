@@ -7,6 +7,9 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @RestControllerAdvice
 public class AuthErrors {
@@ -21,6 +24,22 @@ public class AuthErrors {
     @ExceptionHandler(MailException.class)
     ResponseEntity<Map<String,String>> mail() {
         return ResponseEntity.status(503).body(Map.of("code","MAIL_UNAVAILABLE","message","Chưa gửi được email. Vui lòng thử lại."));
+    }
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<Map<String,String>> fileTooLarge() {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(Map.of("code","FILE_TOO_LARGE","message","Kích thước tệp vượt quá giới hạn cho phép (5MB)."));
+    }
+    @ExceptionHandler({
+            MissingServletRequestPartException.class,
+            MultipartException.class
+    })
+    ResponseEntity<Map<String,String>> invalidMedia(Exception e) {
+        if (e instanceof MaxUploadSizeExceededException) {
+            return fileTooLarge();
+        }
+        return ResponseEntity.badRequest()
+                .body(Map.of("code","INVALID_MEDIA","message","Yêu cầu tải lên hình ảnh không hợp lệ."));
     }
     @ExceptionHandler({
             HttpMessageNotReadableException.class,
