@@ -432,7 +432,7 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void testSecurityLockedUserRejectedWith401_WhenLocked() {
+    void testSecurityLockedUserRejectedWith403_WhenLocked() {
         // Create an item first while active
         String itemIdStr = given()
                 .auth().oauth2(userToken)
@@ -444,13 +444,14 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
         // Lock user account (BI_KHOA)
         db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA' WHERE user_id = ?", userId);
 
-        // All inventory operations must now return 401 Unauthorized because session/token is invalid for BI_KHOA user
+        // All inventory operations must now return 403 ACCOUNT_RESTRICTED (AccountRestrictedFailure from main)
         given()
                 .auth().oauth2(userToken)
                 .when()
                 .get("/api/v1/inventory")
                 .then()
-                .statusCode(401);
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"));
 
         given()
                 .auth().oauth2(userToken)
@@ -459,7 +460,8 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
                 .when()
                 .post("/api/v1/inventory")
                 .then()
-                .statusCode(401);
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"));
 
         given()
                 .auth().oauth2(userToken)
@@ -468,14 +470,16 @@ class InventoryIntegrationTest extends BaseIntegrationTest {
                 .when()
                 .put("/api/v1/inventory/{id}", itemIdStr)
                 .then()
-                .statusCode(401);
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"));
 
         given()
                 .auth().oauth2(userToken)
                 .when()
                 .delete("/api/v1/inventory/{id}", itemIdStr)
                 .then()
-                .statusCode(401);
+                .statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"));
     }
 
     @Test
