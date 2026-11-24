@@ -93,7 +93,7 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 
 ## Bàn giao hiện tại
 
-- **P1-01 · đóng gói PR24/11**: [Chuỗi commit và bàn giao PR](specs/P1-01.md#chia-commit-và-tạo-pr--24112026) tách backend → web → mobile → kiểm thử tích hợp → tài liệu. Cập nhật nhánh với PR#26 P1-04/P1-05 trên main và kiểm lại phần auth dùng chung trước mở PR. Giữ **Đang thực hiện** cho toàn task; các mục “chưa commit/push”22/11 dưới đây là lịch sử.
+- **P1-01 · PR24/11**: [PR#32](https://github.com/huunguyen-git/dorm-trading-platform/pull/32) · [Chuỗi commit và bàn giao](specs/P1-01.md#chia-commit-và-tạo-pr--24112026): backend → web → mobile → kiểm thử → tài liệu → liên kết bàn giao. Đã rebase main#26; backend53/53, web43/43, mobile22/22, build và live web/mobile API/SMTP đạt. Native22/11 chưa chạy lại. PR không xung đột, cần1 approval và CI required; chưa merge. Phạm vi PR chờ review, toàn task giữ **Đang thực hiện** do còn UI báo lỗi giao OTP, native đầy đủ và ghép P1-02. Các mục “chưa commit/push”22/11 dưới đây là lịch sử.
 
 - **P1-01 · bắt đầu phiên mới**: đọc [bàn giao22/11](specs/P1-01.md#bắt-đầu-phiên-mới--22112026) trước khi sửa. Ghi rõ working tree chưa commit, file mới chưa theo dõi, dịch vụ thử đã dừng, nguyên nhân OTP đã sửa/chưa làm và thứ tự tiếp tục. Ưu tiên phản hồi lỗi giao OTP trên UI với ràng buộc chống dò email; sau đó bổ sung native auth. Giữ **Đang thực hiện**; lượt rà này chỉ cập nhật tài liệu, không chạy lại test.
 
