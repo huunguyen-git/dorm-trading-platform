@@ -29,17 +29,19 @@ public class ProfileService {
     private final AuthService auth;
     private final PasswordEncoder encoder;
     private final OtpDelivery delivery;
+    private final CardStorage cards;
     private final Clock clock;
     private final SecureRandom random;
     private final byte[] key;
     private final int otpSeconds, resendSeconds, otpAttempts;
 
     public ProfileService(JdbcTemplate db, AuthService auth, PasswordEncoder encoder, OtpDelivery delivery,
-                          Clock clock, SecureRandom random, @Value("${app.jwt.secret}") String secret,
+                          CardStorage cards, Clock clock, SecureRandom random,
+                          @Value("${app.jwt.secret}") String secret,
                           @Value("${app.auth.otp-seconds:300}") int otpSeconds,
                           @Value("${app.auth.resend-seconds:60}") int resendSeconds,
                           @Value("${app.auth.otp-attempts:5}") int otpAttempts) {
-        this.db = db; this.auth = auth; this.encoder = encoder; this.delivery = delivery;
+        this.db = db; this.auth = auth; this.encoder = encoder; this.delivery = delivery; this.cards = cards;
         this.clock = clock; this.random = random; this.key = Base64.getDecoder().decode(secret);
         this.otpSeconds = otpSeconds; this.resendSeconds = resendSeconds; this.otpAttempts = otpAttempts;
     }
@@ -171,14 +173,19 @@ public class ProfileService {
         catch (java.io.IOException e) { throw new AuthFailure(400, "INVALID_STUDENT_CARD", "Không đọc được ảnh thẻ."); }
         String mime = sniff(bytes);
         if (mime == null) throw new AuthFailure(400, "INVALID_STUDENT_CARD", "Ảnh thẻ phải là JPEG hoặc PNG.");
+        String objectKey = userId + "/" + UUID.randomUUID() + ("image/png".equals(mime) ? ".png" : ".jpg");
+        cards.put(objectKey, bytes, mime);
+        String previous = db.query("select object_key from the_sinh_viens where user_id=?",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
         db.update("""
-                insert into the_sinh_viens(user_id,mime,kich_thuoc,noi_dung,uploaded_at) values (?,?,?,?,?)
-                on conflict (user_id) do update set mime=excluded.mime,kich_thuoc=excluded.kich_thuoc,
-                    noi_dung=excluded.noi_dung,uploaded_at=excluded.uploaded_at
+                insert into the_sinh_viens(user_id,object_key,mime,kich_thuoc,uploaded_at) values (?,?,?,?,?)
+                on conflict (user_id) do update set object_key=excluded.object_key,mime=excluded.mime,
+                    kich_thuoc=excluded.kich_thuoc,uploaded_at=excluded.uploaded_at
                 """, ps -> {
-            ps.setObject(1, userId); ps.setString(2, mime); ps.setInt(3, bytes.length);
-            ps.setBytes(4, bytes); ps.setTimestamp(5, at());
+            ps.setObject(1, userId); ps.setString(2, objectKey); ps.setString(3, mime);
+            ps.setInt(4, bytes.length); ps.setTimestamp(5, at());
         });
+        if (previous != null) cards.delete(previous);
         db.update("update thanh_viens set cho_duyet_lai=true,ly_do_tu_choi=null,updated_at=?,version=version+1 where user_id=?",
                 at(), userId);
     }
@@ -187,11 +194,14 @@ public class ProfileService {
         var user = auth.me(jwt);
         if (!user.id().equals(ownerId) && !user.roles().contains("MODERATOR"))
             throw new AuthFailure(403, "STUDENT_CARD_FORBIDDEN", "Không có quyền xem ảnh thẻ này.");
-        var rows = db.queryForList("select mime,noi_dung from the_sinh_viens where user_id=?", ownerId);
+        var rows = db.queryForList("select object_key,mime from the_sinh_viens where user_id=?", ownerId);
         if (rows.isEmpty())
             throw new AuthFailure(404, "STUDENT_CARD_NOT_FOUND", "Hồ sơ chưa có ảnh thẻ sinh viên.");
-        var card = rows.getFirst();
-        return new Card((byte[]) card.get("noi_dung"), card.get("mime").toString());
+        var row = rows.getFirst();
+        // Object mất nhưng còn dòng DB: coi như chưa có ảnh thay vì trả 500 cho client.
+        byte[] bytes = cards.get(row.get("object_key").toString())
+                .orElseThrow(() -> new AuthFailure(404, "STUDENT_CARD_NOT_FOUND", "Hồ sơ chưa có ảnh thẻ sinh viên."));
+        return new Card(bytes, row.get("mime").toString());
     }
 
     public List<Pending> pending(int offset, int limit) {

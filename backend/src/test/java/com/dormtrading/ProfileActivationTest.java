@@ -193,7 +193,7 @@ class ProfileActivationTest extends BaseIntegrationTest {
                 .then().statusCode(400).body("code",equalTo("INVALID_STUDENT_CARD"));
         given().auth().oauth2(token).multiPart("file","card.png",png,"image/jpeg")
                 .post("/api/v1/profile/me/student-card").then().statusCode(204);
-        assertThat(db.queryForObject("select mime from the_sinh_viens where user_id=?",String.class,userId)).isEqualTo("image/png");
+        assertThat(db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId)).isNotBlank();
 
         given().auth().oauth2(token).get("/api/v1/profile/student-cards/" + userId)
                 .then().statusCode(200).header("Cache-Control","no-store").contentType("image/png");
