@@ -216,11 +216,10 @@ public class ListingService {
         );
 
         Instant now = lifecycleHelper.now();
-        LockedSeller seller;
+        // Lock order (1): thanh_viens FOR UPDATE for both PUBLISH and DRAFT (FR-12 / NFR-02 consistency)
+        LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
         List<UUID> expiredItemIds = List.of();
         if (isPublish) {
-            // Lock order (1): thanh_viens FOR UPDATE
-            seller = lockAndVerifyActiveSeller(sellerId);
             // Lock order (2): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
             List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
             expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
@@ -233,8 +232,6 @@ public class ListingService {
                                 + "). Hãy rút tin cũ hoặc lưu bản nháp."
                 );
             }
-        } else {
-            seller = verifyActiveSellerReadOnly(sellerId);
         }
 
         // Lock order (3): do_vats ORDER BY ma_vat ASC FOR UPDATE (union of new + expired listing items)
@@ -634,8 +631,8 @@ public class ListingService {
 
         // Lock order (1): thanh_viens FOR UPDATE
         LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
-        // Lock order (2a): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
-        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
+        // Lock order (2a): expire seller's other overdue CONG_KHAI listings without bumping target listing's version
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSellerExcluding(sellerId, listingId, now);
 
         // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
@@ -653,11 +650,14 @@ public class ListingService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Tin đăng đã thay đổi bởi thao tác khác. Vui lòng làm mới.");
         }
 
-        boolean isReopeningExpired = ListingDtos.ListingStatus.HET_HAN.name().equals(current.status());
+        boolean targetOverduePublic = ListingLifecycleHelper.isExpired(current.status(), current.expiresAt(), now);
+        boolean isReopeningExpired = ListingDtos.ListingStatus.HET_HAN.name().equals(current.status())
+                || targetOverduePublic;
 
         List<UUID> linkedItemIds = loadLinkedItemIds(listingId);
+        ValidatedFields validatedReopen = null;
         if (isReopeningExpired) {
-            validateListingFields(
+            validatedReopen = validateListingFields(
                     current.title(),
                     current.description(),
                     current.condition(),
@@ -701,10 +701,15 @@ public class ListingService {
             boolean directPublic = ListingDtos.ListingStatus.CONG_KHAI.name().equals(targetStatus);
             Instant nextPublishedAt = directPublic ? now : null;
             Instant nextExpiresAt = directPublic ? newExpiresAt : null;
+            String listingType = ListingLifecycleHelper.deriveListingType(
+                    validatedReopen.itemIds().size(),
+                    validatedReopen.priceVnd()
+            );
             updated = db.update(
                     """
                     UPDATE tin_dangs
                     SET trang_thai = ?,
+                        hinh_thuc = ?,
                         published_at = ?,
                         expires_at = ?,
                         closed_at = NULL,
@@ -715,6 +720,7 @@ public class ListingService {
                     WHERE ma_tin = ? AND nguoi_dang_id = ? AND version = ?
                     """,
                     targetStatus,
+                    listingType,
                     toTimestamp(nextPublishedAt),
                     toTimestamp(nextExpiresAt),
                     Timestamp.from(now),

@@ -1168,4 +1168,142 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("listing.status", equalTo("DA_RUT"))
                 .body("listing.version", equalTo(2));
     }
+
+    @Test
+    void fr13_directRenewOnOverduePublicAndComboTypeRecomputationAfterInventoryDeletion() {
+        TestUser seller = createUser("Người Bán Renew Audit", true, 100);
+        UUID itemA = createInventoryItem(seller.token(), "Giáo trình Mạng máy tính");
+        UUID itemB = createInventoryItem(seller.token(), "Sách bài tập Mạng máy tính");
+        UUID itemFreeA = createInventoryItem(seller.token(), "Đèn bàn học cũ");
+        UUID itemFreeB = createInventoryItem(seller.token(), "Kệ nhựa nhỏ");
+        UUID itemOverdue = createInventoryItem(seller.token(), "Quạt mini quá hạn");
+        UUID itemFiller = createInventoryItem(seller.token(), "Bình giữ nhiệt");
+
+        Instant day0 = currentTime.get();
+
+        // 1. Publish an overdue CONG_KHAI listing (v0)
+        String overdueDirectRenewId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Quạt mini quá hạn gia hạn thẳng", 75000, List.of(itemOverdue)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        // 2. Publish paid combo (2 items) and free combo (2 items, 0đ)
+        String paidComboId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Combo sách Mạng máy tính", 95000, List.of(itemA, itemB)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .body("listing.listingType", equalTo("BAN_COMBO"))
+                .body("listing.isCombo", equalTo(true))
+                .extract().jsonPath().getString("listing.id");
+
+        String freeComboId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Combo tặng đèn + kệ", 0, List.of(itemFreeA, itemFreeB)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .body("listing.listingType", equalTo("BAN_COMBO"))
+                .body("listing.isCombo", equalTo(true))
+                .body("listing.isFree", equalTo(true))
+                .extract().jsonPath().getString("listing.id");
+
+        // Advance Clock +30 days + 5 minutes WITHOUT hitting any reconciliation endpoint first
+        currentTime.set(day0.plus(30, ChronoUnit.DAYS).plus(5, ChronoUnit.MINUTES));
+        String tokenDay31 = relogin(seller);
+
+        // Direct POST /renew with current version=0 on overdue CONG_KHAI MUST succeed (no self-inflicted 409 VERSION_CONFLICT)
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 0))
+                .post("/api/v1/listings/{id}/renew", overdueDirectRenewId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("CONG_KHAI"))
+                .body("listing.renewalCount", equalTo(1))
+                .body("listing.version", equalTo(1))
+                .body("listing.expiresAt", equalTo(currentTime.get().plus(30, ChronoUnit.DAYS).toString()))
+                .body("quota.activeCount", equalTo(1));
+
+        // The other 2 overdue combos were reconciled to HET_HAN cleanly
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(paidComboId)))
+                .isEqualTo("HET_HAN");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(freeComboId)))
+                .isEqualTo("HET_HAN");
+
+        // Delete 1 component item from each HET_HAN combo in P1-03 Inventory -> only 1 item remains linked
+        long itemBVersion = given().auth().oauth2(tokenDay31)
+                .get("/api/v1/inventory/{id}", itemB)
+                .then().statusCode(200)
+                .body("canDelete", equalTo(true))
+                .extract().jsonPath().getLong("version");
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}?version={v}", itemB, itemBVersion)
+                .then().statusCode(204);
+
+        long itemFreeBVersion = given().auth().oauth2(tokenDay31)
+                .get("/api/v1/inventory/{id}", itemFreeB)
+                .then().statusCode(200)
+                .body("canDelete", equalTo(true))
+                .extract().jsonPath().getLong("version");
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}?version={v}", itemFreeB, itemFreeBVersion)
+                .then().statusCode(204);
+
+        // Renewing paidComboId (now 1 item) MUST recompute listingType -> BAN_LE & isCombo -> false
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 1))
+                .post("/api/v1/listings/{id}/renew", paidComboId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("CONG_KHAI"))
+                .body("listing.listingType", equalTo("BAN_LE"))
+                .body("listing.isCombo", equalTo(false))
+                .body("listing.itemCount", equalTo(1))
+                .body("listing.renewalCount", equalTo(1));
+
+        // Renewing freeComboId (now 1 item, price 0) MUST recompute listingType -> CHO_TANG & isCombo -> false
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 1))
+                .post("/api/v1/listings/{id}/renew", freeComboId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("CONG_KHAI"))
+                .body("listing.listingType", equalTo("CHO_TANG"))
+                .body("listing.isCombo", equalTo(false))
+                .body("listing.isFree", equalTo(true))
+                .body("listing.itemCount", equalTo(1))
+                .body("listing.renewalCount", equalTo(1));
+
+        // Overdue CONG_KHAI direct renew MUST still enforce FR-05 quota when 5/5 slots are taken
+        // Publish 2 more listings on day 31 (total 5/5: overdueDirectRenewId, paidComboId, freeComboId + 2 fillers)
+        for (int i = 0; i < 2; i++) {
+            given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                    .body(validPublishPayload("Tin lấp chỗ renew " + i, 20000, List.of(itemFiller)))
+                    .post("/api/v1/listings")
+                    .then().statusCode(201);
+        }
+        // Make overdueDirectRenewId overdue via DB while keeping 5 other active listings (push another active via DB to 5 active + 1 overdue)
+        db.update(
+                "UPDATE tin_dangs SET expires_at = ? WHERE ma_tin = ?",
+                Timestamp.from(currentTime.get().minus(1, ChronoUnit.MINUTES)),
+                UUID.fromString(overdueDirectRenewId)
+        );
+        // Fill the newly freed 5th slot so activeCount = 5 excluding overdueDirectRenewId
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(validPublishPayload("Tin chiếm suất thứ 5", 20000, List.of(itemFiller)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .body("quota.activeCount", equalTo(5));
+
+        // Direct renew on overdueDirectRenewId (version 2 after reconciliation by filler create, or let's reset to overdue CONG_KHAI v1)
+        db.update(
+                "UPDATE tin_dangs SET trang_thai = 'CONG_KHAI', closed_at = NULL, expires_at = ?, version = 1 WHERE ma_tin = ?",
+                Timestamp.from(currentTime.get().minus(1, ChronoUnit.MINUTES)),
+                UUID.fromString(overdueDirectRenewId)
+        );
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 1))
+                .post("/api/v1/listings/{id}/renew", overdueDirectRenewId)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("QUOTA_EXCEEDED"));
+    }
 }
