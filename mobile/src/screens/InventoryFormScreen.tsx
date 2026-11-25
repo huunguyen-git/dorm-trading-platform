@@ -1,5 +1,6 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -14,7 +15,16 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
+import { RestrictedAccountError } from '../api/client';
+import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
+import {
+  MAX_LISTING_IMAGES,
+  pickImagesFromLibrary,
+  takePhotoWithCamera,
+  uploadListingImages,
+  validateImageUrl,
+} from '../media/imagePicker';
 import { Action, Field, ui } from '../components/AuthUI';
 import { HairlineDivider, Icon, InlineBanner, SectionHeading } from '../components/ui';
 import { component, primitive, semantic } from '../theme';
@@ -55,10 +65,12 @@ export default function InventoryFormScreen() {
     };
   }, [clearError]);
 
+  const scrollViewRef = useRef<ScrollView | null>(null);
   const [ten, setTen] = useState(existingItem?.ten || '');
   const [tinhTrang, setTinhTrang] = useState(existingItem?.tinhTrang || '');
   const [hinhAnh, setHinhAnh] = useState<string[]>(existingItem?.hinhAnh || []);
   const [newImageUrl, setNewImageUrl] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [conditionFocused, setConditionFocused] = useState(false);
   const [imageInputFocused, setImageInputFocused] = useState(false);
   const [error, setError] = useState(
@@ -68,17 +80,103 @@ export default function InventoryFormScreen() {
   );
   const [busy, setBusy] = useState(false);
 
+  const reportError = (message: string) => {
+    setError(message);
+    if (message) {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }
+  };
+
+  const appendUniqueImages = (urls: string[]) => {
+    setHinhAnh((prev) => {
+      const next = [...prev];
+      for (const rawUrl of urls) {
+        const cleaned = rawUrl.trim();
+        if (!cleaned || next.length >= MAX_LISTING_IMAGES) continue;
+        if (!next.includes(cleaned)) {
+          next.push(cleaned);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleUploadFailure = (err: unknown, fallback: string) => {
+    if (typeof RestrictedAccountError === 'function' && err instanceof RestrictedAccountError) {
+      if (!useSession.getState().restriction) {
+        useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
+      }
+      setError('');
+      return;
+    }
+    reportError(sanitizeFormError(err, fallback));
+  };
+
+  const handlePickFromLibrary = async () => {
+    const remainingSlots = Math.max(0, MAX_LISTING_IMAGES - hinhAnh.length);
+    if (remainingSlots <= 0) {
+      reportError(`Đã đạt tối đa ${MAX_LISTING_IMAGES} ảnh thực tế.`);
+      return;
+    }
+    setError('');
+    try {
+      const picked = await pickImagesFromLibrary(remainingSlots);
+      if (picked.length === 0) return;
+      setUploadingImage(true);
+      const uploaded = await uploadListingImages(picked);
+      if (uploaded.length === 0) {
+        reportError('Không nhận được đường dẫn ảnh sau khi tải lên. Vui lòng thử lại.');
+        return;
+      }
+      appendUniqueImages(uploaded.map((item) => item.url));
+    } catch (err: unknown) {
+      handleUploadFailure(err, 'Không thể chọn hoặc tải ảnh từ thư viện lên máy chủ.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    const remainingSlots = Math.max(0, MAX_LISTING_IMAGES - hinhAnh.length);
+    if (remainingSlots <= 0) {
+      reportError(`Đã đạt tối đa ${MAX_LISTING_IMAGES} ảnh thực tế.`);
+      return;
+    }
+    setError('');
+    try {
+      const photo = await takePhotoWithCamera();
+      if (!photo) return;
+      setUploadingImage(true);
+      const uploaded = await uploadListingImages([photo]);
+      if (uploaded.length === 0) {
+        reportError('Không nhận được đường dẫn ảnh sau khi chụp. Vui lòng thử lại.');
+        return;
+      }
+      appendUniqueImages(uploaded.map((item) => item.url));
+    } catch (err: unknown) {
+      handleUploadFailure(err, 'Không thể chụp hoặc tải ảnh lên máy chủ.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const handleAddImage = (urlToAdd?: string) => {
     const targetUrl = (urlToAdd || newImageUrl).trim();
     if (!targetUrl) return;
 
-    if (hinhAnh.length >= 5) {
-      setError('Đã đạt tối đa 5 ảnh thực tế.');
+    if (hinhAnh.length >= MAX_LISTING_IMAGES) {
+      reportError('Đã đạt tối đa 5 ảnh thực tế.');
+      return;
+    }
+
+    const validation = validateImageUrl(targetUrl);
+    if (!validation.valid) {
+      reportError(validation.error ?? 'Đường dẫn ảnh không hợp lệ.');
       return;
     }
 
     if (hinhAnh.includes(targetUrl)) {
-      setError('Ảnh này đã được thêm.');
+      reportError('Ảnh này đã được thêm.');
       return;
     }
 
@@ -93,30 +191,31 @@ export default function InventoryFormScreen() {
   };
 
   const handleSubmit = async () => {
+    if (uploadingImage) return;
     if (isBlocked) {
-      setError(
+      reportError(
         'Đồ vật này đang nằm trong tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.',
       );
       return;
     }
 
     if (!ten.trim()) {
-      setError('Vui lòng nhập tên đồ vật.');
+      reportError('Vui lòng nhập tên đồ vật.');
       return;
     }
 
     if (!tinhTrang.trim()) {
-      setError('Vui lòng nhập mô tả tình trạng đồ vật.');
+      reportError('Vui lòng nhập mô tả tình trạng đồ vật.');
       return;
     }
 
     if (hinhAnh.length < 1) {
-      setError('Vui lòng chọn ít nhất 1 ảnh thực tế.');
+      reportError('Vui lòng chọn ít nhất 1 ảnh thực tế.');
       return;
     }
 
-    if (hinhAnh.length > 5) {
-      setError('Chỉ được phép tối đa 5 ảnh thực tế.');
+    if (hinhAnh.length > MAX_LISTING_IMAGES) {
+      reportError('Chỉ được phép tối đa 5 ảnh thực tế.');
       return;
     }
 
@@ -141,13 +240,14 @@ export default function InventoryFormScreen() {
       }
       navigation.goBack();
     } catch (err: unknown) {
-      setError(sanitizeFormError(err, 'Có lỗi xảy ra khi lưu đồ vật.'));
+      reportError(sanitizeFormError(err, 'Có lỗi xảy ra khi lưu đồ vật.'));
     } finally {
       setBusy(false);
     }
   };
 
-  const isDisabled = busy || isBlocked;
+  const isDisabled = busy || uploadingImage || isBlocked;
+  const canAddMoreImages = !isDisabled && hinhAnh.length < MAX_LISTING_IMAGES;
 
   return (
     <KeyboardAvoidingView
@@ -155,6 +255,7 @@ export default function InventoryFormScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -251,37 +352,82 @@ export default function InventoryFormScreen() {
             </View>
           )}
 
-          {!isBlocked ? (
-            <View style={styles.addImageRow}>
-              <TextInput
-                accessibilityLabel="Đường dẫn ảnh"
-                testID="input-image-url"
-                placeholder="Dán liên kết ảnh (https://...)"
-                placeholderTextColor={semantic.color.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                onFocus={() => setImageInputFocused(true)}
-                onBlur={() => setImageInputFocused(false)}
-                style={[
-                  ui.field,
-                  styles.imageInput,
-                  imageInputFocused && !busy && hinhAnh.length < 5 && styles.inputFocused,
-                  (busy || hinhAnh.length >= 5) && styles.inputDisabled,
-                ]}
-                value={newImageUrl}
-                onChangeText={setNewImageUrl}
-                editable={!busy && hinhAnh.length < 5}
-              />
-              <Action
-                variant="secondary"
-                compact
-                icon="plus"
-                title="Thêm"
-                testID="add-image-url-button"
-                disabled={busy || hinhAnh.length >= 5 || !newImageUrl.trim()}
-                onPress={() => handleAddImage()}
-              />
+          {uploadingImage ? (
+            <View style={styles.uploadingRow} testID="inventory-image-uploading">
+              <ActivityIndicator color={semantic.color.accent} size="small" />
+              <Text style={styles.uploadingText}>Đang tải ảnh lên máy chủ…</Text>
             </View>
+          ) : null}
+
+          {!isBlocked ? (
+            <>
+              <View style={styles.quickActionBar}>
+                <Pressable
+                  testID="inventory-pick-library-btn"
+                  accessibilityRole="button"
+                  accessibilityLabel="Chọn ảnh từ thư viện"
+                  accessibilityState={{ disabled: !canAddMoreImages, busy: uploadingImage }}
+                  disabled={!canAddMoreImages}
+                  onPress={() => void handlePickFromLibrary()}
+                  style={({ pressed }) => [
+                    styles.quickActionBtn,
+                    !canAddMoreImages && styles.disabledControl,
+                    pressed && canAddMoreImages && styles.pressed,
+                  ]}
+                >
+                  <Icon name="image" size={15} color={semantic.color.textPrimary} />
+                  <Text style={styles.quickActionText}>Thư viện</Text>
+                </Pressable>
+
+                <Pressable
+                  testID="inventory-take-photo-btn"
+                  accessibilityRole="button"
+                  accessibilityLabel="Chụp ảnh mới"
+                  accessibilityState={{ disabled: !canAddMoreImages, busy: uploadingImage }}
+                  disabled={!canAddMoreImages}
+                  onPress={() => void handleTakePhoto()}
+                  style={({ pressed }) => [
+                    styles.quickActionBtn,
+                    !canAddMoreImages && styles.disabledControl,
+                    pressed && canAddMoreImages && styles.pressed,
+                  ]}
+                >
+                  <Icon name="camera" size={15} color={semantic.color.textPrimary} />
+                  <Text style={styles.quickActionText}>Chụp ảnh</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.addImageRow}>
+                <TextInput
+                  accessibilityLabel="Đường dẫn ảnh"
+                  testID="input-image-url"
+                  placeholder="Hoặc dán liên kết ảnh (https://...)"
+                  placeholderTextColor={semantic.color.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onFocus={() => setImageInputFocused(true)}
+                  onBlur={() => setImageInputFocused(false)}
+                  style={[
+                    ui.field,
+                    styles.imageInput,
+                    imageInputFocused && canAddMoreImages && styles.inputFocused,
+                    !canAddMoreImages && styles.inputDisabled,
+                  ]}
+                  value={newImageUrl}
+                  onChangeText={setNewImageUrl}
+                  editable={canAddMoreImages}
+                />
+                <Action
+                  variant="secondary"
+                  compact
+                  icon="plus"
+                  title="Thêm"
+                  testID="add-image-url-button"
+                  disabled={!canAddMoreImages || !newImageUrl.trim()}
+                  onPress={() => handleAddImage()}
+                />
+              </View>
+            </>
           ) : null}
         </View>
       </ScrollView>
@@ -412,6 +558,42 @@ const styles = StyleSheet.create({
   emptyPhotoText: {
     ...semantic.type.caption,
     flex: 1,
+  },
+  uploadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  uploadingText: {
+    ...semantic.type.caption,
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.medium,
+  },
+  quickActionBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: primitive.space[2],
+  },
+  quickActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeightSm,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  quickActionText: {
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
+  },
+  disabledControl: {
+    opacity: primitive.opacity.disabled,
   },
   addImageRow: {
     flexDirection: 'row',

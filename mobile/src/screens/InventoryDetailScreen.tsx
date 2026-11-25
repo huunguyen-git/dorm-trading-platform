@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
+import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
 import { mapListingStatusLabel } from '../listings/types';
@@ -61,6 +63,11 @@ export default function InventoryDetailScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const { id } = route.params;
 
+  const token = useSession((state) => state.token);
+  const user = useSession((state) => state.user);
+  const isActiveMember = Boolean(
+    token && user?.roles.includes('MEMBER') && user?.accountStatus !== 'BI_KHOA',
+  );
   const { items, selectedItem, loadItem, deleteItem, clearError, loading, error } = useInventory();
   const [localItem, setLocalItem] = useState<InventoryItem | null>(() => {
     return (
@@ -164,6 +171,7 @@ export default function InventoryDetailScreen() {
     item.canEdit && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
   const isDeletable =
     item.canDelete && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
+  const canCreateListing = isActiveMember && item.trangThai === 'KHA_DUNG';
   const images = item.hinhAnh && item.hinhAnh.length > 0 ? item.hinhAnh : [];
   const carouselWidth = Math.max(windowWidth, 320);
   const carouselHeight = Math.min(Math.round(carouselWidth * 0.72), 320);
@@ -262,11 +270,26 @@ export default function InventoryDetailScreen() {
                 const rawStatus = listing.trangThai || listing.status || 'CONG_KHAI';
                 const statusLabel = mapListingStatusLabel(rawStatus);
                 const listingTitle = listing.tieuDe || listing.title || 'Tin đăng liên kết';
+                const hasListingId = Boolean(listing.id && listing.id.trim());
 
                 return (
                   <View key={listing.id || String(idx)}>
                     {idx > 0 ? <HairlineDivider /> : null}
-                    <View style={styles.linkedRow}>
+                    <Pressable
+                      testID={hasListingId ? `linked-listing-${listing.id}` : undefined}
+                      disabled={!hasListingId}
+                      accessibilityRole={hasListingId ? 'button' : undefined}
+                      accessibilityLabel={`Xem tin đăng ${listingTitle}`}
+                      onPress={() => {
+                        if (hasListingId) {
+                          navigation.navigate('Listing', { id: listing.id });
+                        }
+                      }}
+                      style={({ pressed }) => [
+                        styles.linkedRow,
+                        pressed && hasListingId && styles.linkedRowPressed,
+                      ]}
+                    >
                       <View style={styles.linkedIcon}>
                         <Icon name="tag" size={16} color={semantic.color.textSecondary} />
                       </View>
@@ -276,52 +299,66 @@ export default function InventoryDetailScreen() {
                         </Text>
                         <Text style={styles.linkedStatus}>Trạng thái: {statusLabel}</Text>
                       </View>
-                    </View>
+                      {hasListingId ? (
+                        <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
+                      ) : null}
+                    </Pressable>
                   </View>
                 );
               })}
             </View>
-          ) : (
-            <Text style={styles.emptyLinkedText}>Chưa có tin đăng liên kết.</Text>
-          )}
+          ) : null}
         </View>
       </ScrollView>
 
       {/* Sticky Editorial Action Bar */}
       <View
         style={[
-          styles.stickyFooter,
+          styles.stickyFooterWrap,
           { paddingBottom: Math.max(insets?.bottom ?? 0, primitive.space[3]) },
         ]}
       >
-        <View style={styles.footerBtnSlot}>
+        {canCreateListing ? (
           <Action
-            title="Sửa đồ vật"
-            variant="secondary"
-            icon="edit-2"
-            testID="detail-edit-button"
-            disabled={!isEditable || busy}
-            onPress={() => {
-              if (!isEditable) {
-                setActionError(
-                  'Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.',
-                );
-                return;
-              }
-              navigation.navigate('InventoryForm', { mode: 'edit', id: item.id, item });
-            }}
+            title="Đăng tin từ đồ vật này"
+            icon="plus"
+            testID="detail-create-listing-button"
+            disabled={busy}
+            onPress={() =>
+              navigation.navigate('CreateListing', { preselectedItemId: item.id })
+            }
           />
-        </View>
-        <View style={styles.footerBtnSlot}>
-          <Action
-            title="Xóa đồ vật"
-            variant="destructive"
-            icon="trash-2"
-            testID="detail-delete-button"
-            disabled={!isDeletable || busy}
-            busy={busy}
-            onPress={confirmDelete}
-          />
+        ) : null}
+        <View style={styles.stickyFooterRow}>
+          <View style={styles.footerBtnSlot}>
+            <Action
+              title="Sửa đồ vật"
+              variant="secondary"
+              icon="edit-2"
+              testID="detail-edit-button"
+              disabled={!isEditable || busy}
+              onPress={() => {
+                if (!isEditable) {
+                  setActionError(
+                    'Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.',
+                  );
+                  return;
+                }
+                navigation.navigate('InventoryForm', { mode: 'edit', id: item.id, item });
+              }}
+            />
+          </View>
+          <View style={styles.footerBtnSlot}>
+            <Action
+              title="Xóa đồ vật"
+              variant="destructive"
+              icon="trash-2"
+              testID="detail-delete-button"
+              disabled={!isDeletable || busy}
+              busy={busy}
+              onPress={confirmDelete}
+            />
+          </View>
         </View>
       </View>
     </View>
@@ -402,9 +439,13 @@ const styles = StyleSheet.create({
   },
   linkedRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: primitive.space[2.5],
     paddingVertical: primitive.space[3],
+  },
+  linkedRowPressed: {
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
   },
   linkedIcon: {
     width: 28,
@@ -413,7 +454,6 @@ const styles = StyleSheet.create({
     backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
   },
   linkedMeta: {
     flex: 1,
@@ -425,17 +465,17 @@ const styles = StyleSheet.create({
   linkedStatus: {
     ...semantic.type.micro,
   },
-  emptyLinkedText: {
-    ...semantic.type.caption,
-  },
-  stickyFooter: {
-    flexDirection: 'row',
+  stickyFooterWrap: {
     gap: primitive.space[2.5],
     paddingHorizontal: semantic.spacing.pageX,
     paddingTop: primitive.space[3],
     backgroundColor: semantic.color.bgSurface,
     borderTopWidth: 1,
     borderTopColor: semantic.color.borderHairline,
+  },
+  stickyFooterRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
   },
   footerBtnSlot: {
     flex: 1,
