@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_giao_dichs_seller_status_created
 -- Phòng vệ tầng CSDL (FR-08, NFR-02): tối đa 1 giữ chỗ hiệu lực (giu_hieu_luc = TRUE) trên mỗi đồ vật
 CREATE TABLE IF NOT EXISTS giao_dich_do_vat (
   ma_giao_dich UUID NOT NULL REFERENCES giao_dichs(ma_giao_dich) ON DELETE CASCADE,
-  ma_vat UUID NOT NULL REFERENCES do_vats(ma_vat) ON DELETE RESTRICT,
+  ma_vat UUID NOT NULL REFERENCES do_vats(ma_vat) ON DELETE CASCADE,
   giu_hieu_luc BOOLEAN NOT NULL DEFAULT FALSE,
   PRIMARY KEY (ma_giao_dich, ma_vat)
 );

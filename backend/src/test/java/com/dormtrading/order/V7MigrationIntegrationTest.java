@@ -87,5 +87,20 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
                 "chk_giao_dichs_distinct_parties",
                 "chk_lich_hen_trang_thai"
         );
+
+        String itemFkDeleteRule = db.queryForObject(
+                """
+                SELECT rc.delete_rule
+                FROM information_schema.referential_constraints rc
+                JOIN information_schema.key_column_usage kcu
+                  ON kcu.constraint_name = rc.constraint_name
+                 AND kcu.constraint_schema = rc.constraint_schema
+                WHERE kcu.table_schema = 'public'
+                  AND kcu.table_name = 'giao_dich_do_vat'
+                  AND kcu.column_name = 'ma_vat'
+                """,
+                String.class
+        );
+        assertThat(itemFkDeleteRule).isEqualTo("CASCADE");
     }
 }

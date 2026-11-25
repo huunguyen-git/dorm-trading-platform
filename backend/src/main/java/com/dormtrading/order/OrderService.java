@@ -182,6 +182,11 @@ public class OrderService {
             throw new AuthFailure(409, "LISTING_NOT_AVAILABLE", "Tin đăng không còn khả dụng để gửi yêu cầu giữ chỗ.");
         }
 
+        // Read-only counterparty check (no FOR UPDATE on thanh_viens after tin_dangs): reject if seller is locked/disabled
+        if (!isAccountActivelyAvailableReadOnly(listing.sellerId(), current)) {
+            throw new AuthFailure(409, "LISTING_NOT_AVAILABLE", "Người bán hiện không thể giao dịch nên tin đăng tạm thời không khả dụng.");
+        }
+
         if (countActiveReservationsForListing(listing.id()) > 0) {
             throw new AuthFailure(409, "LISTING_ALREADY_RESERVED", "Tin đăng này hiện đang có giữ chỗ hiệu lực.");
         }
@@ -294,6 +299,15 @@ public class OrderService {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Giao dịch vừa được cập nhật. Vui lòng tải lại trước khi thao tác.");
         }
 
+        // Verify counterparty buyer is still active (read-only, deadlock-free; respects FR-12 expired temp lock)
+        if (!isAccountActivelyAvailableReadOnly(order.buyerId(), current)) {
+            throw new AuthFailure(
+                    409,
+                    "BUYER_ACCOUNT_UNAVAILABLE",
+                    "Tài khoản người mua hiện đang bị khóa hoặc không còn hoạt động, không thể chấp nhận giữ chỗ."
+            );
+        }
+
         if (ListingDtos.ListingStatus.GIU_CHO.name().equals(listing.status())) {
             throw new AuthFailure(409, "LISTING_ALREADY_RESERVED", "Tin đăng đã được giữ chỗ cho một giao dịch khác.");
         }
@@ -385,9 +399,10 @@ public class OrderService {
             );
         }
 
-        // If buyer included both proposed time and location in UC-22, seed an initial pending proposal
+        // If buyer included both a future proposed time and location in UC-22, seed an initial pending proposal
         // (still CHO_XAC_NHAN — seller must confirm explicitly in UC-25; one-sided proposal is NOT confirmed).
         if (order.proposedMeetingTime() != null
+                && !order.proposedMeetingTime().isBefore(current)
                 && order.proposedMeetingLocation() != null
                 && !order.proposedMeetingLocation().isBlank()) {
             db.update(
@@ -493,12 +508,15 @@ public class OrderService {
                 ? ListingValidation.optionalText(req.reason(), MAX_REASON_LENGTH, "Lý do hủy không được vượt quá 1000 ký tự.")
                 : null;
 
-        // Verify caller account status without breaking lock ordering
+        // Verify caller account status without breaking global thanh_viens lock order (canonical UUID order)
         if (isSeller) {
             lockAndVerifyActiveSeller(lookup.sellerId());
-        } else {
+        } else if (userId.toString().compareTo(lookup.sellerId().toString()) < 0) {
             verifyActiveMemberReadOnly(userId);
             lockSellerRowOnly(lookup.sellerId());
+        } else {
+            lockSellerRowOnly(lookup.sellerId());
+            verifyActiveMemberReadOnly(userId);
         }
 
         LockedListing listing = lockListingForUpdate(lookup.listingId());
@@ -613,7 +631,7 @@ public class OrderService {
             });
         }
 
-        // 3. UC-24 Step 6: Update listing status only if currently GIU_CHO (respect FR-13 expiry & do not overwrite AN/KET_THUC)
+        // 3. UC-24 Step 6 & E3: Update listing status only if currently GIU_CHO (respect FR-13 expiry & do not overwrite AN/KET_THUC)
         if (ListingDtos.ListingStatus.GIU_CHO.name().equals(listing.status())
                 && countActiveReservationsForListing(listing.id()) == 0) {
             boolean expired = listing.expiresAt() != null && !current.isBefore(listing.expiresAt());
@@ -624,12 +642,23 @@ public class OrderService {
                         tsNow,
                         listing.id()
                 );
+                bumpUnreleasedItemsVersion(orderItemIds, itemsToRelease, tsNow);
             } else if (areAllListingItemsAvailable(listing.id())) {
                 db.update(
                         "UPDATE tin_dangs SET trang_thai = 'CONG_KHAI', updated_at = ?, version = version + 1 WHERE ma_tin = ?",
                         tsNow,
                         listing.id()
                 );
+            } else {
+                // UC-24 postcondition & E3: never leave listing zombied in GIU_CHO with 0 active orders,
+                // and never reopen to CONG_KHAI when an item is DA_CHUYEN_GIAO or held by another valid order.
+                db.update(
+                        "UPDATE tin_dangs SET trang_thai = 'DA_RUT', closed_at = ?, updated_at = ?, version = version + 1 WHERE ma_tin = ?",
+                        tsNow,
+                        tsNow,
+                        listing.id()
+                );
+                bumpUnreleasedItemsVersion(orderItemIds, itemsToRelease, tsNow);
             }
         }
 
@@ -1419,6 +1448,39 @@ public class OrderService {
         db.queryForList("SELECT user_id FROM thanh_viens WHERE user_id = ? FOR UPDATE", UUID.class, sellerId);
     }
 
+    private boolean isAccountActivelyAvailableReadOnly(UUID userId, Instant current) {
+        List<Map<String, Object>> rows = db.queryForList(
+                """
+                SELECT trang_thai_tai_khoan, email_verified, profile_approved, loai_han_che, khoa_den_ngay
+                FROM thanh_viens
+                WHERE user_id = ?
+                """,
+                userId
+        );
+        if (rows.isEmpty()) {
+            return false;
+        }
+        Map<String, Object> row = rows.getFirst();
+        String status = String.valueOf(row.get("trang_thai_tai_khoan"));
+        boolean emailVerified = Boolean.TRUE.equals(row.get("email_verified"));
+        boolean profileApproved = Boolean.TRUE.equals(row.get("profile_approved"));
+        if (!emailVerified || !profileApproved) {
+            return false;
+        }
+        if ("HOAT_DONG".equals(status)) {
+            return true;
+        }
+        if ("BI_KHOA".equals(status)) {
+            String lockType = (String) row.get("loai_han_che");
+            Timestamp lockedUntilTs = (Timestamp) row.get("khoa_den_ngay");
+            // Respect FR-12: an expired 14-day temporary lock is effectively unlocked
+            return "KHOA_TAM_THOI".equals(lockType)
+                    && lockedUntilTs != null
+                    && !lockedUntilTs.toInstant().isAfter(current);
+        }
+        return false;
+    }
+
     private void evaluateMemberRow(List<Map<String, Object>> rows) {
         if (rows.isEmpty()) {
             throw new AuthFailure(401, "UNAUTHORIZED", "Tài khoản không tồn tại.");
@@ -1645,7 +1707,33 @@ public class OrderService {
         return count != null && count > 0;
     }
 
+    private void bumpUnreleasedItemsVersion(List<UUID> orderItemIds, List<UUID> releasedItems, Timestamp tsNow) {
+        List<UUID> unbumpedItems = orderItemIds.stream()
+                .filter(id -> !releasedItems.contains(id))
+                .toList();
+        if (unbumpedItems.isEmpty()) {
+            return;
+        }
+        UUID[] unbumpedArr = unbumpedItems.toArray(new UUID[0]);
+        db.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                    "UPDATE do_vats SET version = version + 1, updated_at = ? WHERE ma_vat = ANY(?)"
+            );
+            ps.setTimestamp(1, tsNow);
+            ps.setArray(2, con.createArrayOf("uuid", unbumpedArr));
+            return ps;
+        });
+    }
+
     private boolean areAllListingItemsAvailable(UUID listingId) {
+        Integer totalItems = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_tin = ?",
+                Integer.class,
+                listingId
+        );
+        if (totalItems == null || totalItems == 0) {
+            return false;
+        }
         Integer unavailable = db.queryForObject(
                 """
                 SELECT COUNT(*)

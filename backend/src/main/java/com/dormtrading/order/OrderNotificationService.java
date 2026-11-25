@@ -91,8 +91,27 @@ public class OrderNotificationService {
                 event.listingId()
         );
 
+        List<UUID> currentListingItems = db.queryForList(
+                "SELECT ma_vat FROM tin_dang_do_vat WHERE ma_tin = ? ORDER BY ma_vat ASC",
+                UUID.class,
+                event.listingId()
+        );
+
         Timestamp createdAt = Timestamp.from(event.occurredAt() != null ? event.occurredAt() : now());
         for (PendingBuyerOrder pending : pendingOrders) {
+            // Keep pending YEU_CAU item snapshot synchronized with updated listing items (giu_hieu_luc remains FALSE)
+            db.update(
+                    "DELETE FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND giu_hieu_luc = FALSE",
+                    pending.orderId()
+            );
+            for (UUID itemId : currentListingItems) {
+                db.update(
+                        "INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, giu_hieu_luc) VALUES (?, ?, FALSE) ON CONFLICT DO NOTHING",
+                        pending.orderId(),
+                        itemId
+                );
+            }
+
             db.update(
                     """
                     INSERT INTO thong_baos(nguoi_nhan_id, loai, tieu_de, noi_dung, ma_tin, ma_giao_dich, da_doc, created_at)
