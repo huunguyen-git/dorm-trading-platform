@@ -23,13 +23,20 @@
 
 **Lựa chọn.** Cột `diem_khoi_tao BOOLEAN`, backfill `TRUE` cho tài khoản đã duyệt. Câu lệnh duyệt dùng `diem_uy_tin = case when diem_khoi_tao then diem_uy_tin else 100 end` và đặt `diem_khoi_tao=true`, nên idempotent cả khi duyệt lặp.
 
-## 3. Ảnh thẻ sinh viên lưu BYTEA, chưa dùng MinIO
+## 3. Ảnh thẻ sinh viên lưu object storage, có công tắc `local`/`s3`
 
-**Bối cảnh.** `application.properties` đã có `storage.s3.*` nhưng chưa có hạ tầng MinIO trong compose lẫn CI; P0-03 còn tồn đọng.
+**Bối cảnh.** NFR-01 yêu cầu xác định nơi lưu ảnh thẻ trước khi dùng dữ liệu thật; `docs/architecture/README.md` §4 quy định ảnh hạn chế nằm ở object storage riêng và chỉ đọc qua endpoint có kiểm quyền. Bản đầu của P1-02 lưu `BYTEA` trong `the_sinh_viens` với lý do "chưa có hạ tầng MinIO trong compose lẫn CI" — tiền đề này không còn đúng: `docker-compose.yml` đã có service `minio` và `application.properties` đã có `storage.s3.*`.
 
-**Lựa chọn.** Bảng `the_sinh_viens` giữ ảnh (≤ 5MB, MIME xác định bằng magic bytes), trả qua endpoint có kiểm quyền, `Cache-Control: no-store`.
+**Lựa chọn.** Ảnh thẻ lưu ngoài Postgres, sau interface `CardStorage`. Công tắc `storage.backend` chọn backend:
 
-**Đánh đổi đã chấp nhận.** Ảnh nằm trong DB làm phình bảng và tăng tải backup, đổi lại không phụ thuộc hạ tầng chưa có. Khi MinIO/S3 sẵn sàng: thay cột `noi_dung` bằng `object_key`, giữ nguyên `mime`/`kich_thuoc` và hợp đồng endpoint nên client không phải sửa.
+- `local` (mặc định, `matchIfMissing`): ghi thư mục `storage.local.dir` (`.local/student-cards`, đã nằm trong `.gitignore`). Dev/test không cần chạy MinIO, CI không cần thêm service.
+- `s3`: `S3CardStorage` dùng MinIO client với `storage.s3.*` sẵn có, tự tạo bucket `student-cards` khi chưa có.
+
+Key do server sinh dạng `<userId>/<uuid>.<ext>`; `LocalCardStorage` kiểm tra lại key bằng regex để chặn path traversal nếu dữ liệu DB bị sửa.
+
+**Hệ quả.** Migration `V7__student_card_object_storage.sql` tạo lại `the_sinh_viens(object_key, mime, kich_thuoc, uploaded_at)` và bỏ `noi_dung` (không chuyển được BYTEA sang object storage bằng SQL, chưa có dữ liệu thật). Hợp đồng `GET /api/v1/profile/student-cards/{ownerId}` và `GET /api/v1/admin/profiles/{userId}/student-card` giữ nguyên bytes + MIME + `Cache-Control: no-store` nên `mobile/` và `admin-web/` không phải sửa.
+
+**ponytail:** nhánh `s3` chưa có test tự động (chỉ smoke tay khi bật `STORAGE_BACKEND=s3`); thêm Testcontainers MinIO khi CI cần kiểm chứng đường object storage.
 
 ## 4. Đổi email dùng lại `auth_challenge` của P1-01
 
