@@ -1222,4 +1222,36 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
     expect(await screen.findByTestId('restricted-account-notice')).toBeTruthy();
     expect(mockedSellerApi.fetchMyListings).not.toHaveBeenCalled();
   });
+
+  test('displays accurate link label in edit mode for items belonging to current listing', async () => {
+    const sharedInventory: InventoryItem[] = [
+      {
+        ...sampleInventory[0],
+        id: 'item-only-this',
+        ten: 'Quạt mini để bàn',
+        linkedListingCount: 1,
+      },
+      {
+        ...sampleInventory[1],
+        id: 'item-shared-more',
+        ten: 'Đèn bàn chống cận',
+        linkedListingCount: 2,
+      },
+    ];
+    mockedInventoryApi.fetchInventoryItems.mockResolvedValueOnce(sharedInventory);
+
+    render(
+      <InventoryPickerSection
+        selectedItemIds={['item-only-this', 'item-shared-more']}
+        onChangeSelectedItemIds={() => {}}
+        mode="combo"
+        onChangeMode={() => {}}
+        currentListingItemIds={['item-only-this', 'item-shared-more']}
+        onNavigateToInventoryCreate={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText('Đang gắn tin này')).toBeTruthy();
+    expect(screen.getByText('Đang gắn tin này và 1 tin khác')).toBeTruthy();
+  });
 });

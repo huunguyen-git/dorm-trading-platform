@@ -657,4 +657,25 @@ describe('EmptyState, QuotaMeter, ToggleControl, StatusIndicator, LayoutPrimitiv
     expect(screen.getByText('Bắt buộc nhập.')).toBeTruthy();
     expect(timingSpy).not.toHaveBeenCalled();
   });
+
+  test('SegmentedControl disabled mode strips thumb elevation to avoid Android shadow bleed', () => {
+    const onChange = jest.fn();
+    render(
+      <SegmentedControl
+        testID="disabled-segmented"
+        disabled
+        options={[
+          { value: 'single', label: 'Tin đơn', testID: 'seg-single' },
+          { value: 'combo', label: 'Combo', testID: 'seg-combo' },
+        ]}
+        value="single"
+        onChange={onChange}
+      />,
+    );
+
+    const singleTab = screen.getByTestId('seg-single');
+    expect(singleTab.props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(screen.getByTestId('seg-combo'));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

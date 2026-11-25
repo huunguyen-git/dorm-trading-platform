@@ -37,6 +37,7 @@ export interface InventoryPickerSectionProps {
   disabled?: boolean;
   error?: string;
   preselectedItemId?: string;
+  currentListingItemIds?: string[];
   onNavigateToInventoryCreate: () => void;
 }
 
@@ -85,6 +86,7 @@ export default function InventoryPickerSection({
   disabled = false,
   error,
   preselectedItemId,
+  currentListingItemIds,
   onNavigateToInventoryCreate,
 }: InventoryPickerSectionProps) {
   const navigation = useOptionalNavigation();
@@ -282,6 +284,18 @@ export default function InventoryPickerSection({
             const canToggle = !disabled && (!isUnavailable || isSelected);
             const thumb = item.hinhAnh[0];
 
+            const isInCurrentListing = Boolean(currentListingItemIds?.includes(item.id));
+            const otherLinkedCount = isInCurrentListing
+              ? Math.max(0, item.linkedListingCount - 1)
+              : item.linkedListingCount;
+            const sharedLinkLabel = isInCurrentListing
+              ? otherLinkedCount > 0
+                ? `Đang gắn tin này và ${otherLinkedCount} tin khác`
+                : 'Đang gắn tin này'
+              : item.linkedListingCount > 0
+                ? `Đang gắn ${item.linkedListingCount} tin khác`
+                : null;
+
             return (
               <Fragment key={item.id}>
                 {index > 0 ? <HairlineDivider insetLeft={36} /> : null}
@@ -351,10 +365,8 @@ export default function InventoryPickerSection({
                       </Text>
                     ) : statusMeta.lockReason ? (
                       <Text style={styles.lockReason}>{statusMeta.lockReason}</Text>
-                    ) : item.linkedListingCount > 0 ? (
-                      <Text style={styles.sharedInfo}>
-                        Đang gắn {item.linkedListingCount} tin khác
-                      </Text>
+                    ) : sharedLinkLabel ? (
+                      <Text style={styles.sharedInfo}>{sharedLinkLabel}</Text>
                     ) : null}
                   </View>
                 </Pressable>

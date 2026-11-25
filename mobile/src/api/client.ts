@@ -1,4 +1,4 @@
-import { useSession, type AccountRestriction } from '../auth/session';
+import { getSessionStore, type AccountRestriction } from '../auth/sessionTypes';
 import { tokenStore } from '../auth/tokenStore';
 
 export class RestrictedAccountError extends Error {
@@ -92,9 +92,10 @@ async function handleRestrictedResponse(
   const restriction = parseAccountRestriction(raw);
   if (!restriction) return;
 
+  const sessionStore = getSessionStore();
   if (clearSession) {
     await tokenStore.clear();
-    useSession.setState({
+    sessionStore?.setState({
       token: null,
       user: null,
       loading: false,
@@ -102,10 +103,10 @@ async function handleRestrictedResponse(
       restrictionDismissed: false,
     });
   } else {
-    const currentUser = useSession.getState().user;
-    if (!currentUser && !useSession.getState().token) {
+    const currentUser = sessionStore?.getState().user ?? null;
+    if (!currentUser && !sessionStore?.getState().token) {
       await tokenStore.clear();
-      useSession.setState({
+      sessionStore?.setState({
         token: null,
         user: null,
         loading: false,
@@ -113,7 +114,7 @@ async function handleRestrictedResponse(
         restrictionDismissed: false,
       });
     } else {
-      useSession.setState({
+      sessionStore?.setState({
         loading: false,
         restriction,
         restrictionDismissed: false,
@@ -147,7 +148,7 @@ async function refresh() {
         throw new Error('Phiên đã hết hạn.');
       }
       const session = await response.json();
-      await useSession.getState().setSession(session.token, session.user, session.refreshToken);
+      await getSessionStore()?.getState().setSession(session.token, session.user, session.refreshToken);
     })().finally(() => {
       refreshFlight = null;
     });
@@ -206,7 +207,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (response.status === 401 && !publicCall && path !== '/auth/password/change') {
     await tokenStore.clear();
-    useSession.setState({ token: null, user: null, loading: false });
+    getSessionStore()?.setState({ token: null, user: null, loading: false });
   }
   if (!response.ok) {
     const raw = await readResponseText(response);

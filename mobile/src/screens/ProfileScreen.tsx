@@ -279,7 +279,11 @@ export default function ProfileScreen() {
                 onPress={() =>
                   void run(async () => {
                     await useSession.getState().logout();
-                    nav.replace('Listings');
+                    if (typeof nav.reset === 'function') {
+                      nav.reset({ index: 0, routes: [{ name: 'Listings' }] });
+                    } else {
+                      nav.replace('Listings');
+                    }
                   })
                 }
               />

@@ -136,6 +136,7 @@ export function SegmentedControl<T extends string = string>({
           importantForAccessibility="no-hide-descendants"
           style={[
             styles.thumb,
+            disabled && styles.thumbDisabled,
             {
               left: thumbLeft,
               right: thumbRight,
@@ -146,7 +147,8 @@ export function SegmentedControl<T extends string = string>({
 
       {options.map((option) => {
         const selected = option.value === value;
-        const isDisabled = disabled || Boolean(option.disabled);
+        const optionOwnDisabled = Boolean(option.disabled);
+        const isDisabled = disabled || optionOwnDisabled;
 
         return (
           <Pressable
@@ -166,7 +168,8 @@ export function SegmentedControl<T extends string = string>({
             style={({ pressed }) => [
               styles.option,
               !isMeasured && selected && styles.optionFallbackSelected,
-              isDisabled && styles.optionDisabled,
+              !isMeasured && selected && disabled && styles.thumbDisabled,
+              !disabled && optionOwnDisabled && styles.optionDisabled,
               pressed && !isDisabled && !selected && styles.optionPressed,
             ]}
           >
@@ -204,6 +207,10 @@ const styles = StyleSheet.create({
     backgroundColor: component.segmented.thumbBg,
     borderRadius: component.segmented.thumbRadius,
     ...primitive.elevation.thumb,
+  },
+  thumbDisabled: {
+    elevation: 0,
+    shadowOpacity: 0,
   },
   option: {
     flex: 1,

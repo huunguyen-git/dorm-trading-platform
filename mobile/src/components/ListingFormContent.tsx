@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -186,9 +186,23 @@ export default function ListingFormContent({
   const [longitude, setLongitude] = useState<number | null>(initialValues?.longitude ?? null);
   const [description, setDescription] = useState(initialValues?.description ?? '');
   const [images, setImages] = useState<string[]>(initialValues?.images ?? []);
+  const scrollViewRef = useRef<ScrollView | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
+  const [activeSubmitAction, setActiveSubmitAction] = useState<'PUBLISH' | 'DRAFT' | 'KEEP' | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formBannerError, setFormBannerError] = useState('');
+
+  useEffect(() => {
+    if (!submitting) {
+      setActiveSubmitAction(null);
+    }
+  }, [submitting]);
+
+  useEffect(() => {
+    if (submitError || conflictState) {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }
+  }, [submitError, conflictState]);
 
   const hasInitialTextbookData = Boolean(
     initialValues?.courseCode || initialValues?.courseName || initialValues?.author,
@@ -356,6 +370,7 @@ export default function ListingFormContent({
           ? 'Vui lòng kiểm tra và hoàn thiện các trường còn thiếu trước khi công khai tin.'
           : 'Vui lòng kiểm tra lại thông tin chưa hợp lệ trước khi lưu nháp.',
       );
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
       return null;
     }
 
@@ -383,17 +398,22 @@ export default function ListingFormContent({
     const base = validateAndBuildPayload(targetAction);
     if (!base) return;
 
-    if (mode === 'create' && onSubmitCreate) {
-      await onSubmitCreate({
-        ...base,
-        action: targetAction === 'DRAFT' ? 'DRAFT' : 'PUBLISH',
-      });
-    } else if (mode === 'edit' && onSubmitEdit) {
-      await onSubmitEdit({
-        ...base,
-        action: targetAction === 'PUBLISH' ? 'PUBLISH' : 'KEEP',
-        version: listingVersion,
-      });
+    setActiveSubmitAction(targetAction);
+    try {
+      if (mode === 'create' && onSubmitCreate) {
+        await onSubmitCreate({
+          ...base,
+          action: targetAction === 'DRAFT' ? 'DRAFT' : 'PUBLISH',
+        });
+      } else if (mode === 'edit' && onSubmitEdit) {
+        await onSubmitEdit({
+          ...base,
+          action: targetAction === 'PUBLISH' ? 'PUBLISH' : 'KEEP',
+          version: listingVersion,
+        });
+      }
+    } finally {
+      setActiveSubmitAction(null);
     }
   };
 
@@ -432,6 +452,7 @@ export default function ListingFormContent({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -561,6 +582,7 @@ export default function ListingFormContent({
             disabled={formDisabled}
             error={fieldErrors.itemIds}
             preselectedItemId={preselectedItemId}
+            currentListingItemIds={mode === 'edit' ? initialValues?.itemIds : undefined}
             onNavigateToInventoryCreate={onNavigateToInventoryCreate}
           />
         </View>
@@ -934,7 +956,10 @@ export default function ListingFormContent({
               testID="submit-draft-listing"
               accessibilityRole="button"
               accessibilityLabel="Lưu nháp"
-              accessibilityState={{ disabled: !canSaveDraftOrKeep, busy: submitting }}
+              accessibilityState={{
+                disabled: !canSaveDraftOrKeep,
+                busy: submitting && activeSubmitAction === 'DRAFT',
+              }}
               disabled={!canSaveDraftOrKeep}
               onPress={() => void handleSubmit('DRAFT')}
               style={({ pressed }) => [
@@ -944,6 +969,9 @@ export default function ListingFormContent({
                 pressed && canSaveDraftOrKeep && styles.pressedState,
               ]}
             >
+              {submitting && activeSubmitAction === 'DRAFT' ? (
+                <ActivityIndicator color={semantic.color.textPrimary} size="small" />
+              ) : null}
               <Text style={styles.secondaryBtnText}>Lưu nháp</Text>
             </Pressable>
 
@@ -951,7 +979,10 @@ export default function ListingFormContent({
               testID="submit-publish-listing"
               accessibilityRole="button"
               accessibilityLabel="Công khai tin"
-              accessibilityState={{ disabled: !canPublishNow, busy: submitting }}
+              accessibilityState={{
+                disabled: !canPublishNow,
+                busy: submitting && activeSubmitAction !== 'DRAFT',
+              }}
               disabled={!canPublishNow}
               onPress={() => void handleSubmit('PUBLISH')}
               style={({ pressed }) => [
@@ -961,7 +992,7 @@ export default function ListingFormContent({
                 pressed && canPublishNow && styles.primaryBtnPressed,
               ]}
             >
-              {submitting ? (
+              {submitting && activeSubmitAction !== 'DRAFT' ? (
                 <ActivityIndicator color={component.button.primaryFg} size="small" />
               ) : null}
               <Text style={styles.primaryBtnText}>Công khai tin</Text>
@@ -973,7 +1004,10 @@ export default function ListingFormContent({
               testID="submit-save-listing"
               accessibilityRole="button"
               accessibilityLabel="Lưu thay đổi"
-              accessibilityState={{ disabled: !canSaveDraftOrKeep, busy: submitting }}
+              accessibilityState={{
+                disabled: !canSaveDraftOrKeep,
+                busy: submitting && activeSubmitAction === 'KEEP',
+              }}
               disabled={!canSaveDraftOrKeep}
               onPress={() => void handleSubmit('KEEP')}
               style={({ pressed }) => [
@@ -983,6 +1017,9 @@ export default function ListingFormContent({
                 pressed && canSaveDraftOrKeep && styles.pressedState,
               ]}
             >
+              {submitting && activeSubmitAction === 'KEEP' ? (
+                <ActivityIndicator color={semantic.color.textPrimary} size="small" />
+              ) : null}
               <Text style={styles.secondaryBtnText}>Lưu thay đổi</Text>
             </Pressable>
 
@@ -990,7 +1027,10 @@ export default function ListingFormContent({
               testID="submit-publish-draft-listing"
               accessibilityRole="button"
               accessibilityLabel="Công khai tin ngay"
-              accessibilityState={{ disabled: !canPublishNow, busy: submitting }}
+              accessibilityState={{
+                disabled: !canPublishNow,
+                busy: submitting && activeSubmitAction !== 'KEEP',
+              }}
               disabled={!canPublishNow}
               onPress={() => void handleSubmit('PUBLISH')}
               style={({ pressed }) => [
@@ -1000,7 +1040,7 @@ export default function ListingFormContent({
                 pressed && canPublishNow && styles.primaryBtnPressed,
               ]}
             >
-              {submitting ? (
+              {submitting && activeSubmitAction !== 'KEEP' ? (
                 <ActivityIndicator color={component.button.primaryFg} size="small" />
               ) : null}
               <Text style={styles.primaryBtnText}>Công khai tin ngay</Text>

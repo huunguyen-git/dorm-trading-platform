@@ -37,7 +37,11 @@ export default function LoginScreen() {
     try {
       await login(email.trim(), password);
       setPassword('');
-      nav.replace('Listings');
+      if (typeof nav.reset === 'function') {
+        nav.reset({ index: 0, routes: [{ name: 'Listings' }] });
+      } else {
+        nav.replace('Listings');
+      }
     } catch (e) {
       if (typeof RestrictedAccountError === 'function' && e instanceof RestrictedAccountError) {
         if (!useSession.getState().restriction) {
