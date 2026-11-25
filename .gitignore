@@ -56,3 +56,6 @@ __pycache__/
 
 # AI agents
 .github/agents/
+
+# Local personal / seminar notes
+docs/seminar/
