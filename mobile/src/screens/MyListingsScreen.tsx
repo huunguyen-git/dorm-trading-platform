@@ -308,6 +308,19 @@ export default function MyListingsScreen() {
         testID: `action-sheet-view-${item.id}`,
         onPress: () => navigation.navigate('Listing', { id: item.id, listing: item }),
       },
+      {
+        key: 'orders',
+        label: 'Giao dịch của tin này',
+        icon: 'shopping-bag',
+        testID: `action-sheet-orders-${item.id}`,
+        onPress: () =>
+          navigation.navigate('Orders', {
+            initialRole: 'SELLER',
+            initialStatus: item.status === 'GIU_CHO' ? 'GIU_CHO' : 'ALL',
+            listingId: item.id,
+            listingTitle: item.title,
+          }),
+      },
     ];
 
     if (canEdit) {
@@ -461,16 +474,28 @@ export default function MyListingsScreen() {
         <Text accessibilityRole="header" style={styles.screenTitle}>
           Tin của tôi
         </Text>
-        <Pressable
-          testID="my-listings-create-btn"
-          accessibilityRole="button"
-          accessibilityLabel="Tạo tin"
-          onPress={() => navigation.navigate('CreateListing')}
-          style={({ pressed }) => [styles.createBtn, pressed && styles.createBtnPressed]}
-        >
-          <Icon name="plus" size={16} color={component.button.primaryFg} />
-          <Text style={styles.createBtnText}>Tạo tin</Text>
-        </Pressable>
+        <View style={styles.topBarActions}>
+          <Pressable
+            testID="my-listings-orders-btn"
+            accessibilityRole="button"
+            accessibilityLabel="Giao dịch của tôi"
+            onPress={() => navigation.navigate('Orders', { initialRole: 'SELLER' })}
+            style={({ pressed }) => [styles.ordersBtn, pressed && styles.pressedState]}
+          >
+            <Icon name="shopping-bag" size={15} color={semantic.color.textPrimary} />
+            <Text style={styles.ordersBtnText}>Giao dịch</Text>
+          </Pressable>
+          <Pressable
+            testID="my-listings-create-btn"
+            accessibilityRole="button"
+            accessibilityLabel="Tạo tin"
+            onPress={() => navigation.navigate('CreateListing')}
+            style={({ pressed }) => [styles.createBtn, pressed && styles.createBtnPressed]}
+          >
+            <Icon name="plus" size={16} color={component.button.primaryFg} />
+            <Text style={styles.createBtnText}>Tạo tin</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Flush Seller Summary + Lucian #299 QuotaMeter */}
@@ -707,6 +732,16 @@ export default function MyListingsScreen() {
                   icon="lock"
                   testID={`locked-badge-${item.id}`}
                   message="Tin đang được giữ chỗ cho giao dịch — không thể sửa, rút tin hoặc xóa lúc này."
+                  actionLabel="Xem giao dịch"
+                  actionTestID={`my-listing-view-order-${item.id}`}
+                  onActionPress={() =>
+                    navigation.navigate('Orders', {
+                      initialRole: 'SELLER',
+                      initialStatus: 'GIU_CHO',
+                      listingId: item.id,
+                      listingTitle: item.title,
+                    })
+                  }
                 />
               ) : null}
 
@@ -821,6 +856,25 @@ const styles = StyleSheet.create({
   },
   screenTitle: {
     ...semantic.type.screenTitle,
+  },
+  topBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+  },
+  ordersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeightSm,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  ordersBtnText: {
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
   },
   createBtn: {
     flexDirection: 'row',

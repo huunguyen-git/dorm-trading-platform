@@ -117,7 +117,7 @@ export default function AppNavigator() {
         <Stack.Screen
           name="Orders"
           component={OrdersScreen}
-          options={{ title: 'Giao dịch của tôi' }}
+          options={{ title: 'Giao dịch của tôi', headerShown: false }}
         />
         <Stack.Screen
           name="OrderDetail"

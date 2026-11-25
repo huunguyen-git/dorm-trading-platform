@@ -30,11 +30,13 @@ import {
   BottomNavBar,
   BottomSheet,
   CheckboxRow,
+  CollapsibleAlert,
   EmptyState,
   FormField,
   HairlineDivider,
   Icon,
   InlineBanner,
+  OrderProgressStepper,
   QuotaMeter,
   SectionHeading,
   SegmentedControl,
@@ -900,5 +902,78 @@ describe('EmptyState, QuotaMeter, ToggleControl, StatusIndicator, LayoutPrimitiv
     } finally {
       process.env.EXPO_PUBLIC_API_URL = prevApiUrl;
     }
+  });
+
+  test('OrderProgressStepper (Lucian #444) exposes progressbar semantics, cancelled state, and respects reduce-motion', async () => {
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+    const timingSpy = jest.spyOn(Animated, 'timing');
+
+    const { rerender } = render(
+      <OrderProgressStepper
+        testID="stepper-test"
+        currentStep={1}
+        statusNote="Đã giữ chỗ · Hai bên thống nhất lịch hẹn."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalled();
+    });
+    timingSpy.mockClear();
+
+    const bar = screen.getByTestId('stepper-test');
+    expect(bar.props.accessibilityRole).toBe('progressbar');
+    expect(bar.props.accessibilityValue).toEqual({ min: 0, max: 4, now: 1 });
+    expect(screen.getByText('Yêu cầu')).toBeTruthy();
+    expect(screen.getByText('Giữ chỗ')).toBeTruthy();
+    expect(screen.getByText('Đang giao')).toBeTruthy();
+    expect(screen.getByText('Hoàn tất')).toBeTruthy();
+    expect(screen.getByText('Đã giữ chỗ · Hai bên thống nhất lịch hẹn.')).toBeTruthy();
+
+    rerender(
+      <OrderProgressStepper
+        testID="stepper-test"
+        currentStep={2}
+        cancelled
+        statusNote="Giữ chỗ đã hủy."
+      />,
+    );
+    expect(screen.getByTestId('stepper-test').props.accessibilityLabel).toContain('đã hủy');
+    expect(timingSpy).not.toHaveBeenCalled();
+  });
+
+  test('CollapsibleAlert (Lucian #072) toggles details, fires press/dismiss, and respects reduce-motion', async () => {
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+    const timingSpy = jest.spyOn(Animated, 'timing');
+    const onPress = jest.fn();
+    const onDismiss = jest.fn();
+
+    render(
+      <CollapsibleAlert
+        testID="alert-test"
+        tone="warning"
+        title="Tin đăng vừa cập nhật"
+        message="Người bán vừa điều chỉnh mô tả tin."
+        details="Giá không đổi, cập nhật địa điểm sảnh A1."
+        onPress={onPress}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalled();
+    });
+    timingSpy.mockClear();
+
+    expect(screen.queryByText('Giá không đổi, cập nhật địa điểm sảnh A1.')).toBeNull();
+    fireEvent.press(screen.getByTestId('alert-test-details-toggle'));
+    expect(screen.getByText('Giá không đổi, cập nhật địa điểm sảnh A1.')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('alert-test-press'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByTestId('alert-test-dismiss'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(timingSpy).not.toHaveBeenCalled();
   });
 });

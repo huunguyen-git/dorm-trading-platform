@@ -3,6 +3,8 @@ import type { Listing } from './listings/store';
 import type { ListingSummary } from './listings/types';
 import type { InventoryItem } from './inventory/types';
 
+import type { OrderRoleFilter, OrderStatus } from './orders/types';
+
 export type RootStack = {
   Listings: undefined;
   Login: undefined;
@@ -21,7 +23,14 @@ export type RootStack = {
     listing?: ListingSummary;
     agreedPriceVnd?: number;
   };
-  Orders: undefined;
+  Orders:
+    | {
+        initialRole?: OrderRoleFilter;
+        initialStatus?: OrderStatus | 'ALL';
+        listingId?: string;
+        listingTitle?: string;
+      }
+    | undefined;
   OrderDetail: { id: string; justCreated?: boolean };
 };
 

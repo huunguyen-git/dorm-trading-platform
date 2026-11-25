@@ -13,11 +13,26 @@ import type {
   ProposeSchedulePayload,
 } from './types';
 
+interface LoadOrdersOptions {
+  role?: OrderRoleFilter;
+  status?: OrderStatus | 'ALL';
+  listingId?: string | null;
+  listingTitle?: string | null;
+  page?: number;
+  refresh?: boolean;
+}
+
 interface OrdersState {
   orders: OrderSummary[];
+  page: number;
+  totalElements: number;
+  totalPages: number;
   roleFilter: OrderRoleFilter;
   statusFilter: OrderStatus | 'ALL';
+  listingIdFilter: string | null;
+  listingTitleFilter: string | null;
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   selectedOrder: OrderDetail | null;
   detailLoading: boolean;
@@ -27,7 +42,8 @@ interface OrdersState {
   unreadCount: number;
   setRoleFilter: (role: OrderRoleFilter) => void;
   setStatusFilter: (status: OrderStatus | 'ALL') => void;
-  loadOrders: (opts?: { role?: OrderRoleFilter; status?: OrderStatus | 'ALL' }) => Promise<void>;
+  clearListingFilter: () => void;
+  loadOrders: (opts?: LoadOrdersOptions) => Promise<void>;
   loadOrderDetail: (orderId: string) => Promise<OrderDetail | null>;
   loadNotifications: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
@@ -53,9 +69,15 @@ function markCatalogStale() {
 
 export const useOrders = create<OrdersState>((set, get) => ({
   orders: [],
+  page: 0,
+  totalElements: 0,
+  totalPages: 0,
   roleFilter: 'ALL',
   statusFilter: 'ALL',
+  listingIdFilter: null,
+  listingTitleFilter: null,
   loading: false,
+  refreshing: false,
   error: null,
   selectedOrder: null,
   detailLoading: false,
@@ -66,21 +88,55 @@ export const useOrders = create<OrdersState>((set, get) => ({
 
   setRoleFilter: (roleFilter) => set({ roleFilter }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
+  clearListingFilter: () => set({ listingIdFilter: null, listingTitleFilter: null }),
 
   loadOrders: async (opts) => {
-    const role = opts?.role ?? get().roleFilter;
-    const status = opts?.status ?? get().statusFilter;
-    set({ loading: true, error: null, roleFilter: role, statusFilter: status });
+    const state = get();
+    const role = opts?.role ?? state.roleFilter;
+    const status = opts?.status ?? state.statusFilter;
+    const listingId = opts && 'listingId' in opts ? (opts.listingId ?? null) : state.listingIdFilter;
+    const listingTitle =
+      opts && 'listingTitle' in opts
+        ? (opts.listingTitle ?? null)
+        : listingId === state.listingIdFilter
+          ? state.listingTitleFilter
+          : null;
+    const targetPage = opts?.page ?? 0;
+    const isRefresh = Boolean(opts?.refresh);
+
+    set({
+      loading: !isRefresh,
+      refreshing: isRefresh,
+      error: null,
+      roleFilter: role,
+      statusFilter: status,
+      listingIdFilter: listingId,
+      listingTitleFilter: listingTitle,
+    });
     try {
-      const page = await orderApi.fetchOrders({ role, status, page: 0, size: 30 });
-      set({ orders: page.items, loading: false, error: null });
+      const result = await orderApi.fetchOrders({
+        role,
+        status,
+        listingId: listingId ?? undefined,
+        page: targetPage,
+        size: 30,
+      });
+      set((prev) => ({
+        orders: targetPage > 0 ? [...prev.orders, ...result.items] : result.items,
+        page: result.page ?? targetPage,
+        totalElements: result.totalElements ?? result.items.length,
+        totalPages: result.totalPages ?? (result.items.length > 0 ? 1 : 0),
+        loading: false,
+        refreshing: false,
+        error: null,
+      }));
     } catch (err) {
       if (isRestrictedError(err)) {
-        set({ loading: false, error: null });
+        set({ loading: false, refreshing: false, error: null });
         return;
       }
       const parsed = extractApiError(err, 'Không thể tải danh sách giao dịch.');
-      set({ loading: false, error: parsed.message });
+      set({ loading: false, refreshing: false, error: parsed.message });
     }
   },
 
@@ -115,7 +171,8 @@ export const useOrders = create<OrdersState>((set, get) => ({
       const updated = await orderApi.markNotificationRead(id);
       set((state) => {
         const nextList = state.notifications.map((n) => (n.id === id ? updated : n));
-        const nextUnread = Math.max(0, state.unreadCount - (state.notifications.find((n) => n.id === id)?.read ? 0 : 1));
+        const wasUnread = state.notifications.find((n) => n.id === id)?.read === false;
+        const nextUnread = Math.max(0, state.unreadCount - (wasUnread ? 1 : 0));
         return { notifications: nextList, unreadCount: nextUnread };
       });
     } catch {
@@ -238,9 +295,15 @@ export const useOrders = create<OrdersState>((set, get) => ({
   reset: () =>
     set({
       orders: [],
+      page: 0,
+      totalElements: 0,
+      totalPages: 0,
       roleFilter: 'ALL',
       statusFilter: 'ALL',
+      listingIdFilter: null,
+      listingTitleFilter: null,
       loading: false,
+      refreshing: false,
       error: null,
       selectedOrder: null,
       detailLoading: false,
@@ -250,10 +313,6 @@ export const useOrders = create<OrdersState>((set, get) => ({
       unreadCount: 0,
     }),
 }));
-
-registerLogoutReset(() => {
-  useOrders.getState().reset();
-});
 
 registerLogoutReset(() => {
   useOrders.getState().reset();

@@ -19,6 +19,7 @@ import { resolveUserRestriction, useSession, type User } from '../auth/session';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 import { useSellerListings } from '../listings/sellerStore';
 import { formatReputationSummary } from '../listings/types';
+import { useOrders } from '../orders/store';
 import { Action, Field, Notice } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
@@ -110,6 +111,7 @@ export default function ProfileScreen() {
   const restrictionDismissed = useSession((s) => s.restrictionDismissed);
   const quota = useSellerListings((s) => s.quota);
   const loadQuota = useSellerListings((s) => s.loadQuota);
+  const unreadOrderNotifications = useOrders((s) => s.unreadCount);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [cardUri, setCardUri] = useState<string | null>(null);
@@ -447,15 +449,27 @@ export default function ProfileScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="Mở Giao dịch của tôi"
                       onPress={() => nav.navigate('Orders')}
-                      style={({ pressed }) => [styles.quickLinkTile, pressed && styles.tilePressed]}
+                      style={({ pressed }) => [styles.quickLinkTileFull, pressed && styles.tilePressed]}
                     >
                       <View style={styles.quickLinkIcon}>
                         <Icon name="shopping-bag" size={18} color={semantic.color.accent} />
                       </View>
                       <View style={styles.quickLinkTextWrap}>
                         <Text style={styles.quickLinkTitle}>Giao dịch của tôi</Text>
-                        <Text style={styles.quickLinkSub}>Giữ chỗ, lịch hẹn & theo dõi giao nhận</Text>
+                        <Text style={styles.quickLinkSub}>
+                          Giữ chỗ, lịch hẹn & theo dõi giao nhận
+                        </Text>
                       </View>
+                      {unreadOrderNotifications > 0 ? (
+                        <View
+                          testID="profile-orders-unread-badge"
+                          style={styles.ordersUnreadPill}
+                        >
+                          <Text style={styles.ordersUnreadText}>
+                            {unreadOrderNotifications > 99 ? '99+' : unreadOrderNotifications}
+                          </Text>
+                        </View>
+                      ) : null}
                       <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
                     </Pressable>
                   </View>
@@ -816,6 +830,31 @@ const styles = StyleSheet.create({
     borderRadius: primitive.radius.md,
     paddingHorizontal: primitive.space[2.5],
     paddingVertical: primitive.space[2.5],
+  },
+  quickLinkTileFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+  },
+  ordersUnreadPill: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accent,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ordersUnreadText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textInverse,
   },
   tilePressed: {
     opacity: primitive.opacity.pressed,

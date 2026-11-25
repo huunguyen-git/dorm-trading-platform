@@ -1363,4 +1363,65 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
       alertSpy.mockRestore();
     }
   });
+
+  test('UC-23 discoverability: owner sees pending requests banner and GIU_CHO reserved order shortcut linking to Orders', async () => {
+    useSession.setState({ token: 'seller-jwt', user: sellerUser, loading: false });
+    mockRouteParams.id = 'listing-1';
+    mockedApi.mockResolvedValueOnce({
+      ...sampleDetail1,
+      status: 'CONG_KHAI',
+      pendingRequestCount: 2,
+      viewer: {
+        isOwner: true,
+        canEdit: true,
+        canWithdraw: true,
+        canDelete: true,
+        canPublish: false,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: false,
+        canMessage: false,
+      },
+    });
+
+    const { unmount } = render(<ListingScreen />);
+    expect(await screen.findByTestId('owner-pending-requests-banner')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('owner-view-pending-requests-button'));
+    expect(mockNavigate).toHaveBeenCalledWith('Orders', {
+      initialRole: 'SELLER',
+      initialStatus: 'YEU_CAU',
+      listingId: 'listing-1',
+      listingTitle: sampleDetail1.title,
+    });
+    unmount();
+
+    mockNavigate.mockClear();
+    useDiscovery.getState().clearDetail();
+    mockedApi.mockResolvedValueOnce({
+      ...sampleDetail1,
+      status: 'GIU_CHO',
+      pendingRequestCount: 0,
+      viewer: {
+        isOwner: true,
+        canEdit: false,
+        canWithdraw: false,
+        canDelete: false,
+        canPublish: false,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: false,
+        canMessage: false,
+      },
+    });
+
+    render(<ListingScreen />);
+    const viewReservedBtn = await screen.findByTestId('owner-view-reserved-order-button');
+    fireEvent.press(viewReservedBtn);
+    expect(mockNavigate).toHaveBeenCalledWith('Orders', {
+      initialRole: 'SELLER',
+      initialStatus: 'GIU_CHO',
+      listingId: 'listing-1',
+      listingTitle: sampleDetail1.title,
+    });
+  });
 });

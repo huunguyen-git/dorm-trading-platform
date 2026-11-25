@@ -1,5 +1,5 @@
 import type { InventoryItemStatus } from '../inventory/types';
-import type { StatusTone } from '../components/ui';
+import type { CollapsibleAlertTone, StatusTone, StatusVariant } from '../components/ui';
 
 export type OrderStatus =
   | 'YEU_CAU'
@@ -169,41 +169,48 @@ export interface ProposeSchedulePayload {
 
 export const ORDER_STATUS_META: Record<
   OrderStatus,
-  { label: string; tone: StatusTone; shortDesc: string }
+  { label: string; tone: StatusTone; tier: StatusVariant; shortDesc: string }
 > = {
   YEU_CAU: {
     label: 'Chờ người bán duyệt',
     tone: 'warning',
+    tier: 'soft',
     shortDesc: 'Đã gửi yêu cầu, chưa chính thức khóa giữ đồ.',
   },
   GIU_CHO: {
     label: 'Đang giữ chỗ',
     tone: 'accent',
+    tier: 'urgent',
     shortDesc: 'Đồ vật đã được giữ cho giao dịch này.',
   },
   DANG_GIAO: {
     label: 'Đang giao hàng',
     tone: 'accent',
+    tier: 'urgent',
     shortDesc: 'Người bán đã thông báo bắt đầu giao hàng.',
   },
   CHO_XAC_NHAN: {
     label: 'Chờ xác nhận nhận hàng',
     tone: 'warning',
+    tier: 'urgent',
     shortDesc: 'Người bán đã báo đã giao kèm ảnh bàn giao (UC-27).',
   },
   CHO_XU_LY: {
     label: 'Chờ kiểm duyệt xử lý',
     tone: 'danger',
+    tier: 'urgent',
     shortDesc: 'Giao dịch đang chờ Kiểm duyệt viên xem xét (UC-29).',
   },
   HOAN_TAT: {
     label: 'Đã hoàn tất',
     tone: 'success',
+    tier: 'dot',
     shortDesc: 'Giao dịch đã hoàn tất.',
   },
   HUY: {
     label: 'Đã hủy',
     tone: 'neutral',
+    tier: 'dot',
     shortDesc: 'Giao dịch đã kết thúc ở trạng thái hủy.',
   },
 };
@@ -224,6 +231,112 @@ export const QUICK_MEETING_LOCATIONS = [
   'Nhà Văn hóa Sinh viên ĐHQG',
   'Cổng Trường ĐH CNTT (UIT)',
 ];
+
+export const ORDER_REJECT_REASONS = [
+  'Đã có người hẹn lấy trước',
+  'Tạm thời chưa giao được',
+  'Chưa phù hợp lịch hẹn',
+];
+
+export const ORDER_CANCEL_REASONS = [
+  'Thay đổi kế hoạch cá nhân',
+  'Chưa sắp xếp được lịch gặp',
+  'Hai bên đã trao đổi lại',
+];
+
+export const SCHEDULE_REJECT_REASONS = [
+  'Bận khung giờ này',
+  'Muốn đổi địa điểm khác',
+  'Đề xuất sang ngày hôm sau',
+];
+
+export interface OrderStepperState {
+  currentStep: number;
+  cancelled: boolean;
+  tone: 'accent' | 'success';
+  statusNote: string;
+}
+
+export function getOrderStepperState(order: OrderDetail): OrderStepperState {
+  switch (order.status) {
+    case 'YEU_CAU':
+      return {
+        currentStep: 0,
+        cancelled: false,
+        tone: 'accent',
+        statusNote: 'Yêu cầu đang chờ người bán chấp nhận để chính thức giữ đồ.',
+      };
+    case 'GIU_CHO':
+      return {
+        currentStep: 1,
+        cancelled: false,
+        tone: 'accent',
+        statusNote: order.scheduleConfirmed
+          ? 'Đã thống nhất lịch hẹn · Sẵn sàng bắt đầu giao hàng.'
+          : 'Đồ vật đã được giữ · Hai bên thống nhất thời gian và địa điểm giao nhận.',
+      };
+    case 'DANG_GIAO':
+      return {
+        currentStep: 2,
+        cancelled: false,
+        tone: 'accent',
+        statusNote: 'Người bán đã thông báo bắt đầu giao hàng theo lịch hẹn.',
+      };
+    case 'CHO_XAC_NHAN':
+      return {
+        currentStep: 2,
+        cancelled: false,
+        tone: 'accent',
+        statusNote: 'Đã báo đã giao (UC-27) · Chờ xác nhận nhận hàng.',
+      };
+    case 'CHO_XU_LY':
+      return {
+        currentStep: 2,
+        cancelled: false,
+        tone: 'accent',
+        statusNote: 'Giao dịch đang chờ Kiểm duyệt viên xử lý (UC-29).',
+      };
+    case 'HOAN_TAT':
+      return {
+        currentStep: 4,
+        cancelled: false,
+        tone: 'success',
+        statusNote: 'Giao dịch đã hoàn tất.',
+      };
+    case 'HUY':
+      return {
+        currentStep: order.deliveryStartedAt ? 2 : order.reservedAt ? 1 : 0,
+        cancelled: true,
+        tone: 'accent',
+        statusNote: order.reservedAt
+          ? 'Giữ chỗ đã hủy · Khả dụng đồ vật đã được cập nhật.'
+          : 'Yêu cầu giữ chỗ đã kết thúc ở trạng thái hủy.',
+      };
+  }
+}
+
+export function getNotificationTone(type: string): CollapsibleAlertTone {
+  const normalized = (type || '').toUpperCase();
+  if (normalized.includes('CANCEL') || normalized.includes('REJECT')) return 'danger';
+  if (
+    normalized.includes('ACCEPTED') ||
+    normalized.includes('CONFIRMED') ||
+    normalized.includes('DELIVERY_STARTED')
+  ) {
+    return 'success';
+  }
+  if (normalized.includes('UPDATED') || normalized.includes('WARNING')) return 'warning';
+  return 'accent';
+}
+
+export function buildPresetMeetingTime(daysAhead: number, hour: number): string {
+  const target = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+  target.setHours(hour, 0, 0, 0);
+  if (target.getTime() <= Date.now()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return formatLocalInputFromDate(target);
+}
 
 export function formatOrderDateTime(iso?: string | null): string {
   if (!iso) return 'Chưa có';
