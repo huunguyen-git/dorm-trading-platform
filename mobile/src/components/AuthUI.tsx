@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +13,7 @@ import {
   type TextInputFocusEventData,
   type TextInputProps,
 } from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { component, primitive, semantic } from '../theme';
 import { Icon, InlineBanner, type AppIconName, type InlineBannerTone } from './ui';
 
@@ -127,10 +128,13 @@ export function AuthScreen({
   showBrand?: boolean;
   children: ReactNode;
 }) {
+  const insets = useContext(SafeAreaInsetsContext);
+  const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
   return (
     <KeyboardAvoidingView
       style={ui.page}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
+      keyboardVerticalOffset={keyboardOffset}
     >
       <ScrollView
         contentContainerStyle={ui.content}

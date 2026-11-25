@@ -868,6 +868,8 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: primitive.radius.md,
     backgroundColor: semantic.color.bgTrack,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
   },
   thumbPlaceholder: {
     width: THUMB_SIZE,

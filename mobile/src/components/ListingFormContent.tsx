@@ -98,6 +98,14 @@ const ZONE_GROUP_LABELS: Record<LocationZoneGroup, string> = {
 
 const ZONE_GROUP_ORDER: LocationZoneGroup[] = ['KTX', 'TRUONG', 'LAN_CAN'];
 
+// Mirrors backend InventoryService linked_count statuses (excludes DA_RUT, HET_HAN, KET_THUC, AN)
+const COUNTED_LINKED_LISTING_STATUSES: ReadonlySet<ListingStatus> = new Set([
+  'NHAP',
+  'CHO_DUYET',
+  'CONG_KHAI',
+  'GIU_CHO',
+]);
+
 function isTextbookCategory(categoryId: string, categories: ListingCategory[]): boolean {
   if (!categoryId) return false;
   const byId = new Map(categories.map((cat) => [cat.id, cat]));
@@ -366,9 +374,11 @@ export default function ListingFormContent({
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setFormBannerError(
-        strict
+        targetAction === 'PUBLISH'
           ? 'Vui lòng kiểm tra và hoàn thiện các trường còn thiếu trước khi công khai tin.'
-          : 'Vui lòng kiểm tra lại thông tin chưa hợp lệ trước khi lưu nháp.',
+          : targetAction === 'KEEP'
+            ? 'Vui lòng kiểm tra và hoàn thiện các trường còn thiếu trước khi lưu thay đổi.'
+            : 'Vui lòng kiểm tra lại thông tin chưa hợp lệ trước khi lưu nháp.',
       );
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
       return null;
@@ -446,10 +456,13 @@ export default function ListingFormContent({
   const canPublishNow = !formDisabled && !imageUploading && !publishDisabledByQuota;
   const canSaveDraftOrKeep = !formDisabled && !imageUploading;
 
+  const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
+
   return (
     <KeyboardAvoidingView
       style={styles.shell}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
+      keyboardVerticalOffset={keyboardOffset}
     >
       <ScrollView
         ref={scrollViewRef}
@@ -583,6 +596,11 @@ export default function ListingFormContent({
             error={fieldErrors.itemIds}
             preselectedItemId={preselectedItemId}
             currentListingItemIds={mode === 'edit' ? initialValues?.itemIds : undefined}
+            currentListingCountsTowardLinked={
+              mode === 'edit'
+                ? !listingStatus || COUNTED_LINKED_LISTING_STATUSES.has(listingStatus)
+                : undefined
+            }
             onNavigateToInventoryCreate={onNavigateToInventoryCreate}
           />
         </View>

@@ -131,6 +131,7 @@ export function SegmentedControl<T extends string = string>({
     >
       {isMeasured ? (
         <Animated.View
+          testID={testID ? `${testID}-thumb` : undefined}
           pointerEvents="none"
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"

@@ -1,10 +1,13 @@
 // Lucian UX/UI Prompt #305 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#305
-import { useContext, useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
   Easing,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -63,6 +66,28 @@ export function BottomSheet({
   const insets = useContext(SafeAreaInsetsContext);
   const scrimOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslateY = useRef(new Animated.Value(320)).current;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardHeight(0);
+      return;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      const nextHeight = Math.max(0, Math.round(event.endCoordinates?.height ?? 0));
+      setKeyboardHeight(nextHeight);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -98,8 +123,17 @@ export function BottomSheet({
   }, [visible, reduceMotion, scrimOpacity, sheetTranslateY]);
 
   const screenHeight = Dimensions.get('window').height || 800;
-  const maxHeight = Math.round(screenHeight * maxHeightRatio);
-  const bottomPad = Math.max(insets?.bottom ?? 0, primitive.space[4]);
+  const baseMaxHeight = Math.round(screenHeight * maxHeightRatio);
+  const availableAboveKeyboard = Math.max(
+    240,
+    Math.round((screenHeight - keyboardHeight - (insets?.top ?? 0) - 16) * 0.94),
+  );
+  const maxHeight =
+    keyboardHeight > 0 ? Math.min(baseMaxHeight, availableAboveKeyboard) : baseMaxHeight;
+  const bottomPad =
+    keyboardHeight > 0
+      ? primitive.space[3]
+      : Math.max(insets?.bottom ?? 0, primitive.space[4]);
 
   const resolvedFooterLabel =
     footerLabel && typeof footerCount === 'number'
@@ -114,7 +148,11 @@ export function BottomSheet({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.overlay} accessibilityViewIsModal>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior="padding"
+        accessibilityViewIsModal
+      >
         <Pressable
           testID={testID ? `${testID}-scrim` : 'bottom-sheet-scrim'}
           accessibilityRole="button"
@@ -221,7 +259,7 @@ export function BottomSheet({
             </View>
           ) : null}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

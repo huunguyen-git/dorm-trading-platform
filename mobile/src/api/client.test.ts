@@ -459,3 +459,17 @@ test('handles 403 ACCOUNT_RESTRICTED and preserves error status/code on FormData
   expect(mediaError?.status).toBe(413);
   expect(mediaError?.code).toBe('FILE_TOO_LARGE');
 });
+
+test('logout clears local tokens and session state even when /auth/logout fails', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false, restriction: null });
+  store.get.mockResolvedValue('valid-jwt');
+  fetchMock.mockRejectedValueOnce(new Error('Network request failed'));
+
+  await expect(useSession.getState().logout()).resolves.toBeUndefined();
+
+  expect(store.clear).toHaveBeenCalledTimes(1);
+  expect(useSession.getState().token).toBeNull();
+  expect(useSession.getState().user).toBeNull();
+  expect(useSession.getState().restriction).toBeNull();
+});

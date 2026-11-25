@@ -38,6 +38,7 @@ export interface InventoryPickerSectionProps {
   error?: string;
   preselectedItemId?: string;
   currentListingItemIds?: string[];
+  currentListingCountsTowardLinked?: boolean;
   onNavigateToInventoryCreate: () => void;
 }
 
@@ -87,6 +88,7 @@ export default function InventoryPickerSection({
   error,
   preselectedItemId,
   currentListingItemIds,
+  currentListingCountsTowardLinked = true,
   onNavigateToInventoryCreate,
 }: InventoryPickerSectionProps) {
   const navigation = useOptionalNavigation();
@@ -285,9 +287,10 @@ export default function InventoryPickerSection({
             const thumb = item.hinhAnh[0];
 
             const isInCurrentListing = Boolean(currentListingItemIds?.includes(item.id));
-            const otherLinkedCount = isInCurrentListing
-              ? Math.max(0, item.linkedListingCount - 1)
-              : item.linkedListingCount;
+            const otherLinkedCount =
+              isInCurrentListing && currentListingCountsTowardLinked
+                ? Math.max(0, item.linkedListingCount - 1)
+                : item.linkedListingCount;
             const sharedLinkLabel = isInCurrentListing
               ? otherLinkedCount > 0
                 ? `Đang gắn tin này và ${otherLinkedCount} tin khác`
@@ -479,6 +482,8 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: 8,
     backgroundColor: semantic.color.bgTrack,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
   },
   thumbPlaceholder: {
     width: THUMB_SIZE,

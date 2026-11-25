@@ -179,7 +179,14 @@ export default function AuthFlowScreen() {
           ? 'Xác minh email'
           : 'Khôi phục tài khoản';
 
-  const back = () => nav.replace(mode === 'change' || (mode === 'verify' && user) ? 'Profile' : 'Login');
+  const back = () => {
+    const target = mode === 'change' || (mode === 'verify' && user) ? 'Profile' : 'Login';
+    if (mode === 'reset' && typeof nav.reset === 'function') {
+      nav.reset({ index: 1, routes: [{ name: 'Listings' }, { name: 'Login' }] });
+      return;
+    }
+    nav.replace(target);
+  };
   const labels = mode === 'reset' ? ['Email', 'Xác minh', 'Mật khẩu mới'] : ['Thông tin', 'Xác minh'];
   const stage = grant ? 2 : challenge ? 1 : 0;
 

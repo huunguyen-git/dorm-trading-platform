@@ -359,7 +359,7 @@ export default function ListingsScreen() {
           testID="filtered-empty-state"
           icon="search"
           title="Không tìm thấy tin phù hợp. Thử nới lỏng bộ lọc."
-          subtitle="Bỏ bớt một tiêu chí bên dưới hoặc đặt lại toàn bộ bộ lọc để xem thêm tin mới nhất."
+          subtitle="Bỏ bớt một tiêu chí bên dưới hoặc đặt lại tất cả bộ lọc để xem thêm tin mới nhất."
           suggestions={loosenSuggestions}
           primaryActionLabel="Xóa bộ lọc"
           onPrimaryAction={handleResetFilters}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { AccessibilityInfo, Animated, Text, View } from 'react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo, Animated, Keyboard, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSession } from '../../auth/session';
 import {
   LISTING_STATUS_META,
@@ -660,7 +660,35 @@ describe('EmptyState, QuotaMeter, ToggleControl, StatusIndicator, LayoutPrimitiv
 
   test('SegmentedControl disabled mode strips thumb elevation to avoid Android shadow bleed', () => {
     const onChange = jest.fn();
-    render(
+    const { rerender } = render(
+      <SegmentedControl
+        testID="disabled-segmented"
+        disabled={false}
+        options={[
+          { value: 'single', label: 'Tin đơn', testID: 'seg-single' },
+          { value: 'combo', label: 'Combo', testID: 'seg-combo' },
+        ]}
+        value="single"
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent(screen.getByTestId('disabled-segmented'), 'layout', {
+      nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 44 } },
+    });
+    fireEvent(screen.getByTestId('seg-single'), 'layout', {
+      nativeEvent: { layout: { x: 3, y: 3, width: 157, height: 38 } },
+    });
+    fireEvent(screen.getByTestId('seg-combo'), 'layout', {
+      nativeEvent: { layout: { x: 160, y: 3, width: 157, height: 38 } },
+    });
+
+    const enabledThumbStyle = StyleSheet.flatten(
+      screen.getByTestId('disabled-segmented-thumb', { includeHiddenElements: true }).props.style,
+    );
+    expect(enabledThumbStyle.elevation).toBeGreaterThan(0);
+
+    rerender(
       <SegmentedControl
         testID="disabled-segmented"
         disabled
@@ -673,9 +701,63 @@ describe('EmptyState, QuotaMeter, ToggleControl, StatusIndicator, LayoutPrimitiv
       />,
     );
 
+    const disabledThumbStyle = StyleSheet.flatten(
+      screen.getByTestId('disabled-segmented-thumb', { includeHiddenElements: true }).props.style,
+    );
+    expect(disabledThumbStyle.elevation).toBe(0);
+    expect(disabledThumbStyle.shadowOpacity).toBe(0);
+
     const singleTab = screen.getByTestId('seg-single');
     expect(singleTab.props.accessibilityState.disabled).toBe(true);
     fireEvent.press(screen.getByTestId('seg-combo'));
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('BottomSheet shrinks maxHeight when keyboard opens and restores when keyboard hides', () => {
+    const listeners = new Map<string, (event: unknown) => void>();
+    const addListenerSpy = jest
+      .spyOn(Keyboard, 'addListener')
+      .mockImplementation(((eventName: string, cb: (event: unknown) => void) => {
+        listeners.set(eventName, cb);
+        return { remove: jest.fn() };
+      }) as unknown as typeof Keyboard.addListener);
+
+    try {
+      render(
+        <BottomSheet visible onClose={() => {}} title="Bộ lọc" testID="kb-sheet">
+          <Text>Filter body</Text>
+        </BottomSheet>,
+      );
+
+      const initialMaxHeight = StyleSheet.flatten(
+        screen.getByTestId('kb-sheet').props.style,
+      ).maxHeight as number;
+      expect(initialMaxHeight).toBeGreaterThan(400);
+
+      const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+      const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+      const showCb = listeners.get(showEvent);
+      const hideCb = listeners.get(hideEvent);
+      expect(showCb).toBeDefined();
+      expect(hideCb).toBeDefined();
+
+      act(() => {
+        showCb?.({ endCoordinates: { height: 340 } });
+      });
+      const shrunkMaxHeight = StyleSheet.flatten(
+        screen.getByTestId('kb-sheet').props.style,
+      ).maxHeight as number;
+      expect(shrunkMaxHeight).toBeLessThan(initialMaxHeight);
+
+      act(() => {
+        hideCb?.({});
+      });
+      const restoredMaxHeight = StyleSheet.flatten(
+        screen.getByTestId('kb-sheet').props.style,
+      ).maxHeight as number;
+      expect(restoredMaxHeight).toBe(initialMaxHeight);
+    } finally {
+      addListenerSpy.mockRestore();
+    }
   });
 });

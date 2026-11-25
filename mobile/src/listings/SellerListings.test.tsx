@@ -1254,4 +1254,93 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
     expect(await screen.findByText('Đang gắn tin này')).toBeTruthy();
     expect(screen.getByText('Đang gắn tin này và 1 tin khác')).toBeTruthy();
   });
+
+  test('does not subtract current listing from linkedListingCount when editing withdrawn or expired listing', async () => {
+    const withdrawnInventory: InventoryItem[] = [
+      {
+        ...sampleInventory[0],
+        id: 'item-in-withdrawn-only',
+        ten: 'Quạt mini chỉ ở tin đã rút',
+        linkedListingCount: 0,
+      },
+      {
+        ...sampleInventory[1],
+        id: 'item-in-withdrawn-and-active',
+        ten: 'Giá đỡ laptop còn gắn 1 tin công khai',
+        linkedListingCount: 1,
+      },
+    ];
+    mockedInventoryApi.fetchInventoryItems.mockResolvedValueOnce(withdrawnInventory);
+
+    render(
+      <InventoryPickerSection
+        selectedItemIds={['item-in-withdrawn-only', 'item-in-withdrawn-and-active']}
+        onChangeSelectedItemIds={() => {}}
+        mode="combo"
+        onChangeMode={() => {}}
+        currentListingItemIds={['item-in-withdrawn-only', 'item-in-withdrawn-and-active']}
+        currentListingCountsTowardLinked={false}
+        onNavigateToInventoryCreate={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText('Đang gắn tin này')).toBeTruthy();
+    expect(screen.getByText('Đang gắn tin này và 1 tin khác')).toBeTruthy();
+  });
+
+  test('CreateListingScreen refreshes quota when backend returns 409 QUOTA_EXCEEDED', async () => {
+    setActiveMemberSession();
+    const quota4of5: ListingQuota = {
+      reputationScore: 100,
+      activeCount: 4,
+      limit: 5,
+      remaining: 1,
+      canPublish: true,
+      highTierThreshold: 120,
+      standardLimit: 5,
+      highTierLimit: 10,
+    };
+    const quota5of5: ListingQuota = {
+      ...quota4of5,
+      activeCount: 5,
+      remaining: 0,
+      canPublish: false,
+    };
+    mockedSellerApi.fetchListingQuota
+      .mockResolvedValueOnce(quota4of5)
+      .mockResolvedValueOnce(quota5of5);
+    mockedSellerApi.fetchReferenceData.mockResolvedValueOnce({
+      categories: [...sampleCategories],
+      categoryTree: [...sampleCategoryTree],
+      locations: [...sampleLocations],
+    });
+    mockedInventoryApi.fetchInventoryItems.mockResolvedValueOnce([sampleInventory[0]]);
+
+    const quotaErr = Object.assign(
+      new Error('Bạn đã đạt hạn mức tin đăng đang mở (5/5). Hãy rút tin cũ hoặc lưu bản nháp.'),
+      { status: 409, code: 'QUOTA_EXCEEDED' },
+    );
+    mockedSellerApi.createListing.mockRejectedValueOnce(quotaErr);
+
+    render(<CreateListingScreen />);
+    await screen.findByTestId('inventory-picker-item-item-1');
+
+    fireEvent.press(screen.getByTestId('inventory-picker-item-item-1'));
+    fireEvent.press(screen.getByTestId('listing-toggle-url-input'));
+    fireEvent.changeText(screen.getByTestId('listing-image-url-input'), 'https://example.com/q.jpg');
+    fireEvent.press(screen.getByTestId('listing-add-url-btn'));
+    fireEvent.changeText(screen.getByTestId('listing-title-input'), 'Tin chạm mốc 5/5');
+    fireEvent.changeText(screen.getByTestId('listing-condition-input'), 'Mới 95%');
+    fireEvent.changeText(screen.getByTestId('listing-price-input'), '80000');
+    fireEvent.press(screen.getByTestId('category-chip-DO_GIA_DUNG'));
+    fireEvent.changeText(screen.getByTestId('listing-description-input'), 'Mô tả đầy đủ');
+    fireEvent.press(screen.getByTestId('location-chip-KTX_KHU_A'));
+    fireEvent.press(screen.getByTestId('submit-publish-listing'));
+
+    expect(await screen.findByTestId('quota-conflict-banner')).toBeTruthy();
+    await waitFor(() => {
+      expect(mockedSellerApi.fetchListingQuota).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('5 / 5 tin')).toBeTruthy();
+  });
 });

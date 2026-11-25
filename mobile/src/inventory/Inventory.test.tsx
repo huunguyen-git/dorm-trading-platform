@@ -515,6 +515,40 @@ describe('Screen: InventoryFormScreen (Add & Edit)', () => {
     expect(screen.getByText('Ảnh thực tế (2/5)')).toBeTruthy();
   });
 
+  test('prevents duplicate concurrent picker launches on rapid double-tap in InventoryFormScreen', async () => {
+    mockRouteParams.mode = 'create';
+    let resolvePicker: ((value: imagePicker.PickableImageAsset[]) => void) | undefined;
+    mockedImagePicker.pickImagesFromLibrary.mockImplementationOnce(
+      () =>
+        new Promise<imagePicker.PickableImageAsset[]>((resolve) => {
+          resolvePicker = resolve;
+        }),
+    );
+    mockedImagePicker.uploadListingImages.mockResolvedValueOnce([
+      {
+        id: 'm-double',
+        url: 'http://127.0.0.1:8082/api/v1/media/m-double',
+        contentType: 'image/jpeg',
+        sizeBytes: 9000,
+      },
+    ]);
+
+    render(<InventoryFormScreen />);
+
+    const pickBtn = screen.getByTestId('inventory-pick-library-btn');
+    fireEvent.press(pickBtn);
+    fireEvent.press(pickBtn);
+
+    expect(mockedImagePicker.pickImagesFromLibrary).toHaveBeenCalledTimes(1);
+
+    if (resolvePicker) {
+      resolvePicker([
+        { uri: 'file:///once.jpg', fileName: 'once.jpg', mimeType: 'image/jpeg', fileSize: 9000 },
+      ]);
+    }
+    expect(await screen.findByText('Ảnh thực tế (1/5)')).toBeTruthy();
+  });
+
   test('clears shared store error when cancelling form after an error', async () => {
     mockRouteParams.mode = 'create';
     mockedApi.createInventoryItem.mockRejectedValue(new Error('Dữ liệu không hợp lệ'));

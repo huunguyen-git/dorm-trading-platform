@@ -391,6 +391,8 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: primitive.radius.md,
     backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
   },
   thumbnailPlaceholder: {
     width: 80,

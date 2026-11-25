@@ -178,6 +178,7 @@ export default function EditListingScreen() {
         return;
       }
       if (parsed.code === 'QUOTA_EXCEEDED') {
+        void loadQuota().catch(() => {});
         setConflictState({
           type: 'QUOTA_EXCEEDED',
           message: parsed.message,

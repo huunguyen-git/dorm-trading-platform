@@ -83,6 +83,7 @@ export default function CreateListingScreen() {
       }
       const parsed = extractApiError(err, 'Không thể tạo tin đăng. Vui lòng thử lại.');
       if (parsed.code === 'QUOTA_EXCEEDED') {
+        void loadQuota().catch(() => {});
         setConflictState({
           type: 'QUOTA_EXCEEDED',
           message: parsed.message,

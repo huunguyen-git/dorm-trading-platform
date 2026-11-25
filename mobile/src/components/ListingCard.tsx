@@ -139,6 +139,8 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: component.listRow.thumbRadius,
     backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
   },
   thumbnailPlaceholder: {
     width: THUMB_SIZE,

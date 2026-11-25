@@ -66,6 +66,7 @@ export default function InventoryFormScreen() {
   }, [clearError]);
 
   const scrollViewRef = useRef<ScrollView | null>(null);
+  const pickerInFlightRef = useRef(false);
   const [ten, setTen] = useState(existingItem?.ten || '');
   const [tinhTrang, setTinhTrang] = useState(existingItem?.tinhTrang || '');
   const [hinhAnh, setHinhAnh] = useState<string[]>(existingItem?.hinhAnh || []);
@@ -113,11 +114,13 @@ export default function InventoryFormScreen() {
   };
 
   const handlePickFromLibrary = async () => {
+    if (pickerInFlightRef.current || uploadingImage || busy || isBlocked) return;
     const remainingSlots = Math.max(0, MAX_LISTING_IMAGES - hinhAnh.length);
     if (remainingSlots <= 0) {
       reportError(`Đã đạt tối đa ${MAX_LISTING_IMAGES} ảnh thực tế.`);
       return;
     }
+    pickerInFlightRef.current = true;
     setError('');
     try {
       const picked = await pickImagesFromLibrary(remainingSlots);
@@ -132,16 +135,19 @@ export default function InventoryFormScreen() {
     } catch (err: unknown) {
       handleUploadFailure(err, 'Không thể chọn hoặc tải ảnh từ thư viện lên máy chủ.');
     } finally {
+      pickerInFlightRef.current = false;
       setUploadingImage(false);
     }
   };
 
   const handleTakePhoto = async () => {
+    if (pickerInFlightRef.current || uploadingImage || busy || isBlocked) return;
     const remainingSlots = Math.max(0, MAX_LISTING_IMAGES - hinhAnh.length);
     if (remainingSlots <= 0) {
       reportError(`Đã đạt tối đa ${MAX_LISTING_IMAGES} ảnh thực tế.`);
       return;
     }
+    pickerInFlightRef.current = true;
     setError('');
     try {
       const photo = await takePhotoWithCamera();
@@ -156,6 +162,7 @@ export default function InventoryFormScreen() {
     } catch (err: unknown) {
       handleUploadFailure(err, 'Không thể chụp hoặc tải ảnh lên máy chủ.');
     } finally {
+      pickerInFlightRef.current = false;
       setUploadingImage(false);
     }
   };
@@ -249,10 +256,13 @@ export default function InventoryFormScreen() {
   const isDisabled = busy || uploadingImage || isBlocked;
   const canAddMoreImages = !isDisabled && hinhAnh.length < MAX_LISTING_IMAGES;
 
+  const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
+      keyboardVerticalOffset={keyboardOffset}
     >
       <ScrollView
         ref={scrollViewRef}
@@ -530,6 +540,8 @@ const styles = StyleSheet.create({
     borderRadius: primitive.radius.md,
     overflow: 'hidden',
     backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
   },
   thumbImage: {
     width: '100%',

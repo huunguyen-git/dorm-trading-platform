@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -43,6 +43,9 @@ export default function ListingImageManager({
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkDraft, setLinkDraft] = useState('');
   const [sourceSheetVisible, setSourceSheetVisible] = useState(false);
+  const pickerInFlightRef = useRef(false);
+  const latestImagesRef = useRef(images);
+  latestImagesRef.current = images;
 
   useEffect(() => {
     if (error) {
@@ -72,7 +75,7 @@ export default function ListingImageManager({
   };
 
   const appendUniqueUrls = (urls: string[]) => {
-    const merged = [...images];
+    const merged = [...latestImagesRef.current];
     for (const rawUrl of urls) {
       const cleaned = rawUrl.trim();
       if (!cleaned) continue;
@@ -85,14 +88,17 @@ export default function ListingImageManager({
   };
 
   const handlePickFromLibrary = async () => {
+    if (pickerInFlightRef.current || busyOrDisabled) return;
     setLocalError('');
-    if (remainingSlots <= 0) {
+    const currentRemaining = Math.max(0, maxImages - latestImagesRef.current.length);
+    if (currentRemaining <= 0) {
       setLocalError(`Bạn chỉ có thể đính kèm tối đa ${maxImages} ảnh thực tế cho mỗi tin đăng.`);
       return;
     }
 
+    pickerInFlightRef.current = true;
     try {
-      const picked = await pickImagesFromLibrary(remainingSlots);
+      const picked = await pickImagesFromLibrary(currentRemaining);
       if (picked.length === 0) return;
 
       setUploadFlag(true);
@@ -105,17 +111,21 @@ export default function ListingImageManager({
     } catch (err) {
       handleUploadFailure(err, 'Không thể chọn hoặc tải ảnh từ thư viện lên máy chủ.');
     } finally {
+      pickerInFlightRef.current = false;
       setUploadFlag(false);
     }
   };
 
   const handleTakePhoto = async () => {
+    if (pickerInFlightRef.current || busyOrDisabled) return;
     setLocalError('');
-    if (remainingSlots <= 0) {
+    const currentRemaining = Math.max(0, maxImages - latestImagesRef.current.length);
+    if (currentRemaining <= 0) {
       setLocalError(`Bạn chỉ có thể đính kèm tối đa ${maxImages} ảnh thực tế cho mỗi tin đăng.`);
       return;
     }
 
+    pickerInFlightRef.current = true;
     try {
       const photo = await takePhotoWithCamera();
       if (!photo) return;
@@ -130,6 +140,7 @@ export default function ListingImageManager({
     } catch (err) {
       handleUploadFailure(err, 'Không thể chụp hoặc tải ảnh lên máy chủ.');
     } finally {
+      pickerInFlightRef.current = false;
       setUploadFlag(false);
     }
   };

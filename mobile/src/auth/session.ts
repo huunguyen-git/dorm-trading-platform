@@ -45,9 +45,14 @@ export const useSession = create<SessionState>((set) => ({
     }
   },
   logout: async () => {
-    await api<void>('/auth/logout', { method: 'POST' });
-    await tokenStore.clear();
-    set({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+    try {
+      await api<void>('/auth/logout', { method: 'POST' });
+    } catch {
+      // Best-effort server token revocation; always clear local session so the user is never trapped.
+    } finally {
+      await tokenStore.clear();
+      set({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+    }
   },
 }));
 
