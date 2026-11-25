@@ -416,7 +416,7 @@ public class ListingService {
         }
 
         Set<UUID> affectedItems = syncListingItems(listingId, oldItemIds, fields.itemIds());
-        boolean becameInventoryActive = !ListingDtos.ListingStatus.isActiveForInventoryLink(currentStatus)
+        boolean becameInventoryActive = !ListingDtos.ListingStatus.isActiveForInventoryLink(effectiveStatus)
                 && ListingDtos.ListingStatus.isActiveForInventoryLink(nextStatus);
         boolean becameInventoryInactive = ListingDtos.ListingStatus.isActiveForInventoryLink(currentStatus)
                 && !ListingDtos.ListingStatus.isActiveForInventoryLink(nextStatus);

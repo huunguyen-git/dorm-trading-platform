@@ -360,9 +360,20 @@ public class InventoryService {
         }
 
         Instant currentNow = now();
+        List<UUID> closedListingIds = List.of();
         if (lifecycleHelper != null) {
-            // Lock order (2) -> (3): expire overdue tin_dangs first, then lock union(expiredItems, itemId) ascending
+            // Lock order (2) -> (3): expire overdue tin_dangs first, lock closed DA_RUT/HET_HAN listings
+            // referencing itemId so hinh_thuc stays consistent after link cleanup, then lock do_vats ascending.
             List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(userId, currentNow);
+            closedListingIds = db.queryForList(
+                    "SELECT t.ma_tin FROM tin_dangs t " +
+                            "JOIN tin_dang_do_vat td ON td.ma_tin = t.ma_tin " +
+                            "WHERE td.ma_vat = ? AND t.nguoi_dang_id = ? " +
+                            "AND t.trang_thai IN ('DA_RUT', 'HET_HAN') " +
+                            "ORDER BY t.ma_tin ASC FOR UPDATE OF t",
+                    UUID.class,
+                    itemId,
+                    userId);
             if (!expiredListingIds.isEmpty()) {
                 List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
                 lifecycleHelper.lockAndBumpItemsVersion(expiredItemIds, List.of(itemId), currentNow);
@@ -411,6 +422,22 @@ public class InventoryService {
                             "WHERE td.ma_tin = t.ma_tin AND td.ma_vat = ? " +
                             "AND t.trang_thai IN ('DA_RUT', 'HET_HAN', 'KET_THUC')",
                     itemId);
+            if (!closedListingIds.isEmpty()) {
+                UUID[] affectedListings = closedListingIds.toArray(new UUID[0]);
+                db.update(con -> {
+                    PreparedStatement ps = con.prepareStatement(
+                            "UPDATE tin_dangs t " +
+                                    "SET hinh_thuc = CASE " +
+                                    "    WHEN (SELECT COUNT(*) FROM tin_dang_do_vat td WHERE td.ma_tin = t.ma_tin) >= 2 THEN 'BAN_COMBO' " +
+                                    "    WHEN t.gia_vnd = 0 THEN 'CHO_TANG' " +
+                                    "    ELSE 'BAN_LE' END, " +
+                                    "    updated_at = ? " +
+                                    "WHERE t.ma_tin = ANY(?) AND t.trang_thai IN ('DA_RUT', 'HET_HAN')");
+                    ps.setTimestamp(1, Timestamp.from(currentNow));
+                    ps.setArray(2, con.createArrayOf("uuid", affectedListings));
+                    return ps;
+                });
+            }
             int deleted = db.update("DELETE FROM do_vats WHERE ma_vat = ? AND user_id = ? AND version = ?", itemId,
                     userId, current.version());
             if (deleted == 0) {

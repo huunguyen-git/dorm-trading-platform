@@ -1247,6 +1247,26 @@ class ListingApiTest extends BaseIntegrationTest {
                 .delete("/api/v1/inventory/{id}?version={v}", itemFreeB, itemFreeBVersion)
                 .then().statusCode(204);
 
+        // Immediately after Inventory deletion (even BEFORE /renew), HET_HAN combo listings must NOT report stale BAN_COMBO / isCombo=true
+        given().auth().oauth2(tokenDay31)
+                .get("/api/v1/listings/{id}", paidComboId)
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("HET_HAN"))
+                .body("listingType", equalTo("BAN_LE"))
+                .body("isCombo", equalTo(false))
+                .body("itemCount", equalTo(1));
+
+        given().auth().oauth2(tokenDay31)
+                .get("/api/v1/listings/{id}", freeComboId)
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("HET_HAN"))
+                .body("listingType", equalTo("CHO_TANG"))
+                .body("isCombo", equalTo(false))
+                .body("isFree", equalTo(true))
+                .body("itemCount", equalTo(1));
+
         // Renewing paidComboId (now 1 item) MUST recompute listingType -> BAN_LE & isCombo -> false
         given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
                 .body(Map.of("version", 1))
@@ -1305,5 +1325,40 @@ class ListingApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(409)
                 .body("code", equalTo("QUOTA_EXCEEDED"));
+
+        // Free 1 quota slot (withdraw paidComboId), then set overdueDirectRenewId back to overdue CONG_KHAI v1
+        // and reopen via PUT(action=PUBLISH) -> must bump do_vats.version (NFR-02)
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 2))
+                .post("/api/v1/listings/{id}/withdraw", paidComboId)
+                .then().statusCode(200);
+
+        db.update(
+                "UPDATE tin_dangs SET trang_thai = 'CONG_KHAI', closed_at = NULL, expires_at = ?, version = 1 WHERE ma_tin = ?",
+                Timestamp.from(currentTime.get().minus(1, ChronoUnit.MINUTES)),
+                UUID.fromString(overdueDirectRenewId)
+        );
+        long itemOverdueVersionBefore = db.queryForObject(
+                "SELECT version FROM do_vats WHERE ma_vat = ?",
+                Long.class,
+                itemOverdue
+        );
+        var republishOverdueBody = validPublishPayload("Quạt mini quá hạn mở lại bằng PUT PUBLISH", 70000, List.of(itemOverdue));
+        republishOverdueBody.put("action", "PUBLISH");
+        republishOverdueBody.put("version", 1);
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(republishOverdueBody)
+                .put("/api/v1/listings/{id}", overdueDirectRenewId)
+                .then()
+                .statusCode(200)
+                .body("listing.status", equalTo("CONG_KHAI"))
+                .body("listing.version", equalTo(2));
+
+        long itemOverdueVersionAfter = db.queryForObject(
+                "SELECT version FROM do_vats WHERE ma_vat = ?",
+                Long.class,
+                itemOverdue
+        );
+        assertThat(itemOverdueVersionAfter).isGreaterThan(itemOverdueVersionBefore);
     }
 }

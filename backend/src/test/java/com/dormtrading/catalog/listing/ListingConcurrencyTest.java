@@ -363,4 +363,95 @@ class ListingConcurrencyTest extends BaseIntegrationTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void fr12_nfr02_concurrentDraftCreationAndAccountLockSerializeCleanlyWithoutDeadlock() throws Exception {
+        SellerAccount seller = createActiveSeller(100);
+        SellerAccount moderator = createActiveSeller(120);
+        db.update(
+                "INSERT INTO vai_tro_quan_tri(user_id, loai_vai_tro, bat_dau) VALUES (?, 'KIEM_DUYET_VIEN', CURRENT_TIMESTAMP - INTERVAL '1 minute')",
+                moderator.id()
+        );
+        String moderatorEmail = db.queryForObject(
+                "SELECT email FROM thanh_viens WHERE user_id = ?",
+                String.class,
+                moderator.id()
+        );
+        String moderatorToken = given()
+                .header("Origin", "http://localhost:5173")
+                .contentType(ContentType.JSON)
+                .body(Map.of("email", moderatorEmail, "password", PASSWORD, "client", "admin-web"))
+                .post("/api/v1/auth/login")
+                .then().statusCode(200)
+                .extract().jsonPath().getString("token");
+
+        UUID item = createItem(seller.token(), "Sách kiểm thử khóa đồng thời tạo nháp");
+
+        int draftThreads = 3;
+        CountDownLatch ready = new CountDownLatch(draftThreads + 1);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(draftThreads + 1);
+        try {
+            List<Future<Outcome>> draftFutures = new ArrayList<>();
+            for (int i = 0; i < draftThreads; i++) {
+                final int idx = i;
+                draftFutures.add(pool.submit(() -> {
+                    ready.countDown();
+                    assertThat(start.await(15, TimeUnit.SECONDS)).isTrue();
+                    var body = publishPayload("Bản nháp đồng thời " + idx, List.of(item));
+                    body.put("action", "DRAFT");
+                    Response res = given()
+                            .auth().oauth2(seller.token())
+                            .contentType(ContentType.JSON)
+                            .body(body)
+                            .post("/api/v1/listings");
+                    String code = res.statusCode() == 201 ? null : res.jsonPath().getString("code");
+                    return new Outcome(res.statusCode(), code);
+                }));
+            }
+
+            Future<Integer> lockFuture = pool.submit(() -> {
+                ready.countDown();
+                assertThat(start.await(15, TimeUnit.SECONDS)).isTrue();
+                return given()
+                        .header("Origin", "http://localhost:5173")
+                        .auth().oauth2(moderatorToken)
+                        .contentType(ContentType.JSON)
+                        .body(Map.of(
+                                "lockType", "TEMPORARY",
+                                "durationDays", 14,
+                                "reason", "Kiểm thử khóa đồng thời với tạo bản nháp"
+                        ))
+                        .post("/api/v1/admin/users/{id}/lock", seller.id())
+                        .statusCode();
+            });
+
+            assertThat(ready.await(15, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(lockFuture.get(30, TimeUnit.SECONDS)).isEqualTo(200);
+            for (Future<Outcome> f : draftFutures) {
+                Outcome outcome = f.get(30, TimeUnit.SECONDS);
+                // Each concurrent DRAFT call either committed strictly BEFORE lock (201) or was rejected cleanly AFTER lock (403 ACCOUNT_RESTRICTED)
+                assertThat(outcome.status()).isIn(201, 403);
+                if (outcome.status() == 403) {
+                    assertThat(outcome.code()).isEqualTo("ACCOUNT_RESTRICTED");
+                }
+            }
+
+            // Once locked, any subsequent DRAFT attempt MUST be rejected with 403 ACCOUNT_RESTRICTED
+            var afterBody = publishPayload("Bản nháp sau khi đã khóa", List.of(item));
+            afterBody.put("action", "DRAFT");
+            given()
+                    .auth().oauth2(seller.token())
+                    .contentType(ContentType.JSON)
+                    .body(afterBody)
+                    .post("/api/v1/listings")
+                    .then()
+                    .statusCode(403)
+                    .body("code", org.hamcrest.Matchers.equalTo("ACCOUNT_RESTRICTED"));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
 }
