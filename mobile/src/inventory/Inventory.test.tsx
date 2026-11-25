@@ -170,7 +170,7 @@ describe('Screen: InventoryListScreen', () => {
       screen.getByText('Bạn chưa có món đồ nào trong kho cá nhân. Hãy thêm đồ vật để sẵn sàng đăng tin thanh lý!'),
     ).toBeTruthy();
 
-    const addNowBtn = screen.getByText('+ Thêm đồ vật ngay');
+    const addNowBtn = screen.getByText('Thêm đồ vật ngay');
     fireEvent.press(addNowBtn);
     expect(mockNavigate).toHaveBeenCalledWith('InventoryForm', { mode: 'create' });
   });
@@ -287,7 +287,7 @@ describe('Screen: InventoryDetailScreen', () => {
     expect(screen.getByText('Hoạt động tốt 3 chế độ sáng')).toBeTruthy();
     expect(screen.getByText('Đang giữ')).toBeTruthy();
     expect(screen.getByText('Thanh lý đèn bàn')).toBeTruthy();
-    expect(screen.getByText('Trạng thái: DANG_GIU')).toBeTruthy();
+    expect(screen.getByText('Trạng thái: Đang giữ chỗ')).toBeTruthy();
   });
 
   test('blocks edit and delete button for item with status DANG_GIU', async () => {

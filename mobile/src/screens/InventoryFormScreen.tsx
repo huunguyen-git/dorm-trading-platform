@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import {
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,27 +12,40 @@ import {
 } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
 import { useInventory } from '../inventory/store';
-import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
-import { colors, radius, space, text } from '../theme';
+import { Action, Field, ui } from '../components/AuthUI';
+import { HairlineDivider, Icon, InlineBanner, SectionHeading } from '../components/ui';
+import { component, primitive, semantic } from '../theme';
 
 type RouteProps = RouteProp<RootStack, 'InventoryForm'>;
+
+function sanitizeFormError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  if (trimmed.startsWith('API ')) {
+    return 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+  }
+  return trimmed;
+}
 
 export default function InventoryFormScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProps>();
+  const insets = useContext(SafeAreaInsetsContext);
   const mode = route.params?.mode || 'create';
   const existingItem = route.params?.item;
   const itemId = route.params?.id || existingItem?.id;
 
-  // Editable check in edit mode
-  const isBlocked =
+  const isBlocked = Boolean(
     mode === 'edit' &&
-    existingItem &&
-    (!existingItem.canEdit ||
-      existingItem.trangThai !== 'KHA_DUNG' ||
-      existingItem.linkedListingCount > 0);
+      existingItem &&
+      (!existingItem.canEdit ||
+        existingItem.trangThai !== 'KHA_DUNG' ||
+        existingItem.linkedListingCount > 0),
+  );
 
   const { addItem, updateItem, clearError } = useInventory();
 
@@ -44,6 +59,8 @@ export default function InventoryFormScreen() {
   const [tinhTrang, setTinhTrang] = useState(existingItem?.tinhTrang || '');
   const [hinhAnh, setHinhAnh] = useState<string[]>(existingItem?.hinhAnh || []);
   const [newImageUrl, setNewImageUrl] = useState('');
+  const [conditionFocused, setConditionFocused] = useState(false);
+  const [imageInputFocused, setImageInputFocused] = useState(false);
   const [error, setError] = useState(
     isBlocked
       ? 'Đồ vật này đang nằm trong tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.'
@@ -77,7 +94,9 @@ export default function InventoryFormScreen() {
 
   const handleSubmit = async () => {
     if (isBlocked) {
-      setError('Đồ vật này đang nằm trong tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.');
+      setError(
+        'Đồ vật này đang nằm trong tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.',
+      );
       return;
     }
 
@@ -121,162 +140,250 @@ export default function InventoryFormScreen() {
         });
       }
       navigation.goBack();
-    } catch (err: any) {
-      const msg = err?.message || 'Có lỗi xảy ra khi lưu đồ vật.';
-      setError(msg);
+    } catch (err: unknown) {
+      setError(sanitizeFormError(err, 'Có lỗi xảy ra khi lưu đồ vật.'));
     } finally {
       setBusy(false);
     }
   };
 
+  const isDisabled = busy || isBlocked;
+
   return (
-    <AuthScreen
-      title={mode === 'edit' ? 'Sửa thông tin đồ vật' : 'Thêm đồ vật vào kho'}
-      subtitle={
-        mode === 'edit'
-          ? 'Cập nhật tình trạng hoặc hình ảnh thực tế của đồ vật.'
-          : 'Lưu đồ vật vào kho cá nhân với mô tả và ảnh thực tế trước khi đăng bán.'
-      }
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {error ? <Notice message={error} error /> : null}
-
-      <Field
-        label="Tên đồ vật"
-        testID="input-item-name"
-        placeholder="VD: Bàn học gấp gọn, Nồi cơm điện..."
-        value={ten}
-        onChangeText={setTen}
-        editable={!busy && !isBlocked}
-        hint="Tên ngắn gọn, rõ ràng của món đồ."
-      />
-
-      <View style={{ gap: space.sm }}>
-        <Text style={ui.label}>Mô tả tình trạng</Text>
-        <TextInput
-          accessibilityLabel="Mô tả tình trạng"
-          testID="input-item-condition"
-          placeholder="VD: Còn mới 95%, chỉ dùng 1 học kỳ, không trầy xước, đầy đủ phụ kiện..."
-          placeholderTextColor={colors.muted}
-          multiline
-          numberOfLines={4}
-          style={[
-            ui.field,
-            styles.textArea,
-            (busy || isBlocked) && { backgroundColor: '#f5f4ef' },
-          ]}
-          value={tinhTrang}
-          onChangeText={setTinhTrang}
-          editable={!busy && !isBlocked}
-        />
-        <Text style={ui.caption}>
-          Nêu rõ tình trạng hao mòn, khuyết điểm (nếu có) để tạo sự minh bạch.
-        </Text>
-      </View>
-
-      {/* Images Section */}
-      <View style={{ gap: space.sm }}>
-        <View style={styles.imageHeaderRow}>
-          <Text style={ui.label}>Ảnh thực tế ({hinhAnh.length}/5)</Text>
-          <Text style={ui.caption}>Quy chuẩn: 1 đến 5 ảnh</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.leadStrip}>
+          <Text style={styles.leadText}>
+            {mode === 'edit'
+              ? 'Cập nhật tình trạng hoặc hình ảnh thực tế của đồ vật.'
+              : 'Lưu đồ vật vào kho cá nhân với mô tả và ảnh thực tế trước khi đăng bán.'}
+          </Text>
+          {error ? <InlineBanner tone="danger" message={error} /> : null}
         </View>
 
-        {/* Existing Thumbnails */}
-        {hinhAnh.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailList}>
-            {hinhAnh.map((imgUri, idx) => (
-              <View key={idx} style={styles.thumbWrapper} testID={`image-thumb-${idx}`}>
-                <Image source={{ uri: imgUri }} style={styles.thumbImage} resizeMode="cover" />
-                {!isBlocked && !busy && (
-                  <Pressable
-                    testID={`remove-image-${idx}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Xóa ảnh ${idx + 1}`}
-                    onPress={() => handleRemoveImage(idx)}
-                    style={styles.removeBtn}
-                  >
-                    <Text style={styles.removeBtnText}>✕</Text>
-                  </Pressable>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.emptyPhotoBox}>
-            <Text style={ui.caption}>Chưa có ảnh nào được thêm. Vui lòng thêm ít nhất 1 ảnh.</Text>
-          </View>
-        )}
+        {/* Section 1: Item Details */}
+        <View style={styles.section}>
+          <SectionHeading title="Thông tin đồ vật" />
 
-        {/* Add Image Inputs */}
-        {!isBlocked && (
-          <View style={{ gap: space.xs, marginTop: space.xs }}>
-            <View style={{ flexDirection: 'row', gap: space.sm }}>
+          <Field
+            label="Tên đồ vật"
+            testID="input-item-name"
+            placeholder="VD: Bàn học gấp gọn, Nồi cơm điện..."
+            value={ten}
+            onChangeText={setTen}
+            editable={!isDisabled}
+            hint="Tên ngắn gọn, rõ ràng của món đồ."
+          />
+
+          <View style={styles.fieldGroup}>
+            <Text style={[ui.label, isDisabled && styles.labelDisabled]}>Mô tả tình trạng</Text>
+            <TextInput
+              accessibilityLabel="Mô tả tình trạng"
+              testID="input-item-condition"
+              placeholder="VD: Còn mới 95%, chỉ dùng 1 học kỳ, không trầy xước, đầy đủ phụ kiện..."
+              placeholderTextColor={semantic.color.textSecondary}
+              multiline
+              numberOfLines={4}
+              onFocus={() => setConditionFocused(true)}
+              onBlur={() => setConditionFocused(false)}
+              style={[
+                ui.field,
+                styles.textArea,
+                conditionFocused && !isDisabled && styles.inputFocused,
+                isDisabled && styles.inputDisabled,
+              ]}
+              value={tinhTrang}
+              onChangeText={setTinhTrang}
+              editable={!isDisabled}
+            />
+            <Text style={styles.hintText}>
+              Nêu rõ tình trạng hao mòn, khuyết điểm (nếu có) để tạo sự minh bạch.
+            </Text>
+          </View>
+        </View>
+
+        <HairlineDivider />
+
+        {/* Section 2: Real Photos */}
+        <View style={styles.section}>
+          <View style={styles.imageHeaderRow}>
+            <Text style={styles.imageHeading}>Ảnh thực tế ({hinhAnh.length}/5)</Text>
+            <Text style={styles.imageSubHint}>Từ 1 đến 5 ảnh</Text>
+          </View>
+
+          {hinhAnh.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.thumbnailList}
+            >
+              {hinhAnh.map((imgUri, idx) => (
+                <View key={`${imgUri}-${idx}`} style={styles.thumbWrapper} testID={`image-thumb-${idx}`}>
+                  <Image source={{ uri: imgUri }} style={styles.thumbImage} resizeMode="cover" />
+                  {!isDisabled ? (
+                    <Pressable
+                      testID={`remove-image-${idx}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Xóa ảnh ${idx + 1}`}
+                      onPress={() => handleRemoveImage(idx)}
+                      hitSlop={6}
+                      style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
+                    >
+                      <Icon name="x" size={12} color={semantic.color.textInverse} />
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.emptyPhotoBox}>
+              <Icon name="image" size={20} color={semantic.color.textSecondary} />
+              <Text style={styles.emptyPhotoText}>
+                Chưa có ảnh nào được thêm. Vui lòng thêm ít nhất 1 ảnh.
+              </Text>
+            </View>
+          )}
+
+          {!isBlocked ? (
+            <View style={styles.addImageRow}>
               <TextInput
                 accessibilityLabel="Đường dẫn ảnh"
                 testID="input-image-url"
-                placeholder="Nhập URL ảnh thực tế..."
-                placeholderTextColor={colors.muted}
-                style={[ui.field, { flex: 1, minHeight: 44, paddingVertical: space.xs }]}
+                placeholder="Dán liên kết ảnh (https://...)"
+                placeholderTextColor={semantic.color.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onFocus={() => setImageInputFocused(true)}
+                onBlur={() => setImageInputFocused(false)}
+                style={[
+                  ui.field,
+                  styles.imageInput,
+                  imageInputFocused && !busy && hinhAnh.length < 5 && styles.inputFocused,
+                  (busy || hinhAnh.length >= 5) && styles.inputDisabled,
+                ]}
                 value={newImageUrl}
                 onChangeText={setNewImageUrl}
                 editable={!busy && hinhAnh.length < 5}
               />
               <Action
-                secondary
+                variant="secondary"
+                compact
+                icon="plus"
                 title="Thêm"
                 testID="add-image-url-button"
                 disabled={busy || hinhAnh.length >= 5 || !newImageUrl.trim()}
                 onPress={() => handleAddImage()}
               />
             </View>
-          </View>
-        )}
+          ) : null}
+        </View>
+      </ScrollView>
+
+      {/* Flush Bottom Actions */}
+      <View
+        style={[
+          styles.footerBar,
+          { paddingBottom: Math.max(insets?.bottom ?? 0, primitive.space[3]) },
+        ]}
+      >
+        <Action
+          title={mode === 'edit' ? 'Cập nhật đồ vật' : 'Lưu đồ vật vào kho'}
+          testID="submit-inventory-form"
+          disabled={isDisabled}
+          busy={busy}
+          onPress={() => void handleSubmit()}
+        />
+        <Action
+          variant="ghost"
+          compact
+          title="Hủy"
+          testID="cancel-inventory-form"
+          disabled={busy}
+          onPress={() => {
+            clearError();
+            navigation.goBack();
+          }}
+        />
       </View>
-
-      <Action
-        title={mode === 'edit' ? 'Cập nhật đồ vật' : 'Lưu đồ vật vào kho'}
-        testID="submit-inventory-form"
-        disabled={busy || isBlocked}
-        busy={busy}
-        onPress={handleSubmit}
-      />
-
-      <Action
-        secondary
-        title="Hủy thao tác"
-        testID="cancel-inventory-form"
-        disabled={busy}
-        onPress={() => {
-          clearError();
-          navigation.goBack();
-        }}
-      />
-    </AuthScreen>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+  },
+  scrollContent: {
+    paddingBottom: primitive.space[8],
+  },
+  leadStrip: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[4],
+    gap: primitive.space[3],
+  },
+  leadText: {
+    ...semantic.type.caption,
+  },
+  section: {
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[5],
+    gap: primitive.space[4],
+  },
+  fieldGroup: {
+    gap: primitive.space[1.5],
+  },
+  labelDisabled: {
+    opacity: primitive.opacity.disabled,
+  },
   textArea: {
-    minHeight: 90,
+    minHeight: 100,
     textAlignVertical: 'top',
+  },
+  inputFocused: {
+    borderColor: component.input.focusBorder,
+    borderWidth: 1.5,
+  },
+  inputDisabled: {
+    backgroundColor: component.input.disabledBg,
+    borderColor: semantic.color.borderHairline,
+    color: semantic.color.textSecondary,
+  },
+  hintText: {
+    ...semantic.type.micro,
   },
   imageHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: primitive.space[2],
+  },
+  imageHeading: {
+    ...semantic.type.sectionTitle,
+  },
+  imageSubHint: {
+    ...semantic.type.micro,
   },
   thumbnailList: {
     flexDirection: 'row',
-    gap: space.sm,
-    paddingVertical: space.xs,
+    gap: primitive.space[2.5],
+    paddingVertical: primitive.space[1],
   },
   thumbWrapper: {
     position: 'relative',
-    width: 72,
-    height: 72,
-    borderRadius: radius.md,
+    width: 80,
+    height: 80,
+    borderRadius: primitive.radius.md,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.line,
+    backgroundColor: semantic.color.bgSubtle,
   },
   thumbImage: {
     width: '100%',
@@ -284,25 +391,47 @@ const styles = StyleSheet.create({
   },
   removeBtn: {
     position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    top: primitive.space[1],
+    right: primitive.space[1],
+    backgroundColor: semantic.color.overlayDark,
+    width: 22,
+    height: 22,
+    borderRadius: primitive.radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  removeBtnText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
-    lineHeight: 12,
-  },
   emptyPhotoBox: {
-    padding: space.md,
-    backgroundColor: '#f2ede4',
-    borderRadius: radius.md,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: primitive.space[2.5],
+    paddingHorizontal: primitive.space[4],
+    paddingVertical: primitive.space[3],
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.lg,
+  },
+  emptyPhotoText: {
+    ...semantic.type.caption,
+    flex: 1,
+  },
+  addImageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+  },
+  imageInput: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: primitive.space[2],
+  },
+  footerBar: {
+    backgroundColor: semantic.color.bgSurface,
+    borderTopWidth: 1,
+    borderTopColor: semantic.color.borderHairline,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+    gap: primitive.space[1.5],
+  },
+  pressed: {
+    opacity: primitive.opacity.pressed,
   },
 });

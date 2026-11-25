@@ -1,7 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { resolveUserRestriction, useSession, type AccountRestriction } from '../auth/session';
-import { colors, radius, space } from '../theme';
+import { primitive, semantic } from '../theme';
 import { Action } from './AuthUI';
+import { HairlineDivider, Icon, type AppIconName } from './ui';
 
 function getRestrictionTitle(lockType: string | null): string {
   if (lockType === 'KHOA_TAM_THOI') return 'Tài khoản đang bị khóa tạm thời';
@@ -51,72 +52,117 @@ export function RestrictedAccountNotice({
     trimmedMessage !== title &&
     trimmedMessage !== restriction.reason?.trim();
 
+  const isTemporary = restriction.lockType === 'KHOA_TAM_THOI';
+  const surfaceBg = isTemporary ? semantic.color.warningSoft : semantic.color.dangerSoft;
+  const accentColor = isTemporary ? semantic.color.warning : semantic.color.danger;
+  const iconName: AppIconName =
+    restriction.lockType === 'KHOA_VINH_VIEN' ? 'lock' : 'alert-triangle';
+
   return (
     <View
       testID="restricted-account-notice"
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      style={styles.card}
+      style={[styles.strip, { backgroundColor: surfaceBg }]}
     >
-      <Text style={styles.title}>{title}</Text>
-      {showMessage ? <Text style={styles.body}>{restriction.message}</Text> : null}
-      {restriction.reason ? <Text style={styles.detail}>Lý do: {restriction.reason}</Text> : null}
-      {restriction.lockedUntil ? (
-        <Text style={styles.detail}>Mở khóa sau: {formatLockedUntil(restriction.lockedUntil)}</Text>
-      ) : null}
-      {typeof restriction.reputationScore === 'number' ? (
-        <Text style={styles.detail}>Điểm uy tín: {restriction.reputationScore}</Text>
-      ) : null}
-      {restriction.appealable ? (
-        <View style={styles.appealBox}>
-          <Text style={styles.appealText}>
-            Bạn có quyền gửi khiếu nại kèm bằng chứng tới Kiểm duyệt viên để được xem xét lại.
-          </Text>
+      <View style={styles.headerRow}>
+        <View style={styles.iconWrap}>
+          <Icon name={iconName} size={18} color={accentColor} />
         </View>
+        <Text style={[styles.title, { color: accentColor }]}>{title}</Text>
+      </View>
+
+      {showMessage ? <Text style={styles.body}>{restriction.message}</Text> : null}
+
+      <View style={styles.detailList}>
+        {restriction.reason ? (
+          <Text style={styles.detail}>Lý do: {restriction.reason}</Text>
+        ) : null}
+        {restriction.lockedUntil ? (
+          <Text style={styles.detail}>
+            Mở khóa sau: {formatLockedUntil(restriction.lockedUntil)}
+          </Text>
+        ) : null}
+        {typeof restriction.reputationScore === 'number' ? (
+          <Text style={styles.detail}>Điểm uy tín: {restriction.reputationScore}</Text>
+        ) : null}
+      </View>
+
+      {restriction.appealable ? (
+        <>
+          <HairlineDivider />
+          <View style={styles.appealRow}>
+            <View style={styles.appealIcon}>
+              <Icon name="shield" size={15} color={semantic.color.textSecondary} />
+            </View>
+            <Text style={styles.appealText}>
+              Bạn có quyền gửi khiếu nại kèm bằng chứng tới Kiểm duyệt viên để được xem xét lại.
+            </Text>
+          </View>
+        </>
       ) : null}
-      <Action
-        title="Đã hiểu"
-        secondary
-        testID="dismiss-restriction"
-        onPress={() => useSession.getState().clearRestriction()}
-      />
+
+      <View style={styles.footerRow}>
+        <Action
+          title="Đã hiểu"
+          variant="secondary"
+          compact
+          testID="dismiss-restriction"
+          onPress={() => useSession.getState().clearRestriction()}
+        />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: '#fff0ec',
-    borderWidth: 1,
-    borderColor: '#e5b8af',
-    gap: space.sm,
+  strip: {
+    padding: primitive.space[4],
+    borderRadius: primitive.radius.lg,
+    gap: primitive.space[2.5],
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+  },
+  iconWrap: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
-    color: colors.danger,
-    fontSize: 16,
-    fontWeight: '700',
+    ...semantic.type.sectionTitle,
+    flex: 1,
   },
   body: {
-    color: colors.ink,
-    lineHeight: 22,
+    ...semantic.type.body,
+  },
+  detailList: {
+    gap: primitive.space[1],
   },
   detail: {
-    color: colors.ink,
-    fontWeight: '500',
-    lineHeight: 22,
+    ...semantic.type.caption,
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.medium,
   },
-  appealBox: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
+  appealRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: primitive.space[2],
+  },
+  appealIcon: {
+    paddingTop: 2,
   },
   appealText: {
-    color: colors.ink,
-    lineHeight: 20,
+    ...semantic.type.caption,
+    color: semantic.color.textPrimary,
+    flex: 1,
+  },
+  footerRow: {
+    alignItems: 'flex-start',
+    paddingTop: primitive.space[1],
   },
 });
 
