@@ -1,4 +1,5 @@
 import type { InventoryItemStatus } from '../inventory/types';
+import { semantic } from '../theme';
 
 export type ListingStatus =
   | 'NHAP'
@@ -204,21 +205,74 @@ export interface LocationsResponse {
   items: LocationZone[];
 }
 
+export type ListingStatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'accent';
+export type ListingStatusTier = 'dot' | 'soft' | 'urgent';
+
 export interface ListingStatusMeta {
   label: string;
   bg: string;
   fg: string;
+  tone: ListingStatusTone;
+  tier: ListingStatusTier;
 }
 
 export const LISTING_STATUS_META: Record<ListingStatus, ListingStatusMeta> = {
-  NHAP: { label: 'Bản nháp', bg: '#f1f3f4', fg: '#5f6368' },
-  CHO_DUYET: { label: 'Chờ duyệt', bg: '#e8f0fe', fg: '#1967d2' },
-  CONG_KHAI: { label: 'Công khai', bg: '#e6f4ea', fg: '#137333' },
-  GIU_CHO: { label: 'Đang giữ chỗ', bg: '#fef7e0', fg: '#b06000' },
-  DA_RUT: { label: 'Đã rút tin', bg: '#f2ede4', fg: '#5c5a54' },
-  HET_HAN: { label: 'Hết hạn', bg: '#fce8e6', fg: '#a12d24' },
-  AN: { label: 'Đã ẩn', bg: '#fff0ec', fg: '#a12d24' },
-  KET_THUC: { label: 'Đã kết thúc', bg: '#e8eaed', fg: '#3c4043' },
+  NHAP: {
+    label: 'Bản nháp',
+    bg: semantic.color.bgTrack,
+    fg: semantic.color.textSecondary,
+    tone: 'neutral',
+    tier: 'dot',
+  },
+  CHO_DUYET: {
+    label: 'Chờ duyệt',
+    bg: semantic.color.warningSoft,
+    fg: semantic.color.warning,
+    tone: 'warning',
+    tier: 'urgent',
+  },
+  CONG_KHAI: {
+    label: 'Đang hiển thị',
+    bg: semantic.color.successSoft,
+    fg: semantic.color.success,
+    tone: 'success',
+    tier: 'dot',
+  },
+  GIU_CHO: {
+    label: 'Đang giữ chỗ',
+    bg: semantic.color.warningSoft,
+    fg: semantic.color.warning,
+    tone: 'warning',
+    tier: 'urgent',
+  },
+  DA_RUT: {
+    label: 'Đã rút tin',
+    bg: semantic.color.bgSubtle,
+    fg: semantic.color.textSecondary,
+    tone: 'neutral',
+    tier: 'dot',
+  },
+  HET_HAN: {
+    label: 'Hết hạn',
+    bg: semantic.color.dangerSoft,
+    fg: semantic.color.danger,
+    tone: 'danger',
+    tier: 'dot',
+  },
+  AN: {
+    label: 'Bị ẩn',
+    bg: semantic.color.dangerSoft,
+    fg: semantic.color.danger,
+    tone: 'danger',
+    tier: 'urgent',
+  },
+  KET_THUC: {
+    label: 'Đã kết thúc',
+    bg: semantic.color.bgTrack,
+    fg: semantic.color.textSecondary,
+    tone: 'neutral',
+    tier: 'dot',
+  },
 };
 
 export const LISTING_TYPE_LABELS: Record<ListingType, string> = {
@@ -536,6 +590,70 @@ export function formatVnd(priceVnd: number | null | undefined): string {
   }
   const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${grouped}đ`;
+}
+
+export function formatDisplayPrice(priceVnd: number | null | undefined): string {
+  const value = typeof priceVnd === 'number' && Number.isFinite(priceVnd) ? Math.round(priceVnd) : 0;
+  if (value <= 0) {
+    return 'Tặng miễn phí';
+  }
+  const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${grouped}đ`;
+}
+
+export interface ReputationSummary {
+  scoreText: string;
+  tierLabel: string;
+}
+
+export function formatReputationSummary(score: number | null | undefined): ReputationSummary {
+  const normalized =
+    typeof score === 'number' && Number.isFinite(score) ? Math.max(0, Math.round(score)) : 0;
+  let tierLabel = 'Hạn chế';
+  if (normalized >= 120) {
+    tierLabel = 'Tin cậy cao';
+  } else if (normalized >= 80) {
+    tierLabel = 'Ổn định';
+  } else if (normalized >= 50) {
+    tierLabel = 'Cần cải thiện';
+  }
+  return {
+    scoreText: `Uy tín ${normalized}`,
+    tierLabel,
+  };
+}
+
+const EXTRA_STATUS_LABELS: Record<string, string> = {
+  DANG_GIU: 'Đang giữ chỗ',
+  HOAN_TAT: 'Đã hoàn tất',
+  KHA_DUNG: 'Khả dụng',
+  DA_CHUYEN_GIAO: 'Đã chuyển giao',
+  DA_DONG: 'Đã đóng',
+  BI_AN: 'Bị ẩn',
+  DA_XOA: 'Đã xóa',
+  CHO_XAC_NHAN: 'Chờ xác nhận',
+  DA_HUY: 'Đã hủy',
+};
+
+export function mapListingStatusLabel(status: string | null | undefined): string {
+  if (!status || typeof status !== 'string') {
+    return 'Không xác định';
+  }
+  const trimmed = status.trim();
+  if (!trimmed) {
+    return 'Không xác định';
+  }
+  const normalized = trimmed.toUpperCase();
+  if (normalized in LISTING_STATUS_META) {
+    return LISTING_STATUS_META[normalized as ListingStatus].label;
+  }
+  if (normalized in EXTRA_STATUS_LABELS) {
+    return EXTRA_STATUS_LABELS[normalized];
+  }
+  if (/^[A-Z0-9_]+$/.test(trimmed)) {
+    return 'Không xác định';
+  }
+  return trimmed;
 }
 
 export function formatShortDate(iso: string | null | undefined): string {

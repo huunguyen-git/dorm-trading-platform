@@ -1,1 +1,5 @@
-module.exports = { preset: 'jest-expo', testMatch: ['**/*.test.ts?(x)'] };
+module.exports = {
+  preset: 'jest-expo',
+  testMatch: ['**/*.test.ts?(x)'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+};

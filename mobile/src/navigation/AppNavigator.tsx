@@ -13,24 +13,65 @@ import ProfileScreen from '../screens/ProfileScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
+import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
 
 export default function AppNavigator() {
   return (
     <NavigationContainer>
-      <StatusBar />
-      <Stack.Navigator>
-        <Stack.Screen name="Listings" component={ListingsScreen} options={{ title: 'Tin đăng' }} />
+      <StatusBar style="dark" backgroundColor={semantic.color.bgSurface} />
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: { backgroundColor: semantic.color.bgSurface },
+          headerTintColor: semantic.color.textPrimary,
+          headerTitleStyle: {
+            fontSize: semantic.type.sectionTitle.fontSize,
+            fontWeight: semantic.type.sectionTitle.fontWeight,
+            color: semantic.color.textPrimary,
+          },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: semantic.color.bgPage },
+        }}
+      >
+        <Stack.Screen
+          name="Listings"
+          component={ListingsScreen}
+          options={{ title: 'Khám phá', headerShown: false }}
+        />
         <Stack.Screen name="AuthFlow" component={AuthFlowScreen} options={{ title: 'Tài khoản' }} />
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Đăng nhập' }} />
         <Stack.Screen name="Listing" component={ListingScreen} options={{ title: 'Chi tiết tin' }} />
-        <Stack.Screen name="CreateListing" component={CreateListingScreen} options={{ title: 'Đăng tin' }} />
-        <Stack.Screen name="MyListings" component={MyListingsScreen} options={{ title: 'Tin của tôi' }} />
-        <Stack.Screen name="EditListing" component={EditListingScreen} options={{ title: 'Sửa tin' }} />
-        <Stack.Screen name="Profile" component={ProfileScreen} />
-        <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: 'Kho đồ cá nhân' }} />
-        <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: 'Chi tiết đồ vật' }} />
+        <Stack.Screen
+          name="CreateListing"
+          component={CreateListingScreen}
+          options={{ title: 'Đăng tin mới' }}
+        />
+        <Stack.Screen
+          name="MyListings"
+          component={MyListingsScreen}
+          options={{ title: 'Tin của tôi', headerShown: false }}
+        />
+        <Stack.Screen
+          name="EditListing"
+          component={EditListingScreen}
+          options={{ title: 'Chỉnh sửa tin' }}
+        />
+        <Stack.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={{ title: 'Hồ sơ', headerShown: false }}
+        />
+        <Stack.Screen
+          name="InventoryList"
+          component={InventoryListScreen}
+          options={{ title: 'Kho đồ cá nhân', headerShown: false }}
+        />
+        <Stack.Screen
+          name="InventoryDetail"
+          component={InventoryDetailScreen}
+          options={{ title: 'Chi tiết đồ vật' }}
+        />
         <Stack.Screen
           name="InventoryForm"
           component={InventoryFormScreen}
