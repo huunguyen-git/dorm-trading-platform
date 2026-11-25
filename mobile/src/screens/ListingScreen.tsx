@@ -499,7 +499,10 @@ export default function ListingScreen() {
       navigation.navigate('Login');
       return;
     }
-    showUpcomingFeatureNotice('Giữ chỗ');
+    navigation.navigate('ReservationRequest', {
+      listingId: display.id,
+      listing: display,
+    });
   };
 
   const handleReportPress = () => {

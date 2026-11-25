@@ -16,6 +16,13 @@ export type RootStack = {
   InventoryList: undefined;
   InventoryDetail: { id: string };
   InventoryForm: { mode: 'create' | 'edit'; id?: string; item?: InventoryItem };
+  ReservationRequest: {
+    listingId: string;
+    listing?: ListingSummary;
+    agreedPriceVnd?: number;
+  };
+  Orders: undefined;
+  OrderDetail: { id: string; justCreated?: boolean };
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;

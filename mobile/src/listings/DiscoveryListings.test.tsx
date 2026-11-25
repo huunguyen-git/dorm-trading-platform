@@ -941,9 +941,9 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     expect(screen.getByText('Chưa có đánh giá')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('reserve-button'));
-    expect(alertSpy).toHaveBeenCalledWith(
-      'Tính năng sắp ra mắt',
-      'Tính năng Giữ chỗ đang được hoàn thiện và sẽ sớm ra mắt.',
+    expect(mockNavigate).toHaveBeenCalledWith(
+      'ReservationRequest',
+      expect.objectContaining({ listingId: 'listing-2' }),
     );
     alertSpy.mockRestore();
   });

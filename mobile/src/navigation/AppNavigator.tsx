@@ -15,6 +15,9 @@ import SettingsScreen from '../screens/SettingsScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
+import ReservationRequestScreen from '../screens/ReservationRequestScreen';
+import OrdersScreen from '../screens/OrdersScreen';
+import OrderDetailScreen from '../screens/OrderDetailScreen';
 import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -105,6 +108,21 @@ export default function AppNavigator() {
           options={({ route }) => ({
             title: route.params?.mode === 'edit' ? 'Sửa đồ vật' : 'Thêm đồ vật',
           })}
+        />
+        <Stack.Screen
+          name="ReservationRequest"
+          component={ReservationRequestScreen}
+          options={{ title: 'Gửi yêu cầu giữ chỗ' }}
+        />
+        <Stack.Screen
+          name="Orders"
+          component={OrdersScreen}
+          options={{ title: 'Giao dịch của tôi' }}
+        />
+        <Stack.Screen
+          name="OrderDetail"
+          component={OrderDetailScreen}
+          options={{ title: 'Chi tiết giao dịch' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

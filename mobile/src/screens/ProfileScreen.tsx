@@ -441,6 +441,23 @@ export default function ProfileScreen() {
                         <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
                       </Pressable>
                     </View>
+
+                    <Pressable
+                      testID="profile-shortcut-orders"
+                      accessibilityRole="button"
+                      accessibilityLabel="Mở Giao dịch của tôi"
+                      onPress={() => nav.navigate('Orders')}
+                      style={({ pressed }) => [styles.quickLinkTile, pressed && styles.tilePressed]}
+                    >
+                      <View style={styles.quickLinkIcon}>
+                        <Icon name="shopping-bag" size={18} color={semantic.color.accent} />
+                      </View>
+                      <View style={styles.quickLinkTextWrap}>
+                        <Text style={styles.quickLinkTitle}>Giao dịch của tôi</Text>
+                        <Text style={styles.quickLinkSub}>Giữ chỗ, lịch hẹn & theo dõi giao nhận</Text>
+                      </View>
+                      <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
+                    </Pressable>
                   </View>
                   <HairlineDivider />
                 </>
