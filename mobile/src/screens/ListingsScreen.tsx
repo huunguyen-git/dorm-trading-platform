@@ -8,9 +8,9 @@ import {
   RefreshControl,
   SafeAreaView,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
   type NativeScrollEvent,
@@ -25,7 +25,11 @@ import {
   normalizeSearchTypeParam,
   type DiscoverySearchFilters,
 } from '../listings/discoveryApi';
-import { hasActiveDiscoveryFilters, useDiscovery } from '../listings/discoveryStore';
+import {
+  countActiveDiscoveryFilters,
+  hasActiveDiscoveryFilters,
+  useDiscovery,
+} from '../listings/discoveryStore';
 import { useListings } from '../listings/store';
 import {
   formatVnd,
@@ -165,7 +169,17 @@ export default function ListingsScreen() {
   const [viewMode, setViewMode] = useState<ListingCardVariant>('grid');
   const [heroIndex, setHeroIndex] = useState(0);
   const [zoneSheetOpen, setZoneSheetOpen] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [searchText, setSearchText] = useState(filters.q ?? '');
+  const prevFilterQRef = useRef<string | undefined>(filters.q);
   const heroScrollRef = useRef<ScrollView | null>(null);
+
+  useEffect(() => {
+    if (filters.q !== prevFilterQRef.current) {
+      prevFilterQRef.current = filters.q;
+      setSearchText(filters.q ?? '');
+    }
+  }, [filters.q]);
 
   useEffect(() => {
     if (isLegacyStubbed) {
@@ -188,36 +202,6 @@ export default function ListingsScreen() {
   }, [isLegacyStubbed, legacyLoad, loadReferences, search]);
 
   useEffect(() => {
-    const applyLightStatus = () => {
-      if (typeof StatusBar.setBarStyle === 'function') {
-        StatusBar.setBarStyle('light-content', true);
-      }
-      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
-        StatusBar.setBackgroundColor(semantic.color.accent, true);
-      }
-    };
-    const restoreDarkStatus = () => {
-      if (typeof StatusBar.setBarStyle === 'function') {
-        StatusBar.setBarStyle('dark-content', true);
-      }
-      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
-        StatusBar.setBackgroundColor(semantic.color.bgSurface, true);
-      }
-    };
-    applyLightStatus();
-    if (typeof navigation?.addListener !== 'function') {
-      return restoreDarkStatus;
-    }
-    const unsubFocus = navigation.addListener('focus', applyLightStatus);
-    const unsubBlur = navigation.addListener('blur', restoreDarkStatus);
-    return () => {
-      unsubFocus();
-      unsubBlur();
-      restoreDarkStatus();
-    };
-  }, [navigation]);
-
-  useEffect(() => {
     if (typeof navigation?.addListener !== 'function') return;
     return navigation.addListener('focus', () => {
       if (isLegacyStubbed) return;
@@ -238,9 +222,30 @@ export default function ListingsScreen() {
 
   const effectiveLoading = isLegacyStubbed ? legacyLoading : loading;
   const effectiveError = error || legacyError;
+  const activeFilterCount = useMemo(() => countActiveDiscoveryFilters(filters), [filters]);
   const filtersActive = hasActiveDiscoveryFilters(filters);
   const hasMore = page + 1 < totalPages && displayItems.length > 0;
   const shownTotal = totalElements > 0 ? totalElements : displayItems.length;
+
+  const heroMetaByAction = useMemo(() => {
+    const textbooks = displayItems.filter(
+      (item) =>
+        Boolean(item.courseCode) ||
+        item.categoryId === 'GIAO_TRINH' ||
+        item.categoryId?.startsWith('GT_'),
+    );
+    const freeItems = displayItems.filter((item) => item.isFree || item.priceVnd === 0);
+    const comboItems = displayItems.filter((item) => item.isCombo);
+    const firstThumb = (list: ListingSummary[]) =>
+      list.find((entry) => entry.thumbnailUrl || entry.images[0])?.thumbnailUrl ??
+      list.find((entry) => entry.images[0])?.images[0] ??
+      null;
+    return {
+      textbooks: { count: textbooks.length, thumb: firstThumb(textbooks) },
+      free: { count: freeItems.length, thumb: firstThumb(freeItems) },
+      combo: { count: comboItems.length, thumb: firstThumb(comboItems) },
+    };
+  }, [displayItems]);
 
   const activeZone = useMemo(
     () => locations.find((z) => z.code === filters.locationCode) ?? null,
@@ -371,12 +376,33 @@ export default function ListingsScreen() {
     [heroCardWidth],
   );
 
+  const handleStickySearchSubmit = useCallback(() => {
+    setLegacyError('');
+    handleApplyFilters({
+      ...filters,
+      q: searchText.trim() || undefined,
+      page: 0,
+    });
+  }, [filters, handleApplyFilters, searchText]);
+
+  const handleClearStickySearch = useCallback(() => {
+    setSearchText('');
+    if (filters.q) {
+      handleApplyFilters({
+        ...filters,
+        q: undefined,
+        page: 0,
+      });
+    }
+  }, [filters, handleApplyFilters]);
+
   const handleQuickZoneSelect = useCallback(
     (zone: LocationZone | null) => {
       setZoneSheetOpen(false);
       if (!zone) {
         handleApplyFilters({
           ...filters,
+          q: searchText.trim() || undefined,
           locationCode: undefined,
           location: undefined,
           lat: undefined,
@@ -389,13 +415,14 @@ export default function ListingsScreen() {
       }
       handleApplyFilters({
         ...filters,
+        q: searchText.trim() || undefined,
         locationCode: zone.code,
         lat: zone.latitude,
         lng: zone.longitude,
         page: 0,
       });
     },
-    [filters, handleApplyFilters],
+    [filters, handleApplyFilters, searchText],
   );
 
   const loosenSuggestions = useMemo<FilterLoosenSuggestion[]>(() => {
@@ -521,6 +548,12 @@ export default function ListingsScreen() {
         loading={effectiveLoading}
         onApply={handleApplyFilters}
         onReset={handleResetFilters}
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+        sheetOpen={filterSheetOpen}
+        onSheetOpenChange={setFilterSheetOpen}
+        hideSearchDock
+        onRequestZonePicker={() => setZoneSheetOpen(true)}
       />
 
       {hasVisibleRestriction || showPendingNotice ? (
@@ -547,7 +580,7 @@ export default function ListingsScreen() {
         </View>
       ) : null}
 
-      {/* Hero Campus Discovery Banner Carousel */}
+      {/* Hero Campus Discovery Banner Carousel (FR-06 filters with live photo preview) */}
       {showDiscoveryShowcase ? (
         <View style={styles.heroSection} testID="discovery-hero-carousel">
           <ScrollView
@@ -560,44 +593,75 @@ export default function ListingsScreen() {
             onMomentumScrollEnd={handleHeroScrollEnd}
             contentContainerStyle={styles.heroScrollContent}
           >
-            {HERO_SLIDES.map((slide) => (
-              <Pressable
-                key={slide.key}
-                testID={`hero-slide-${slide.key}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${slide.title}. ${slide.ctaLabel}`}
-                onPress={() => handleHeroAction(slide.action)}
-                style={({ pressed }) => [
-                  styles.heroCard,
-                  { width: heroCardWidth, backgroundColor: slide.bgColor },
-                  pressed && styles.heroCardPressed,
-                ]}
-              >
-                {/* Decorative soft tonal rings */}
-                <View style={[styles.heroDecorCircleLg, { backgroundColor: slide.ringColor }]} />
-                <View style={[styles.heroDecorCircleSm, { backgroundColor: slide.ringColor }]} />
+            {HERO_SLIDES.map((slide) => {
+              const meta = heroMetaByAction[slide.action];
+              const countCaption =
+                meta.count > 0
+                  ? slide.action === 'textbooks'
+                    ? `${meta.count} giáo trình`
+                    : slide.action === 'free'
+                      ? `${meta.count} món 0đ`
+                      : `${meta.count} bộ combo`
+                  : null;
+              return (
+                <Pressable
+                  key={slide.key}
+                  testID={`hero-slide-${slide.key}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${slide.title}. ${slide.ctaLabel}`}
+                  onPress={() => handleHeroAction(slide.action)}
+                  style={({ pressed }) => [
+                    styles.heroCard,
+                    { width: heroCardWidth, backgroundColor: slide.bgColor },
+                    pressed && styles.heroCardPressed,
+                  ]}
+                >
+                  {/* Decorative soft tonal rings */}
+                  <View style={[styles.heroDecorCircleLg, { backgroundColor: slide.ringColor }]} />
+                  <View style={[styles.heroDecorCircleSm, { backgroundColor: slide.ringColor }]} />
 
-                <View style={styles.heroCardInner}>
-                  <View style={styles.heroTextCol}>
-                    <Text style={styles.heroEyebrow}>{slide.eyebrow}</Text>
-                    <Text style={styles.heroTitle} numberOfLines={2}>
-                      {slide.title}
-                    </Text>
-                    <Text style={styles.heroSubtitle} numberOfLines={2}>
-                      {slide.subtitle}
-                    </Text>
-                    <View style={styles.heroCtaPill}>
-                      <Text style={styles.heroCtaText}>{slide.ctaLabel}</Text>
-                      <Icon name="arrow-right" size={13} color={semantic.color.textPrimary} />
+                  <View style={styles.heroCardInner}>
+                    <View style={styles.heroTextCol}>
+                      <View style={styles.heroEyebrowRow}>
+                        <Text style={styles.heroEyebrow}>{slide.eyebrow}</Text>
+                        {countCaption ? (
+                          <View style={styles.heroLivePill}>
+                            <Text style={styles.heroLivePillText}>{countCaption}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={styles.heroTitle} numberOfLines={2}>
+                        {slide.title}
+                      </Text>
+                      <Text style={styles.heroSubtitle} numberOfLines={1}>
+                        {slide.subtitle}
+                      </Text>
+                      <View style={styles.heroCtaPill}>
+                        <Text style={styles.heroCtaText}>{slide.ctaLabel}</Text>
+                        <Icon name="arrow-right" size={13} color={semantic.color.textPrimary} />
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.heroIconBadge}>
-                    <Icon name={slide.icon} size={28} color={semantic.color.textInverse} />
+                    {meta.thumb ? (
+                      <View style={styles.heroPhotoFrame}>
+                        <Image
+                          source={{ uri: meta.thumb }}
+                          style={styles.heroPhoto}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.heroPhotoIconChip}>
+                          <Icon name={slide.icon} size={12} color={semantic.color.textInverse} />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.heroIconBadge}>
+                        <Icon name={slide.icon} size={26} color={semantic.color.textInverse} />
+                      </View>
+                    )}
                   </View>
-                </View>
-              </Pressable>
-            ))}
+                </Pressable>
+              );
+            })}
           </ScrollView>
 
           <View style={styles.heroDotsRow}>
@@ -806,51 +870,133 @@ export default function ListingsScreen() {
   ) : null;
 
   const isGridMode = viewMode === 'grid';
+  const isFilterTriggerActive = filterSheetOpen || activeFilterCount > 0;
 
   return (
     <SafeAreaView
       style={[styles.container, androidTopInset > 0 && { paddingTop: androidTopInset }]}
     >
-      {/* Signature Branded Terracotta Top Bar */}
-      <View style={styles.topHeader}>
-        <View style={styles.brandGroup}>
-          <View style={styles.brandMark}>
-            <Icon name="shopping-bag" size={15} color={semantic.color.accent} />
+      {/* Signature Pinned Terracotta Commerce Header (Shopee / Tiki / Lazada sticky dock) */}
+      <View style={styles.stickyHeaderShell}>
+        <View style={styles.topHeader}>
+          <View style={styles.brandGroup}>
+            <View style={styles.brandMark}>
+              <Icon name="shopping-bag" size={15} color={semantic.color.accent} />
+            </View>
+            <Text style={styles.brandTitle} accessibilityRole="header">
+              Chợ KTX
+            </Text>
           </View>
-          <Text style={styles.brandTitle} accessibilityRole="header">
-            Chợ KTX
-          </Text>
+
+          <View style={styles.headerRightGroup}>
+            <Pressable
+              testID="header-zone-picker"
+              onPress={() => setZoneSheetOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Chọn khu vực ĐHQG-HCM, hiện tại ${shortZoneLabel(activeZone)}`}
+              style={({ pressed }) => [styles.zonePill, pressed && styles.zonePillPressed]}
+            >
+              <Icon name="map-pin" size={12} color={semantic.color.textInverse} />
+              <Text style={styles.zonePillText} numberOfLines={1}>
+                {shortZoneLabel(activeZone)}
+              </Text>
+              <Icon name="chevron-down" size={13} color={semantic.color.textInverseMuted} />
+            </Pressable>
+
+            <Pressable
+              testID="listings-refresh-button"
+              onPress={handleRefresh}
+              disabled={effectiveLoading || refreshing}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Làm mới danh sách tin đăng"
+              style={({ pressed }) => [
+                styles.refreshBtn,
+                pressed && styles.refreshBtnPressed,
+                (effectiveLoading || refreshing) && styles.refreshBtnDisabled,
+              ]}
+            >
+              <Icon name="refresh-cw" size={16} color={semantic.color.textInverse} />
+            </Pressable>
+          </View>
         </View>
 
-        <View style={styles.headerRightGroup}>
-          <Pressable
-            testID="header-zone-picker"
-            onPress={() => setZoneSheetOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`Chọn khu vực ĐHQG-HCM, hiện tại ${shortZoneLabel(activeZone)}`}
-            style={({ pressed }) => [styles.zonePill, pressed && styles.zonePillPressed]}
-          >
-            <Icon name="map-pin" size={12} color={semantic.color.textInverse} />
-            <Text style={styles.zonePillText} numberOfLines={1}>
-              {shortZoneLabel(activeZone)}
-            </Text>
-            <Icon name="chevron-down" size={13} color={semantic.color.textInverseMuted} />
-          </Pressable>
+        <View style={styles.stickySearchRow} testID="sticky-search-dock">
+          <View style={styles.stickySearchField}>
+            <Pressable
+              testID="search-submit-button"
+              accessibilityRole="button"
+              accessibilityLabel="Tìm kiếm"
+              disabled={effectiveLoading}
+              hitSlop={6}
+              onPress={handleStickySearchSubmit}
+              style={({ pressed }) => [
+                styles.stickySearchIconBtn,
+                pressed && styles.zonePillPressed,
+                effectiveLoading && styles.refreshBtnDisabled,
+              ]}
+            >
+              <Icon name="search" size={16} color={semantic.color.accent} />
+            </Pressable>
+
+            <TextInput
+              testID="search-input"
+              accessibilityLabel="Tìm kiếm tin đăng"
+              placeholder="Tìm giáo trình, mã môn SE100, quạt, đèn..."
+              placeholderTextColor={semantic.color.textSecondary}
+              value={searchText}
+              onChangeText={setSearchText}
+              returnKeyType="search"
+              onSubmitEditing={handleStickySearchSubmit}
+              style={styles.stickySearchInput}
+            />
+
+            {searchText.length > 0 ? (
+              <Pressable
+                testID="clear-search-input"
+                accessibilityRole="button"
+                accessibilityLabel="Xóa từ khóa tìm kiếm"
+                hitSlop={8}
+                onPress={handleClearStickySearch}
+                style={({ pressed }) => [styles.stickyClearBtn, pressed && styles.zonePillPressed]}
+              >
+                <Icon name="x" size={13} color={semantic.color.textSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
 
           <Pressable
-            testID="listings-refresh-button"
-            onPress={handleRefresh}
-            disabled={effectiveLoading || refreshing}
-            hitSlop={8}
+            testID="toggle-advanced-filters"
             accessibilityRole="button"
-            accessibilityLabel="Làm mới danh sách tin đăng"
+            accessibilityLabel={
+              activeFilterCount > 0 ? `Lọc (${activeFilterCount} bộ lọc đang áp dụng)` : 'Lọc'
+            }
+            accessibilityState={{ expanded: filterSheetOpen }}
+            onPress={() => setFilterSheetOpen((prev) => !prev)}
             style={({ pressed }) => [
-              styles.refreshBtn,
-              pressed && styles.refreshBtnPressed,
-              (effectiveLoading || refreshing) && styles.refreshBtnDisabled,
+              styles.stickyFilterBtn,
+              isFilterTriggerActive && styles.stickyFilterBtnActive,
+              pressed && styles.zonePillPressed,
             ]}
           >
-            <Icon name="refresh-cw" size={16} color={semantic.color.textInverse} />
+            <Icon
+              name="sliders"
+              size={15}
+              color={isFilterTriggerActive ? semantic.color.accent : semantic.color.textInverse}
+            />
+            <Text
+              style={[
+                styles.stickyFilterLabel,
+                isFilterTriggerActive && styles.stickyFilterLabelActive,
+              ]}
+            >
+              Lọc
+            </Text>
+            {activeFilterCount > 0 ? (
+              <View style={styles.stickyFilterBadge} testID="active-filter-count-badge">
+                <Text style={styles.stickyFilterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
       </View>
@@ -970,14 +1116,98 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: semantic.color.accent,
   },
+  stickyHeaderShell: {
+    backgroundColor: semantic.color.accent,
+    paddingBottom: primitive.space[2.5],
+  },
   topHeader: {
-    height: 52,
+    height: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: semantic.spacing.pageX,
     backgroundColor: semantic.color.accent,
     gap: primitive.space[2],
+  },
+  stickySearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[1],
+    gap: primitive.space[2],
+  },
+  stickySearchField: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 40,
+    borderRadius: primitive.radius.lg,
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: primitive.space[2],
+    gap: primitive.space[1.5],
+    ...primitive.elevation.thumb,
+  },
+  stickySearchIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: primitive.radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickySearchInput: {
+    flex: 1,
+    minHeight: 38,
+    fontSize: 13.5,
+    color: semantic.color.textPrimary,
+    paddingVertical: primitive.space[1],
+  },
+  stickyClearBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgTrack,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickyFilterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+    paddingHorizontal: primitive.space[2.5],
+    borderRadius: primitive.radius.lg,
+    backgroundColor: semantic.color.inversePillBg,
+    borderWidth: 1,
+    borderColor: semantic.color.inversePillBorder,
+    gap: primitive.space[1.5],
+  },
+  stickyFilterBtnActive: {
+    backgroundColor: semantic.color.bgSurface,
+    borderColor: semantic.color.bgSurface,
+  },
+  stickyFilterLabel: {
+    ...semantic.type.label,
+    fontSize: 13,
+    color: semantic.color.textInverse,
+  },
+  stickyFilterLabelActive: {
+    color: semantic.color.accent,
+  },
+  stickyFilterBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accent,
+    paddingHorizontal: primitive.space[1],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickyFilterBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textInverse,
   },
   brandGroup: {
     flexDirection: 'row',
@@ -1064,7 +1294,7 @@ const styles = StyleSheet.create({
 
   // Hero Discovery Carousel
   heroSection: {
-    paddingTop: primitive.space[3],
+    paddingTop: primitive.space[2.5],
     paddingBottom: primitive.space[1],
   },
   heroScrollContent: {
@@ -1073,10 +1303,11 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     borderRadius: primitive.radius.xl,
-    padding: primitive.space[4],
+    paddingHorizontal: primitive.space[4],
+    paddingVertical: primitive.space[3],
     overflow: 'hidden',
     position: 'relative',
-    minHeight: 136,
+    minHeight: 118,
     justifyContent: 'center',
     ...primitive.elevation.floating,
   },
@@ -1107,47 +1338,93 @@ const styles = StyleSheet.create({
   },
   heroTextCol: {
     flex: 1,
-    gap: 4,
+    gap: 3,
+  },
+  heroEyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
   },
   heroEyebrow: {
     fontSize: 10,
     lineHeight: 14,
     fontWeight: primitive.fontWeight.bold,
-    letterSpacing: 1.1,
+    letterSpacing: 1.0,
     color: semantic.color.textInverseMuted,
   },
+  heroLivePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.inversePillBg,
+    borderWidth: 1,
+    borderColor: semantic.color.inversePillBorder,
+  },
+  heroLivePillText: {
+    fontSize: 9.5,
+    lineHeight: 12,
+    fontWeight: primitive.fontWeight.bold,
+    color: semantic.color.textInverse,
+    fontVariant: ['tabular-nums'],
+  },
   heroTitle: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: primitive.fontWeight.bold,
     color: semantic.color.textInverse,
     letterSpacing: -0.2,
   },
   heroSubtitle: {
-    fontSize: 12.5,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     color: semantic.color.textInverseMuted,
   },
   heroCtaPill: {
     alignSelf: 'flex-start',
-    marginTop: primitive.space[1.5],
+    marginTop: primitive.space[1],
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: semantic.color.bgSurface,
-    paddingHorizontal: primitive.space[3],
-    paddingVertical: 5,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: 4,
     borderRadius: primitive.radius.full,
   },
   heroCtaText: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11.5,
+    lineHeight: 15,
     fontWeight: primitive.fontWeight.bold,
     color: semantic.color.textPrimary,
   },
+  heroPhotoFrame: {
+    width: 74,
+    height: 74,
+    borderRadius: primitive.radius.lg,
+    borderWidth: 2,
+    borderColor: semantic.color.inversePillBorder,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: semantic.color.inversePillBg,
+    ...primitive.elevation.thumb,
+  },
+  heroPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  heroPhotoIconChip: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    width: 22,
+    height: 22,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.overlayDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heroIconBadge: {
-    width: 54,
-    height: 54,
+    width: 52,
+    height: 52,
     borderRadius: primitive.radius.xl,
     backgroundColor: semantic.color.inversePillBg,
     borderWidth: 1,
@@ -1160,7 +1437,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingTop: primitive.space[2],
+    paddingTop: primitive.space[1.5],
   },
   heroDot: {
     width: 6,
@@ -1175,9 +1452,9 @@ const styles = StyleSheet.create({
 
   // Horizontal Spotlight Shelf
   spotlightSection: {
-    marginTop: primitive.space[3],
+    marginTop: primitive.space[2],
     backgroundColor: semantic.color.bgSurface,
-    paddingVertical: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: semantic.color.borderHairline,
@@ -1187,7 +1464,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: semantic.spacing.pageX,
-    marginBottom: primitive.space[2.5],
+    marginBottom: primitive.space[2],
   },
   spotlightTitleGroup: {
     flexDirection: 'row',
@@ -1196,7 +1473,7 @@ const styles = StyleSheet.create({
   },
   spotlightTitle: {
     ...semantic.type.sectionTitle,
-    fontSize: 15.5,
+    fontSize: 15,
   },
   spotlightCaption: {
     ...semantic.type.micro,
@@ -1204,10 +1481,10 @@ const styles = StyleSheet.create({
   },
   spotlightScrollContent: {
     paddingHorizontal: semantic.spacing.pageX,
-    gap: primitive.space[2.5],
+    gap: primitive.space[2],
   },
   spotlightCard: {
-    width: 146,
+    width: 136,
     borderRadius: primitive.radius.lg,
     backgroundColor: semantic.color.bgSurface,
     borderWidth: 1,
@@ -1216,7 +1493,7 @@ const styles = StyleSheet.create({
   },
   spotlightPhotoWrap: {
     width: '100%',
-    height: 108,
+    height: 92,
     backgroundColor: semantic.color.bgSubtle,
     position: 'relative',
   },

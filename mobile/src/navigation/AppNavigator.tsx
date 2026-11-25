@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, type NavigationState } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import type { RootStack } from '../navigation';
 import ListingsScreen from '../screens/ListingsScreen';
@@ -16,11 +17,34 @@ import InventoryFormScreen from '../screens/InventoryFormScreen';
 import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
+const TERRACOTTA_HEADER_ROUTES = new Set(['Listings', 'Profile']);
+
+function getActiveRouteName(state: NavigationState | undefined): string {
+  if (!state || !state.routes || state.routes.length === 0) {
+    return 'Listings';
+  }
+  const index = typeof state.index === 'number' ? state.index : state.routes.length - 1;
+  const route = state.routes[index];
+  if (route?.state && 'routes' in route.state) {
+    return getActiveRouteName(route.state as NavigationState);
+  }
+  return route?.name ?? 'Listings';
+}
 
 export default function AppNavigator() {
+  const [activeRoute, setActiveRoute] = useState<string>('Listings');
+  const hasTerracottaHeader = TERRACOTTA_HEADER_ROUTES.has(activeRoute);
+
   return (
-    <NavigationContainer>
-      <StatusBar style="dark" />
+    <NavigationContainer
+      onStateChange={(state) => {
+        setActiveRoute(getActiveRouteName(state));
+      }}
+    >
+      <StatusBar
+        style={hasTerracottaHeader ? 'light' : 'dark'}
+        backgroundColor={hasTerracottaHeader ? semantic.color.accent : semantic.color.bgSurface}
+      />
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: semantic.color.bgSurface },

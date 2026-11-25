@@ -669,6 +669,101 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
       expect(mockedApi).toHaveBeenCalledWith(expect.stringContaining('freeOnly=true'));
     });
   });
+
+  test('UC-19 3.1 Step 6: displays item condition on both 2-column grid cards and 1-column list cards', async () => {
+    setupDefaultApiMock();
+    render(<ListingsScreen />);
+
+    expect(await screen.findByText('Tìm thấy 2 tin đăng')).toBeTruthy();
+    expect(screen.getByTestId('listing-condition-listing-1').props.children).toBe(
+      'Mới 95%, không viết vẽ',
+    );
+    expect(screen.getByTestId('listing-condition-listing-2').props.children).toBe(
+      'Còn sáng tốt 3 chế độ',
+    );
+
+    // Switch to 1-column list view and verify condition remains visible
+    fireEvent.press(screen.getByTestId('view-mode-list'));
+    expect(screen.getByTestId('listing-condition-listing-1').props.children).toBe(
+      'Mới 95%, không viết vẽ',
+    );
+    expect(screen.getByTestId('listing-condition-listing-2').props.children).toBe(
+      'Còn sáng tốt 3 chế độ',
+    );
+  });
+
+  test('preserves typed search query when tapping category, quick sort, or quick filter pills without pressing search first', async () => {
+    setupDefaultApiMock();
+    render(<ListingsScreen />);
+    await screen.findByText('Tìm thấy 2 tin đăng');
+
+    const input = screen.getByTestId('search-input');
+    fireEvent.changeText(input, 'giáo trình');
+
+    // Tapping a category chip must keep q=giáo+trình in outgoing query AND in input field
+    fireEvent.press(screen.getByTestId('category-chip-GIAO_TRINH'));
+    await waitFor(() => {
+      const listingCalls = mockedApi.mock.calls
+        .map((call) => String(call[0]))
+        .filter((path) => path.startsWith('/listings?'));
+      const latest = listingCalls[listingCalls.length - 1];
+      expect(latest).toContain('categoryId=GIAO_TRINH');
+      expect(latest).toContain('q=');
+      expect(decodeURIComponent(latest.replace(/\+/g, ' '))).toContain('q=giáo trình');
+    });
+    expect(screen.getByTestId('search-input').props.value).toBe('giáo trình');
+
+    // Tapping quick sort pill also keeps q
+    fireEvent.press(screen.getByTestId('quick-sort-price_asc'));
+    await waitFor(() => {
+      const listingCalls = mockedApi.mock.calls
+        .map((call) => String(call[0]))
+        .filter((path) => path.startsWith('/listings?'));
+      const latest = listingCalls[listingCalls.length - 1];
+      expect(latest).toContain('sort=price_asc');
+      expect(decodeURIComponent(latest.replace(/\+/g, ' '))).toContain('q=giáo trình');
+    });
+  });
+
+  test('FR-06: supports minPrice/maxPrice range filter with presets and blocks minPrice > maxPrice', async () => {
+    setupDefaultApiMock();
+    render(<ListingsScreen />);
+    await screen.findByText('Tìm thấy 2 tin đăng');
+
+    fireEvent.press(screen.getByTestId('toggle-advanced-filters'));
+    expect(screen.getByTestId('filter-min-price')).toBeTruthy();
+    expect(screen.getByTestId('filter-max-price')).toBeTruthy();
+
+    // Invalid range: min > max shows validation error and does not call API
+    const callsBeforeInvalid = mockedApi.mock.calls.length;
+    fireEvent.changeText(screen.getByTestId('filter-min-price'), '300000');
+    fireEvent.changeText(screen.getByTestId('filter-max-price'), '100000');
+    fireEvent.press(screen.getByTestId('apply-filters-button'));
+    expect(screen.getByText('Giá tối thiểu không được lớn hơn giá tối đa.')).toBeTruthy();
+    expect(mockedApi.mock.calls.length).toBe(callsBeforeInvalid);
+
+    // Quick range preset fills valid min/max and applies cleanly
+    fireEvent.press(screen.getByTestId('filter-price-preset-50000-200000'));
+    fireEvent.press(screen.getByTestId('apply-filters-button'));
+
+    await waitFor(() => {
+      const listingCalls = mockedApi.mock.calls
+        .map((call) => String(call[0]))
+        .filter((path) => path.startsWith('/listings?'));
+      const latest = listingCalls[listingCalls.length - 1];
+      expect(latest).toContain('minPrice=50000');
+      expect(latest).toContain('maxPrice=200000');
+    });
+  });
+
+  test('tapping always-visible Gần nhất pill without a selected zone opens campus zone picker', async () => {
+    setupDefaultApiMock();
+    render(<ListingsScreen />);
+    await screen.findByText('Tìm thấy 2 tin đăng');
+
+    fireEvent.press(screen.getByTestId('quick-sort-distance_asc'));
+    expect(screen.getByTestId('campus-zone-sheet')).toBeTruthy();
+  });
 });
 
 describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alternatives)', () => {
@@ -1069,8 +1164,130 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     fireEvent.press(screen.getByTestId('lightbox-next'));
     expect(screen.getByTestId('lightbox-counter').props.children.join('')).toBe('Ảnh 2 / 3');
 
+    // Bottom thumbnail strip jumps directly to 3rd image
+    fireEvent.press(screen.getByTestId('lightbox-thumb-2'));
+    expect(screen.getByTestId('lightbox-counter').props.children.join('')).toBe('Ảnh 3 / 3');
+
     fireEvent.press(screen.getByTestId('lightbox-close-button'));
     expect(screen.queryByTestId('photo-lightbox-modal')).toBeNull();
+  });
+
+  test('PDP clickable category and course code shortcuts filter discovery and navigate to Listings', async () => {
+    useDiscovery.setState({ categories: sampleCategories, categoryTree: sampleCategoryTree });
+    mockRouteParams.id = 'listing-1';
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path.startsWith('/listings/listing-1')) return sampleDetail1;
+      if (path.startsWith('/listings')) {
+        return { items: [sampleListing1], page: 0, size: 20, totalElements: 1, totalPages: 1 };
+      }
+      return [];
+    });
+
+    render(<ListingScreen />);
+    await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú');
+
+    fireEvent.press(screen.getByTestId('listing-course-shortcut'));
+    expect(useDiscovery.getState().filters.courseCode).toBe('SE100');
+    expect(mockNavigate).toHaveBeenCalledWith('Listings');
+
+    mockNavigate.mockClear();
+    fireEvent.press(screen.getByTestId('listing-category-shortcut'));
+    expect(useDiscovery.getState().filters.categoryId).toBe('GT_CNTT');
+    expect(mockNavigate).toHaveBeenCalledWith('Listings');
+  });
+
+  test('UC-20 Alt 1: owner ActionSheet supports republishing DA_RUT and deleting directly from detail screen', async () => {
+    useSession.setState({ token: 'seller-jwt', user: sellerUser, loading: false });
+    mockRouteParams.id = 'listing-1';
+    const withdrawnOwnerDetail: ListingDetail = {
+      ...sampleDetail1,
+      status: 'DA_RUT',
+      version: 2,
+      viewer: {
+        isOwner: true,
+        canEdit: true,
+        canWithdraw: false,
+        canDelete: true,
+        canPublish: true,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: false,
+        canMessage: false,
+      },
+    };
+    const publishedOwnerDetail: ListingDetail = {
+      ...withdrawnOwnerDetail,
+      status: 'CONG_KHAI',
+      version: 3,
+      viewer: {
+        ...withdrawnOwnerDetail.viewer,
+        canWithdraw: true,
+        canPublish: false,
+      },
+    };
+
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/listings/listing-1/publish' && init?.method === 'POST') {
+        return {
+          listing: publishedOwnerDetail,
+          quota: {
+            reputationScore: 125,
+            activeCount: 1,
+            limit: 10,
+            remaining: 9,
+            canPublish: true,
+            highTierThreshold: 120,
+            standardLimit: 5,
+            highTierLimit: 10,
+          },
+        };
+      }
+      if (path === '/listings/listing-1?version=3' && init?.method === 'DELETE') {
+        return undefined;
+      }
+      if (path === '/listings/quota') {
+        return {
+          reputationScore: 125,
+          activeCount: 0,
+          limit: 10,
+          remaining: 10,
+          canPublish: true,
+          highTierThreshold: 120,
+          standardLimit: 5,
+          highTierLimit: 10,
+        };
+      }
+      if (path.startsWith('/listings/listing-1')) {
+        return mockedApi.mock.calls.some((c) => String(c[0]).includes('/publish'))
+          ? publishedOwnerDetail
+          : withdrawnOwnerDetail;
+      }
+      return [];
+    });
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+      const destructive = buttons?.find((b) => b.style === 'destructive');
+      destructive?.onPress?.();
+    });
+
+    try {
+      render(<ListingScreen />);
+      await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú');
+
+      // Open owner ActionSheet -> Republish DA_RUT
+      fireEvent.press(screen.getByTestId('listing-more-button'));
+      fireEvent.press(screen.getByTestId('action-sheet-publish'));
+      expect(await screen.findByTestId('owner-action-notice')).toBeTruthy();
+
+      // Open owner ActionSheet -> Delete listing -> navigates to MyListings
+      fireEvent.press(screen.getByTestId('listing-more-button'));
+      fireEvent.press(screen.getByTestId('action-sheet-delete'));
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('MyListings');
+      });
+    } finally {
+      alertSpy.mockRestore();
+    }
   });
 
   test('UC-20 Alt 1: owner can directly withdraw listing from detail screen with confirmation', async () => {

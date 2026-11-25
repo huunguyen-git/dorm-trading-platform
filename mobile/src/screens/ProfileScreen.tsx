@@ -1,10 +1,8 @@
 import { useCallback, useContext, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -90,36 +88,6 @@ export default function ProfileScreen() {
   useEffect(() => {
     syncQuota();
   }, [syncQuota]);
-
-  useEffect(() => {
-    const applyLightStatus = () => {
-      if (typeof StatusBar.setBarStyle === 'function') {
-        StatusBar.setBarStyle('light-content', true);
-      }
-      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
-        StatusBar.setBackgroundColor(semantic.color.accent, true);
-      }
-    };
-    const restoreDarkStatus = () => {
-      if (typeof StatusBar.setBarStyle === 'function') {
-        StatusBar.setBarStyle('dark-content', true);
-      }
-      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
-        StatusBar.setBackgroundColor(semantic.color.bgSurface, true);
-      }
-    };
-    applyLightStatus();
-    if (typeof nav?.addListener !== 'function') {
-      return restoreDarkStatus;
-    }
-    const unsubFocus = nav.addListener('focus', applyLightStatus);
-    const unsubBlur = nav.addListener('blur', restoreDarkStatus);
-    return () => {
-      unsubFocus();
-      unsubBlur();
-      restoreDarkStatus();
-    };
-  }, [nav]);
 
   useEffect(() => {
     if (typeof nav?.addListener !== 'function') return;

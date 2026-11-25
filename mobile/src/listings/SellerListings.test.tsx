@@ -1390,4 +1390,142 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
     fireEvent.press(screen.getByTestId('price-preset-100000'));
     expect(screen.getByTestId('listing-price-input').props.value).toBe('100000');
   });
+
+  test('sellerStore loadMyListings ignores stale out-of-order responses when rapidly switching tabs', async () => {
+    let resolveTabA!: (val: {
+      items: ListingSummary[];
+      page: number;
+      size: number;
+      totalElements: number;
+      totalPages: number;
+      quota: ListingQuota;
+    }) => void;
+    let resolveTabB!: (val: {
+      items: ListingSummary[];
+      page: number;
+      size: number;
+      totalElements: number;
+      totalPages: number;
+      quota: ListingQuota;
+    }) => void;
+
+    mockedSellerApi.fetchMyListings
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveTabA = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveTabB = resolve;
+          }),
+      );
+
+    const pA = useSellerListings.getState().loadMyListings({ status: 'CONG_KHAI' });
+    const pB = useSellerListings.getState().loadMyListings({ status: 'NHAP' });
+
+    // Tab B resolves first, then stale Tab A resolves later
+    resolveTabB({
+      items: [draftListing],
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+      quota: sampleQuota,
+    });
+    await pB;
+
+    resolveTabA({
+      items: [pubListing],
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+      quota: sampleQuota,
+    });
+    await pA;
+
+    expect(useSellerListings.getState().myListings).toHaveLength(1);
+    expect(useSellerListings.getState().myListings[0].id).toBe('tin-draft');
+    expect(useSellerListings.getState().statusFilter).toBe('NHAP');
+  });
+
+  test('MyListingsScreen switches KPI label when filtered and disables HET_HAN renew at 5/5 quota while keeping CONG_KHAI renewal enabled', async () => {
+    const expiredListing = makeListingSummary({
+      id: 'tin-expired-quota',
+      title: 'Bàn gấp hết hạn khi đủ hạn mức',
+      status: 'HET_HAN',
+      version: 2,
+    });
+    const fullQuota: ListingQuota = {
+      ...sampleQuota,
+      activeCount: 5,
+      remaining: 0,
+      canPublish: false,
+    };
+
+    mockedSellerApi.fetchMyListings
+      .mockResolvedValueOnce({
+        items: [expiringListing, expiredListing],
+        page: 0,
+        size: 20,
+        totalElements: 2,
+        totalPages: 1,
+        quota: fullQuota,
+      })
+      .mockResolvedValueOnce({
+        items: [],
+        page: 0,
+        size: 20,
+        totalElements: 0,
+        totalPages: 0,
+        quota: fullQuota,
+      });
+
+    render(<MyListingsScreen />);
+
+    // Unfiltered ALL tab shows "Tổng tin"
+    expect(await screen.findByText('Tổng tin')).toBeTruthy();
+
+    // Active CONG_KHAI listing nearing expiry can still be renewed at 5/5 (does not consume new slot)
+    expect(
+      screen.getByTestId('renew-banner-btn-tin-expiring').props.accessibilityState?.disabled,
+    ).not.toBe(true);
+
+    // Expired HET_HAN listing cannot be renewed when quota is 5/5 (would reopen a new active slot)
+    expect(
+      screen.getByTestId('my-listing-renew-tin-expired-quota').props.accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('my-listing-more-tin-expired-quota'));
+    expect(
+      screen.getByTestId('action-sheet-renew-tin-expired-quota').props.accessibilityState.disabled,
+    ).toBe(true);
+    expect(
+      screen.getByTestId('action-sheet-publish-tin-expired-quota').props.accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('my-listing-action-sheet-cancel'));
+
+    // Switching to NHAP filter changes middle KPI label to "Trong mục này"
+    fireEvent.press(screen.getByTestId('filter-status-NHAP'));
+    expect(await screen.findByText('Trong mục này')).toBeTruthy();
+  });
+
+  test('CreateListingScreen combo readiness step requires 2 items before counting Đồ vật as done', async () => {
+    render(<CreateListingScreen />);
+    await screen.findByTestId('inventory-picker-item-item-1');
+
+    // Switch to combo mode
+    fireEvent.press(screen.getByTestId('listing-mode-combo'));
+    expect(screen.getByText('0/4 mục')).toBeTruthy();
+
+    // Selecting 1 item in combo mode must NOT mark Đồ vật complete
+    fireEvent.press(screen.getByTestId('inventory-picker-item-item-1'));
+    expect(screen.getByText('0/4 mục')).toBeTruthy();
+
+    // Selecting 2nd item completes the Đồ vật step
+    fireEvent.press(screen.getByTestId('inventory-picker-item-item-2'));
+    expect(screen.getByText('1/4 mục')).toBeTruthy();
+  });
 });

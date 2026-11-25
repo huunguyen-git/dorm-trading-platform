@@ -332,11 +332,13 @@ export default function MyListingsScreen() {
     }
 
     if (canRenew) {
+      const renewBlockedByQuota =
+        item.status === 'HET_HAN' && Boolean(quota && !quota.canPublish);
       options.push({
         key: 'renew',
         label: 'Gia hạn +30 ngày',
         icon: 'refresh-cw',
-        disabled: isBusy,
+        disabled: isBusy || renewBlockedByQuota,
         testID: `action-sheet-renew-${item.id}`,
         onPress: () => void handleRenew(item),
       });
@@ -482,7 +484,9 @@ export default function MyListingsScreen() {
             </View>
             <View style={styles.metricTile}>
               <Text style={styles.metricValue}>{totalElements}</Text>
-              <Text style={styles.metricLabel}>Tổng tin</Text>
+              <Text style={styles.metricLabel}>
+                {statusFilter ? 'Trong mục này' : 'Tổng tin'}
+              </Text>
             </View>
             <View style={styles.metricTile}>
               <Text
@@ -605,6 +609,7 @@ export default function MyListingsScreen() {
           const locationLabel = item.locationName || item.locationText || '';
           const metaLine = [locationLabel, expiryMeta, item.courseCode].filter(Boolean).join(' · ');
           const publishDisabled = isBusy || Boolean(quota && !quota.canPublish);
+          const renewExpiredDisabled = isBusy || Boolean(quota && !quota.canPublish);
 
           return (
             <View style={styles.rowContainer} testID={`my-listing-card-${item.id}`}>
@@ -725,13 +730,13 @@ export default function MyListingsScreen() {
                       testID={`my-listing-renew-${item.id}`}
                       accessibilityRole="button"
                       accessibilityLabel={`Gia hạn ${item.title}`}
-                      accessibilityState={{ disabled: isBusy }}
-                      disabled={isBusy}
+                      accessibilityState={{ disabled: renewExpiredDisabled }}
+                      disabled={renewExpiredDisabled}
                       onPress={() => void handleRenew(item)}
                       style={({ pressed }) => [
                         styles.inlinePrimaryBtn,
-                        isBusy && styles.disabledState,
-                        pressed && !isBusy && styles.pressedState,
+                        renewExpiredDisabled && styles.disabledState,
+                        pressed && !renewExpiredDisabled && styles.pressedState,
                       ]}
                     >
                       <Text style={styles.inlinePrimaryText}>Gia hạn</Text>

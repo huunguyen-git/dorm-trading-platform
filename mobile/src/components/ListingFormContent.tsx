@@ -458,7 +458,11 @@ export default function ListingFormContent({
 
   const readinessSteps = [
     { key: 'photos', label: 'Ảnh', done: images.length > 0 },
-    { key: 'items', label: 'Đồ vật', done: selectedItemIds.length > 0 },
+    {
+      key: 'items',
+      label: 'Đồ vật',
+      done: pickerMode === 'combo' ? selectedItemIds.length >= 2 : selectedItemIds.length > 0,
+    },
     {
       key: 'details',
       label: 'Thông tin',
@@ -476,6 +480,7 @@ export default function ListingFormContent({
     },
   ];
   const readyCount = readinessSteps.filter((s) => s.done).length;
+  const readyPercent = Math.round((readyCount / readinessSteps.length) * 100);
 
   const conditionPresets = ['Mới 99%', 'Mới 95%', 'Mới 90%', 'Dùng tốt'];
   const pricePresets = [
@@ -609,6 +614,15 @@ export default function ListingFormContent({
                     ? 'Sẵn sàng công khai'
                     : `${readyCount}/${readinessSteps.length} mục`}
                 </Text>
+              </View>
+              <View style={styles.readinessTrack}>
+                <View
+                  style={[
+                    styles.readinessFill,
+                    { width: `${readyPercent}%` },
+                    readyCount === readinessSteps.length && styles.readinessFillDone,
+                  ]}
+                />
               </View>
               <View style={styles.readinessRow}>
                 {readinessSteps.map((step) => (
@@ -1329,6 +1343,20 @@ const styles = StyleSheet.create({
   },
   readinessCountDone: {
     color: semantic.color.freeFg,
+  },
+  readinessTrack: {
+    height: 4,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.borderHairline,
+    overflow: 'hidden',
+  },
+  readinessFill: {
+    height: '100%',
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accent,
+  },
+  readinessFillDone: {
+    backgroundColor: semantic.color.freeFg,
   },
   readinessRow: {
     flexDirection: 'row',

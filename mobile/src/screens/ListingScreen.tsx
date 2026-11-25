@@ -7,6 +7,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -113,6 +114,7 @@ export default function ListingScreen() {
 
   const listingId = params?.id ?? previewSummary?.id ?? '';
   const carouselRef = useRef<ScrollView | null>(null);
+  const lightboxScrollRef = useRef<ScrollView | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [reputationSheetOpen, setReputationSheetOpen] = useState(false);
@@ -187,8 +189,33 @@ export default function ListingScreen() {
       const wrapped = ((nextIndex % images.length) + images.length) % images.length;
       setActivePhotoIndex(wrapped);
       carouselRef.current?.scrollTo({ x: wrapped * stageWidth, animated: true });
+      lightboxScrollRef.current?.scrollTo({ x: wrapped * stageWidth, animated: true });
     },
     [images.length, stageWidth],
+  );
+
+  const openLightbox = useCallback(() => {
+    setLightboxOpen(true);
+    setTimeout(() => {
+      lightboxScrollRef.current?.scrollTo({ x: activePhotoIndex * stageWidth, animated: false });
+    }, 0);
+  }, [activePhotoIndex, stageWidth]);
+
+  const handleFilterShortcut = useCallback(
+    (partial: { categoryId?: string; courseCode?: string }) => {
+      const discovery = useDiscovery.getState();
+      void discovery.search({
+        resetPage: true,
+        filters: {
+          sort: 'newest',
+          page: 0,
+          size: discovery.size || 20,
+          ...partial,
+        },
+      });
+      navigation.navigate('Listings');
+    },
+    [navigation],
   );
 
   const handleCarouselScrollEnd = useCallback(
@@ -277,7 +304,8 @@ export default function ListingScreen() {
   const hasTextbookInfo = Boolean(display.courseCode || display.courseName || display.author);
   const postedDate = formatShortDate(display.publishedAt ?? display.createdAt);
   const locationZoneName = display.locationName ?? display.locationCode ?? 'ĐHQG-HCM';
-  const comboItemCount = Math.max(2, detail?.items.length || display.itemCount);
+  const actualItemCount = detail ? detail.items.length : display.itemCount;
+  const comboItemCount = actualItemCount > 0 ? actualItemCount : 2;
   const showUrgentStatusBadge = display.status !== 'CONG_KHAI';
 
   const canOwnerEdit = detail
@@ -286,6 +314,8 @@ export default function ListingScreen() {
   const canOwnerWithdraw = detail
     ? detail.viewer.canWithdraw
     : display.status === 'CONG_KHAI' || display.status === 'CHO_DUYET';
+  const canOwnerPublish = Boolean(detail?.viewer.canPublish);
+  const canOwnerDelete = Boolean(detail?.viewer.canDelete);
   const canOwnerRenew = Boolean(
     detail?.viewer.canRenew &&
       ((display.status === 'CONG_KHAI' && display.renewalReminderDue) ||
@@ -349,6 +379,63 @@ export default function ListingScreen() {
           text: 'Rút tin',
           style: 'destructive',
           onPress: () => void performOwnerWithdraw(),
+        },
+      ],
+    );
+  };
+
+  const handleOwnerPublishPress = async () => {
+    if (!canOwnerPublish || ownerBusy) return;
+    setOwnerBusy(true);
+    setOwnerNotice('');
+    setOwnerError('');
+    try {
+      await useSellerListings.getState().publish(display.id, display.version);
+      await loadDetail(display.id);
+      setOwnerNotice('Đã công khai tin đăng thành công.');
+    } catch (err) {
+      if (!isRestrictedError(err)) {
+        const parsed = extractApiError(err, 'Không thể công khai tin đăng.');
+        setOwnerError(parsed.message);
+      }
+    } finally {
+      setOwnerBusy(false);
+    }
+  };
+
+  const performOwnerDelete = async () => {
+    if (!display || ownerBusy) return;
+    setOwnerBusy(true);
+    setOwnerNotice('');
+    setOwnerError('');
+    try {
+      await useSellerListings.getState().remove(display.id, display.version);
+      if (typeof navigation.replace === 'function') {
+        navigation.replace('MyListings');
+      } else {
+        navigation.navigate('MyListings');
+      }
+    } catch (err) {
+      if (!isRestrictedError(err)) {
+        const parsed = extractApiError(err, 'Không thể xóa tin đăng.');
+        setOwnerError(parsed.message);
+      }
+    } finally {
+      setOwnerBusy(false);
+    }
+  };
+
+  const handleOwnerDeletePress = () => {
+    if (!canOwnerDelete || ownerBusy) return;
+    Alert.alert(
+      'Xác nhận xóa tin',
+      `Bạn có chắc chắn muốn xóa vĩnh viễn tin "${display.title}"? Các liên kết với Kho đồ cá nhân sẽ được gỡ bỏ.`,
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Xóa tin',
+          style: 'destructive',
+          onPress: () => void performOwnerDelete(),
         },
       ],
     );
@@ -445,6 +532,18 @@ export default function ListingScreen() {
           onPress: () => navigation.navigate('EditListing', { id: display.id }),
           testID: 'action-sheet-edit',
         },
+        ...(canOwnerPublish
+          ? [
+              {
+                key: 'publish',
+                label: display.status === 'NHAP' ? 'Công khai' : 'Công khai lại',
+                icon: 'send' as const,
+                disabled: ownerBusy,
+                onPress: () => void handleOwnerPublishPress(),
+                testID: 'action-sheet-publish',
+              },
+            ]
+          : []),
         ...(canOwnerRenew
           ? [
               {
@@ -467,6 +566,19 @@ export default function ListingScreen() {
                 disabled: ownerBusy,
                 onPress: handleOwnerWithdrawPress,
                 testID: 'action-sheet-withdraw',
+              },
+            ]
+          : []),
+        ...(canOwnerDelete
+          ? [
+              {
+                key: 'delete',
+                label: 'Xóa tin',
+                icon: 'trash-2' as const,
+                destructive: true,
+                disabled: ownerBusy,
+                onPress: handleOwnerDeletePress,
+                testID: 'action-sheet-delete',
               },
             ]
           : []),
@@ -567,7 +679,7 @@ export default function ListingScreen() {
                         testID={index === activePhotoIndex ? 'gallery-zoom-trigger' : undefined}
                         accessibilityRole="button"
                         accessibilityLabel={`Xem ảnh lớn ${index + 1}/${images.length}`}
-                        onPress={() => setLightboxOpen(true)}
+                        onPress={openLightbox}
                       >
                         <Image
                           testID={index === activePhotoIndex ? 'gallery-main-image' : undefined}
@@ -584,7 +696,7 @@ export default function ListingScreen() {
                     testID="gallery-zoom-trigger"
                     accessibilityRole="button"
                     accessibilityLabel="Xem ảnh phóng to"
-                    onPress={() => setLightboxOpen(true)}
+                    onPress={openLightbox}
                   >
                     <Image
                       testID="gallery-main-image"
@@ -609,7 +721,7 @@ export default function ListingScreen() {
 
                 <Pressable
                   testID="gallery-lightbox-button"
-                  onPress={() => setLightboxOpen(true)}
+                  onPress={openLightbox}
                   hitSlop={6}
                   accessibilityRole="button"
                   accessibilityLabel="Phóng to ảnh"
@@ -738,15 +850,44 @@ export default function ListingScreen() {
           {categoryBreadcrumb || postedDate ? (
             <View style={styles.breadcrumbRow}>
               {categoryBreadcrumb ? (
-                <Text style={styles.breadcrumbText} testID="listing-category">
-                  Danh mục: {categoryBreadcrumb}
-                </Text>
+                display.categoryId ? (
+                  <Pressable
+                    testID="listing-category-shortcut"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Xem thêm tin trong danh mục ${categoryBreadcrumb}`}
+                    onPress={() => handleFilterShortcut({ categoryId: display.categoryId! })}
+                    style={({ pressed }) => [pressed && styles.pressedControl]}
+                  >
+                    <Text style={styles.breadcrumbLink} testID="listing-category">
+                      Danh mục: {categoryBreadcrumb}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.breadcrumbText} testID="listing-category">
+                    Danh mục: {categoryBreadcrumb}
+                  </Text>
+                )
               ) : null}
               {categoryBreadcrumb && postedDate ? (
                 <Text style={styles.breadcrumbDot}>·</Text>
               ) : null}
               {postedDate ? (
                 <Text style={styles.breadcrumbText}>Đăng ngày: {postedDate}</Text>
+              ) : null}
+              {display.courseCode ? (
+                <Pressable
+                  testID="listing-course-shortcut"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Tìm tin cùng mã môn ${display.courseCode}`}
+                  onPress={() => handleFilterShortcut({ courseCode: display.courseCode! })}
+                  style={({ pressed }) => [
+                    styles.courseShortcutPill,
+                    pressed && styles.pressedControl,
+                  ]}
+                >
+                  <Icon name="book-open" size={11} color={semantic.color.accent} />
+                  <Text style={styles.courseShortcutText}>{display.courseCode}</Text>
+                </Pressable>
               ) : null}
             </View>
           ) : null}
@@ -1174,15 +1315,17 @@ export default function ListingScreen() {
         )}
       </View>
 
-      {/* Full-Screen Photo Lightbox Modal */}
+      {/* Swipeable Full-Screen Photo Lightbox Modal with Thumbnail Strip */}
       {lightboxOpen && images.length > 0 ? (
         <Modal
           visible={lightboxOpen}
           transparent
+          statusBarTranslucent
           animationType="fade"
           onRequestClose={() => setLightboxOpen(false)}
         >
           <View style={styles.lightboxBackdrop} testID="photo-lightbox-modal">
+            <StatusBar barStyle="light-content" backgroundColor={semantic.color.lightboxBg} />
             <View
               style={[
                 styles.lightboxHeader,
@@ -1205,12 +1348,26 @@ export default function ListingScreen() {
             </View>
 
             <View style={styles.lightboxStage}>
-              <Image
-                source={{ uri: images[activePhotoIndex] ?? images[0] }}
-                style={{ width: stageWidth, height: stageWidth * 1.1 }}
-                resizeMode="contain"
-                accessibilityLabel={`${display.title} - ảnh phóng to ${activePhotoIndex + 1}`}
-              />
+              <ScrollView
+                ref={lightboxScrollRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={handleCarouselScrollEnd}
+                scrollEventThrottle={16}
+                contentContainerStyle={styles.lightboxScrollContent}
+              >
+                {images.map((uri, index) => (
+                  <View key={`lb-${uri}-${index}`} style={[styles.lightboxSlide, { width: stageWidth }]}>
+                    <Image
+                      source={{ uri }}
+                      style={{ width: stageWidth, height: stageWidth * 1.05 }}
+                      resizeMode="contain"
+                      accessibilityLabel={`${display.title} - ảnh phóng to ${index + 1}`}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
 
               {images.length > 1 ? (
                 <>
@@ -1247,6 +1404,32 @@ export default function ListingScreen() {
             </View>
 
             <View style={[styles.lightboxFooter, { paddingBottom: stickyBottomPad }]}>
+              {images.length > 1 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.lightboxThumbStrip}
+                >
+                  {images.map((uri, index) => {
+                    const active = index === activePhotoIndex;
+                    return (
+                      <Pressable
+                        key={`lb-thumb-${uri}-${index}`}
+                        testID={`lightbox-thumb-${index}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Xem ảnh ${index + 1}`}
+                        onPress={() => goToPhoto(index)}
+                        style={[
+                          styles.lightboxThumbWrap,
+                          active && styles.lightboxThumbWrapActive,
+                        ]}
+                      >
+                        <Image source={{ uri }} style={styles.lightboxThumbImg} resizeMode="cover" />
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
               <Text style={styles.lightboxTitle} numberOfLines={2}>
                 {display.title}
               </Text>
@@ -1808,16 +1991,17 @@ const styles = StyleSheet.create({
   },
   ownerManageBtn: {
     flex: 1,
+    paddingHorizontal: primitive.space[2.5],
   },
   withdrawBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: primitive.space[1.5],
+    gap: 5,
     minHeight: component.button.minHeight,
     borderRadius: component.button.radius,
     backgroundColor: semantic.color.dangerSoft,
-    paddingHorizontal: primitive.space[3],
+    paddingHorizontal: primitive.space[2.5],
   },
   withdrawBtnText: {
     fontSize: primitive.fontSize.sm,
@@ -1825,13 +2009,36 @@ const styles = StyleSheet.create({
     color: semantic.color.danger,
   },
   ownerEditBtn: {
-    flex: 1.15,
+    flex: 1.1,
+    paddingHorizontal: primitive.space[3],
   },
   offerBtn: {
     paddingHorizontal: primitive.space[3],
   },
   reserveBtn: {
     flex: 1,
+  },
+  breadcrumbLink: {
+    ...semantic.type.caption,
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.medium,
+  },
+  courseShortcutPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: primitive.space[2],
+    paddingVertical: 2,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accentSoft,
+    borderWidth: 1,
+    borderColor: semantic.color.accentBorder,
+  },
+  courseShortcutText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.bold,
+    color: semantic.color.accent,
   },
   lightboxBackdrop: {
     flex: 1,
@@ -1865,9 +2072,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
+  lightboxScrollContent: {
+    alignItems: 'center',
+  },
+  lightboxSlide: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   lightboxFooter: {
     paddingHorizontal: semantic.spacing.pageX,
-    paddingTop: primitive.space[3],
+    paddingTop: primitive.space[2],
+    gap: primitive.space[2.5],
+  },
+  lightboxThumbStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[2],
+  },
+  lightboxThumbWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: primitive.radius.sm,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    opacity: 0.55,
+  },
+  lightboxThumbWrapActive: {
+    borderColor: semantic.color.textInverse,
+    opacity: 1,
+  },
+  lightboxThumbImg: {
+    width: '100%',
+    height: '100%',
   },
   lightboxTitle: {
     fontSize: primitive.fontSize.sm,

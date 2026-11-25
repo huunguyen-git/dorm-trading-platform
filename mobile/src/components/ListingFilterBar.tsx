@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   normalizeSearchTypeParam,
@@ -34,6 +34,12 @@ export interface ListingFilterBarProps {
   loading?: boolean;
   onApply: (nextFilters: DiscoverySearchFilters) => void;
   onReset: () => void;
+  searchText?: string;
+  onSearchTextChange?: (text: string) => void;
+  sheetOpen?: boolean;
+  onSheetOpenChange?: (open: boolean) => void;
+  hideSearchDock?: boolean;
+  onRequestZonePicker?: () => void;
 }
 
 type TypeSegmentValue = 'ALL' | 'SINGLE' | 'COMBO';
@@ -58,11 +64,11 @@ const SORT_OPTIONS: Array<{
   { value: 'distance_asc', label: 'Gần nhất', shortLabel: 'Gần nhất', requiresLocation: true },
 ];
 
-const QUICK_PRICE_PRESETS = [
-  { label: '50k', value: '50000' },
-  { label: '100k', value: '100000' },
-  { label: '250k', value: '250000' },
-  { label: '500k', value: '500000' },
+const QUICK_PRICE_RANGES: Array<{ label: string; min: string; max: string }> = [
+  { label: 'Dưới 50k', min: '', max: '50000' },
+  { label: '50k – 200k', min: '50000', max: '200000' },
+  { label: '200k – 500k', min: '200000', max: '500000' },
+  { label: 'Trên 500k', min: '500000', max: '' },
 ];
 
 const QUICK_COURSE_PRESETS = ['SE100', 'IT003', 'MA006'];
@@ -160,10 +166,19 @@ export function ListingFilterBar({
   loading = false,
   onApply,
   onReset,
+  searchText,
+  onSearchTextChange,
+  sheetOpen,
+  onSheetOpenChange,
+  hideSearchDock = false,
+  onRequestZonePicker,
 }: ListingFilterBarProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [queryText, setQueryText] = useState(filters.q ?? '');
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const [internalQueryText, setInternalQueryText] = useState(filters.q ?? '');
   const [courseCode, setCourseCode] = useState(filters.courseCode ?? '');
+  const [minPriceText, setMinPriceText] = useState(
+    filters.minPrice !== undefined ? String(filters.minPrice) : '',
+  );
   const [maxPriceText, setMaxPriceText] = useState(
     filters.maxPrice !== undefined ? String(filters.maxPrice) : '',
   );
@@ -178,9 +193,36 @@ export function ListingFilterBar({
   const [sort, setSort] = useState<ListingSortOption>(filters.sort ?? 'newest');
   const [validationError, setValidationError] = useState('');
 
+  const expanded = sheetOpen !== undefined ? sheetOpen : internalExpanded;
+  const setExpanded = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(expanded) : next;
+    if (onSheetOpenChange) {
+      onSheetOpenChange(resolved);
+    } else {
+      setInternalExpanded(resolved);
+    }
+  };
+
+  const queryText = searchText !== undefined ? searchText : internalQueryText;
+  const setQueryText = (next: string) => {
+    if (onSearchTextChange) {
+      onSearchTextChange(next);
+    } else {
+      setInternalQueryText(next);
+    }
+  };
+
+  const prevFilterQRef = useRef<string | undefined>(filters.q);
+
   useEffect(() => {
-    setQueryText(filters.q ?? '');
+    if (filters.q !== prevFilterQRef.current) {
+      prevFilterQRef.current = filters.q;
+      if (searchText === undefined) {
+        setInternalQueryText(filters.q ?? '');
+      }
+    }
     setCourseCode(filters.courseCode ?? '');
+    setMinPriceText(filters.minPrice !== undefined ? String(filters.minPrice) : '');
     setMaxPriceText(filters.maxPrice !== undefined ? String(filters.maxPrice) : '');
     setFreeOnly(Boolean(filters.freeOnly));
     setListingType(normalizeSearchTypeParam(filters.type));
@@ -188,7 +230,7 @@ export function ListingFilterBar({
     setRadiusText(filters.radiusKm !== undefined ? String(filters.radiusKm) : '');
     setSort(filters.sort ?? 'newest');
     setValidationError('');
-  }, [filters]);
+  }, [filters, searchText]);
 
   const rootCategories = useMemo<CategoryTreeNode[]>(() => {
     if (categoryTree.length > 0) return categoryTree;
@@ -217,11 +259,13 @@ export function ListingFilterBar({
     filters.locationCode || (typeof filters.lat === 'number' && typeof filters.lng === 'number'),
   );
 
+  const resolvedQuery = () => queryText.trim() || undefined;
+
   const handleSearchSubmit = () => {
     setValidationError('');
     onApply({
       ...filters,
-      q: queryText.trim() || undefined,
+      q: resolvedQuery(),
       page: 0,
     });
   };
@@ -241,6 +285,7 @@ export function ListingFilterBar({
     setValidationError('');
     onApply({
       ...filters,
+      q: resolvedQuery(),
       categoryId,
       page: 0,
     });
@@ -248,9 +293,13 @@ export function ListingFilterBar({
 
   const handleQuickSort = (nextSort: ListingSortOption) => {
     setValidationError('');
-    if (nextSort === 'distance_asc' && !hasOriginZone) return;
+    if (nextSort === 'distance_asc' && !hasOriginZone) {
+      onRequestZonePicker?.();
+      return;
+    }
     onApply({
       ...filters,
+      q: resolvedQuery(),
       sort: nextSort,
       page: 0,
     });
@@ -261,6 +310,7 @@ export function ListingFilterBar({
     const nextFree = !filters.freeOnly;
     onApply({
       ...filters,
+      q: resolvedQuery(),
       freeOnly: nextFree ? true : undefined,
       maxPrice: nextFree ? undefined : filters.maxPrice,
       minPrice: nextFree ? undefined : filters.minPrice,
@@ -273,6 +323,7 @@ export function ListingFilterBar({
     const isComboActive = normalizeSearchTypeParam(filters.type) === 'COMBO';
     onApply({
       ...filters,
+      q: resolvedQuery(),
       type: isComboActive ? undefined : 'COMBO',
       page: 0,
     });
@@ -295,6 +346,7 @@ export function ListingFilterBar({
     setValidationError('');
     if (!expanded) {
       setCourseCode(filters.courseCode ?? '');
+      setMinPriceText(filters.minPrice !== undefined ? String(filters.minPrice) : '');
       setMaxPriceText(filters.maxPrice !== undefined ? String(filters.maxPrice) : '');
       setFreeOnly(Boolean(filters.freeOnly));
       setListingType(normalizeSearchTypeParam(filters.type));
@@ -308,6 +360,16 @@ export function ListingFilterBar({
   const handleApplyAdvanced = () => {
     setValidationError('');
 
+    let parsedMinPrice: number | undefined;
+    if (!freeOnly && minPriceText.trim()) {
+      const normalized = parseFilterPriceInput(minPriceText);
+      if (!Number.isFinite(normalized) || normalized < 0) {
+        setValidationError('Giá tối thiểu phải là số không âm hợp lệ.');
+        return;
+      }
+      parsedMinPrice = Math.round(normalized);
+    }
+
     let parsedMaxPrice: number | undefined;
     if (!freeOnly && maxPriceText.trim()) {
       const normalized = parseFilterPriceInput(maxPriceText);
@@ -316,6 +378,15 @@ export function ListingFilterBar({
         return;
       }
       parsedMaxPrice = Math.round(normalized);
+    }
+
+    if (
+      parsedMinPrice !== undefined &&
+      parsedMaxPrice !== undefined &&
+      parsedMinPrice > parsedMaxPrice
+    ) {
+      setValidationError('Giá tối thiểu không được lớn hơn giá tối đa.');
+      return;
     }
 
     let parsedRadius: number | undefined;
@@ -337,10 +408,10 @@ export function ListingFilterBar({
 
     const nextFilters: DiscoverySearchFilters = {
       ...filters,
-      q: queryText.trim() || undefined,
+      q: resolvedQuery(),
       courseCode: courseCode.trim() || undefined,
+      minPrice: freeOnly ? undefined : parsedMinPrice,
       maxPrice: freeOnly ? undefined : parsedMaxPrice,
-      minPrice: freeOnly ? undefined : filters.minPrice,
       freeOnly: freeOnly || undefined,
       type: listingType,
       locationCode: selectedZone?.code,
@@ -481,87 +552,89 @@ export function ListingFilterBar({
 
   return (
     <View style={styles.container} testID="listing-filter-bar">
-      {/* Branded Terracotta Search Dock (Shopee / Tiki style) */}
-      <View style={styles.brandedSearchWrap}>
-        <View style={styles.searchBarRow}>
-          <View style={styles.searchField}>
-            <Pressable
-              testID="search-submit-button"
-              accessibilityRole="button"
-              accessibilityLabel="Tìm kiếm"
-              disabled={loading}
-              hitSlop={6}
-              onPress={handleSearchSubmit}
-              style={({ pressed }) => [
-                styles.searchIconBtn,
-                pressed && styles.pressed,
-                loading && styles.disabled,
-              ]}
-            >
-              <Icon name="search" size={17} color={semantic.color.accent} />
-            </Pressable>
-
-            <TextInput
-              testID="search-input"
-              accessibilityLabel="Tìm kiếm tin đăng"
-              placeholder="Tìm giáo trình, mã môn SE100, quạt, đèn..."
-              placeholderTextColor={semantic.color.textSecondary}
-              value={queryText}
-              onChangeText={setQueryText}
-              returnKeyType="search"
-              onSubmitEditing={handleSearchSubmit}
-              style={styles.searchInput}
-            />
-
-            {queryText.length > 0 ? (
+      {/* Branded Terracotta Search Dock (when not pinned externally by ListingsScreen) */}
+      {!hideSearchDock ? (
+        <View style={styles.brandedSearchWrap}>
+          <View style={styles.searchBarRow}>
+            <View style={styles.searchField}>
               <Pressable
-                testID="clear-search-input"
+                testID="search-submit-button"
                 accessibilityRole="button"
-                accessibilityLabel="Xóa từ khóa tìm kiếm"
-                hitSlop={8}
-                onPress={handleClearSearchText}
-                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+                accessibilityLabel="Tìm kiếm"
+                disabled={loading}
+                hitSlop={6}
+                onPress={handleSearchSubmit}
+                style={({ pressed }) => [
+                  styles.searchIconBtn,
+                  pressed && styles.pressed,
+                  loading && styles.disabled,
+                ]}
               >
-                <Icon name="x" size={14} color={semantic.color.textSecondary} />
+                <Icon name="search" size={17} color={semantic.color.accent} />
               </Pressable>
-            ) : null}
-          </View>
 
-          <Pressable
-            testID="toggle-advanced-filters"
-            accessibilityRole="button"
-            accessibilityLabel={
-              activeFilterCount > 0 ? `Lọc (${activeFilterCount} bộ lọc đang áp dụng)` : 'Lọc'
-            }
-            accessibilityState={{ expanded }}
-            onPress={handleToggleSheet}
-            style={({ pressed }) => [
-              styles.filterTrigger,
-              isFilterActive && styles.filterTriggerActive,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Icon
-              name="sliders"
-              size={15}
-              color={isFilterActive ? semantic.color.accent : semantic.color.textInverse}
-            />
-            <Text
-              style={[
-                styles.filterTriggerLabel,
-                isFilterActive && styles.filterTriggerLabelActive,
+              <TextInput
+                testID="search-input"
+                accessibilityLabel="Tìm kiếm tin đăng"
+                placeholder="Tìm giáo trình, mã môn SE100, quạt, đèn..."
+                placeholderTextColor={semantic.color.textSecondary}
+                value={queryText}
+                onChangeText={setQueryText}
+                returnKeyType="search"
+                onSubmitEditing={handleSearchSubmit}
+                style={styles.searchInput}
+              />
+
+              {queryText.length > 0 ? (
+                <Pressable
+                  testID="clear-search-input"
+                  accessibilityRole="button"
+                  accessibilityLabel="Xóa từ khóa tìm kiếm"
+                  hitSlop={8}
+                  onPress={handleClearSearchText}
+                  style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+                >
+                  <Icon name="x" size={14} color={semantic.color.textSecondary} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <Pressable
+              testID="toggle-advanced-filters"
+              accessibilityRole="button"
+              accessibilityLabel={
+                activeFilterCount > 0 ? `Lọc (${activeFilterCount} bộ lọc đang áp dụng)` : 'Lọc'
+              }
+              accessibilityState={{ expanded }}
+              onPress={handleToggleSheet}
+              style={({ pressed }) => [
+                styles.filterTrigger,
+                isFilterActive && styles.filterTriggerActive,
+                pressed && styles.pressed,
               ]}
             >
-              Lọc
-            </Text>
-            {activeFilterCount > 0 ? (
-              <View style={styles.countBadge} testID="active-filter-count-badge">
-                <Text style={styles.countBadgeText}>{activeFilterCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
+              <Icon
+                name="sliders"
+                size={15}
+                color={isFilterActive ? semantic.color.accent : semantic.color.textInverse}
+              />
+              <Text
+                style={[
+                  styles.filterTriggerLabel,
+                  isFilterActive && styles.filterTriggerLabelActive,
+                ]}
+              >
+                Lọc
+              </Text>
+              {activeFilterCount > 0 ? (
+                <View style={styles.countBadge} testID="active-filter-count-badge">
+                  <Text style={styles.countBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {/* Visual Icon Category Strip (Lazada / Shopee / Tiki style) */}
       {rootCategories.length > 0 ? (
@@ -694,14 +767,20 @@ export function ListingFilterBar({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.quickSortContent}
         >
-          {SORT_OPTIONS.filter((opt) => !opt.requiresLocation || hasOriginZone).map((opt) => {
+          {SORT_OPTIONS.map((opt) => {
             const active = activeSort === opt.value;
+            const needsZonePrompt = Boolean(opt.requiresLocation && !hasOriginZone);
+            if (needsZonePrompt && !onRequestZonePicker) {
+              return null;
+            }
             return (
               <Pressable
                 key={opt.value}
                 testID={`quick-sort-${opt.value}`}
                 accessibilityRole="button"
-                accessibilityLabel={`Sắp xếp ${opt.label}`}
+                accessibilityLabel={
+                  needsZonePrompt ? 'Chọn khu vực để sắp xếp gần nhất' : `Sắp xếp ${opt.label}`
+                }
                 accessibilityState={{ selected: active }}
                 onPress={() => handleQuickSort(opt.value)}
                 style={({ pressed }) => [
@@ -710,6 +789,13 @@ export function ListingFilterBar({
                   pressed && styles.pressed,
                 ]}
               >
+                {opt.value === 'distance_asc' ? (
+                  <Icon
+                    name="map-pin"
+                    size={11}
+                    color={active ? semantic.color.accent : semantic.color.textSecondary}
+                  />
+                ) : null}
                 <Text style={[styles.quickPillText, active && styles.quickPillTextActive]}>
                   {opt.shortLabel}
                 </Text>
@@ -855,48 +941,82 @@ export function ListingFilterBar({
             value={freeOnly}
             onValueChange={(next) => {
               setFreeOnly(next);
-              if (next) setMaxPriceText('');
+              if (next) {
+                setMinPriceText('');
+                setMaxPriceText('');
+              }
             }}
           />
         </View>
 
         <HairlineDivider />
 
-        {/* Price & Course Code with quick presets */}
+        {/* Price Range (Min - Max) & Course Code with quick presets */}
         <View style={styles.sheetSection}>
-          <FormField
-            testID="filter-max-price"
-            label="Giá tối đa (VNĐ)"
-            accessibilityLabel="Giá tối đa (VNĐ)"
-            suffix="đ"
-            placeholder="VD: 150.000"
-            keyboardType="numeric"
-            editable={!freeOnly}
-            value={freeOnly ? '0' : maxPriceText}
-            onChangeText={setMaxPriceText}
-            helperText={freeOnly ? 'Đã tắt mức giá khi chọn chỉ tin miễn phí.' : undefined}
-          />
-
-          {!freeOnly ? (
+          <Text style={styles.sectionLabel}>Khoảng giá (VNĐ)</Text>
+          <View style={styles.priceRangeRow}>
+            <View style={styles.priceRangeCol}>
+              <FormField
+                testID="filter-min-price"
+                label="Giá tối thiểu"
+                accessibilityLabel="Giá tối thiểu (VNĐ)"
+                suffix="đ"
+                placeholder="Từ 0"
+                keyboardType="numeric"
+                editable={!freeOnly}
+                value={freeOnly ? '0' : minPriceText}
+                onChangeText={setMinPriceText}
+              />
+            </View>
+            <View style={styles.priceRangeCol}>
+              <FormField
+                testID="filter-max-price"
+                label="Giá tối đa (VNĐ)"
+                accessibilityLabel="Giá tối đa (VNĐ)"
+                suffix="đ"
+                placeholder="VD: 150.000"
+                keyboardType="numeric"
+                editable={!freeOnly}
+                value={freeOnly ? '0' : maxPriceText}
+                onChangeText={setMaxPriceText}
+              />
+            </View>
+          </View>
+          {freeOnly ? (
+            <Text style={styles.priceRangeHelper}>
+              Đã tắt khoảng giá khi chọn chỉ tin miễn phí.
+            </Text>
+          ) : (
             <View style={styles.presetRow}>
-              {QUICK_PRICE_PRESETS.map((preset) => {
-                const selected = maxPriceText.replace(/[.,\s]/g, '') === preset.value;
+              {QUICK_PRICE_RANGES.map((range) => {
+                const cleanMin = minPriceText.replace(/[.,\s]/g, '');
+                const cleanMax = maxPriceText.replace(/[.,\s]/g, '');
+                const selected = cleanMin === range.min && cleanMax === range.max;
                 return (
                   <Pressable
-                    key={preset.value}
+                    key={range.label}
+                    testID={`filter-price-preset-${range.min || '0'}-${range.max || 'up'}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Chọn giá tối đa ${preset.label}`}
-                    onPress={() => setMaxPriceText(selected ? '' : preset.value)}
+                    accessibilityLabel={`Chọn khoảng giá ${range.label}`}
+                    onPress={() => {
+                      if (selected) {
+                        setMinPriceText('');
+                        setMaxPriceText('');
+                      } else {
+                        setMinPriceText(range.min);
+                        setMaxPriceText(range.max);
+                      }
+                    }}
                     style={[styles.presetChip, selected && styles.presetChipActive]}
                   >
                     <Text style={[styles.presetChipText, selected && styles.presetChipTextActive]}>
-                      ≤ {preset.label}
+                      {range.label}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
-          ) : null}
+          )}
 
           <FormField
             testID="filter-course-code"
@@ -1168,17 +1288,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: semantic.spacing.pageX,
-    paddingVertical: primitive.space[3],
-    gap: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+    gap: primitive.space[2.5],
   },
   catTile: {
-    width: 68,
+    width: 64,
     alignItems: 'center',
-    gap: primitive.space[1.5],
+    gap: primitive.space[1],
   },
   catIconBox: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: primitive.radius.lg,
     backgroundColor: semantic.color.accentSoft,
     borderWidth: 1,
@@ -1356,6 +1476,18 @@ const styles = StyleSheet.create({
   sectionLabel: {
     ...semantic.type.label,
     color: semantic.color.textPrimary,
+  },
+  priceRangeRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
+  },
+  priceRangeCol: {
+    flex: 1,
+  },
+  priceRangeHelper: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+    marginTop: -primitive.space[1],
   },
   presetRow: {
     flexDirection: 'row',

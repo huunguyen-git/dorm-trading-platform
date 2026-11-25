@@ -44,6 +44,7 @@ export function ListingCard({
   const reputation = formatReputationSummary(listing.seller.reputationScore);
   const isReserved = listing.status === 'GIU_CHO';
   const isHighTrust = listing.seller.reputationScore >= 120;
+  const conditionText = listing.condition?.trim() || null;
   const hasRating =
     listing.seller.reviewCount > 0 &&
     typeof listing.seller.averageRating === 'number' &&
@@ -73,10 +74,17 @@ export function ListingCard({
             </View>
           )}
 
-          {/* Top-left corner badge: reserved OR combo */}
+          {/* Top-left corner badge: reserved OR combo OR free giveaway */}
           {isReserved ? (
             <View style={[styles.photoBadgeTopLeft, styles.photoBadgeReserved]}>
               <Text style={styles.photoBadgeText}>Đang giữ chỗ</Text>
+            </View>
+          ) : listing.isCombo && isFree ? (
+            <View style={[styles.photoBadgeTopLeft, styles.photoBadgeFree]}>
+              <Icon name="gift" size={11} color={semantic.color.textInverse} />
+              <Text style={styles.photoBadgeText}>
+                Combo · {Math.max(2, listing.itemCount)} món
+              </Text>
             </View>
           ) : listing.isCombo ? (
             <View style={styles.photoBadgeTopLeft}>
@@ -84,6 +92,11 @@ export function ListingCard({
               <Text style={styles.photoBadgeText}>
                 Combo · {Math.max(2, listing.itemCount)} món
               </Text>
+            </View>
+          ) : isFree ? (
+            <View style={[styles.photoBadgeTopLeft, styles.photoBadgeFree]}>
+              <Icon name="gift" size={10} color={semantic.color.textInverse} />
+              <Text style={styles.photoBadgeText}>Tặng 0đ</Text>
             </View>
           ) : null}
 
@@ -110,6 +123,17 @@ export function ListingCard({
             {listing.title}
           </Text>
 
+          {conditionText ? (
+            <Text
+              style={styles.gridConditionText}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              testID={`listing-condition-${listing.id}`}
+            >
+              {conditionText}
+            </Text>
+          ) : null}
+
           <View style={styles.gridPriceRow}>
             <Text style={[styles.gridPrice, isFree && styles.priceFree]} numberOfLines={1}>
               {priceLabel}
@@ -134,9 +158,9 @@ export function ListingCard({
           <View style={styles.gridFooterRow}>
             <View style={styles.gridTrustGroup}>
               <Icon
-                name="shield"
+                name={isHighTrust ? 'check-circle' : 'shield'}
                 size={11}
-                color={isHighTrust ? semantic.color.success : semantic.color.textSecondary}
+                color={isHighTrust ? semantic.color.freeFg : semantic.color.textSecondary}
               />
               <Text
                 style={[styles.gridTrustText, isHighTrust && styles.gridTrustTextHigh]}
@@ -178,6 +202,11 @@ export function ListingCard({
               <Icon name="image" size={26} color={semantic.color.textSecondary} />
             </View>
           )}
+          {isFree ? (
+            <View style={styles.listFreeOverlay}>
+              <Text style={styles.listFreeOverlayText}>0đ</Text>
+            </View>
+          ) : null}
           {photoCount > 1 ? (
             <View style={styles.listPhotoCountPill}>
               <Icon name="camera" size={9} color={semantic.color.textInverse} />
@@ -191,6 +220,17 @@ export function ListingCard({
             <Text style={styles.title} numberOfLines={2}>
               {listing.title}
             </Text>
+
+            {conditionText ? (
+              <Text
+                style={styles.listConditionText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                testID={`listing-condition-${listing.id}`}
+              >
+                {conditionText}
+              </Text>
+            ) : null}
 
             <View style={styles.metaRow}>
               <Icon name="map-pin" size={12} color={semantic.color.textSecondary} />
@@ -239,9 +279,9 @@ export function ListingCard({
               </Text>
               <Text style={styles.trustSep}>·</Text>
               <Icon
-                name="shield"
+                name={isHighTrust ? 'check-circle' : 'shield'}
                 size={12}
-                color={isHighTrust ? semantic.color.success : semantic.color.textSecondary}
+                color={isHighTrust ? semantic.color.freeFg : semantic.color.textSecondary}
               />
               <Text
                 style={[styles.reputationText, isHighTrust && styles.gridTrustTextHigh]}
@@ -287,7 +327,7 @@ const styles = StyleSheet.create({
   },
   gridPhotoStage: {
     width: '100%',
-    aspectRatio: 1,
+    aspectRatio: 1.06,
     backgroundColor: semantic.color.bgSubtle,
     position: 'relative',
   },
@@ -317,10 +357,13 @@ const styles = StyleSheet.create({
   photoBadgeReserved: {
     backgroundColor: semantic.color.warning,
   },
+  photoBadgeFree: {
+    backgroundColor: semantic.color.freeFg,
+  },
   photoBadgeText: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: primitive.fontWeight.semibold,
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.bold,
     color: semantic.color.textInverse,
   },
   courseOverlayPill: {
@@ -360,24 +403,36 @@ const styles = StyleSheet.create({
   },
   gridBody: {
     padding: primitive.space[2.5],
-    gap: primitive.space[1.5],
+    gap: 4,
   },
   gridTitle: {
-    fontSize: 13.5,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17.5,
     fontWeight: primitive.fontWeight.semibold,
     color: semantic.color.textPrimary,
-    minHeight: 36,
+    minHeight: 35,
+  },
+  gridConditionText: {
+    fontSize: 11,
+    lineHeight: 14,
+    color: semantic.color.textSecondary,
+    backgroundColor: semantic.color.bgSubtle,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: primitive.radius.xs,
+    overflow: 'hidden',
   },
   gridPriceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: primitive.space[1],
+    marginTop: 1,
   },
   gridPrice: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 14.5,
+    lineHeight: 19,
     fontWeight: primitive.fontWeight.bold,
     fontVariant: ['tabular-nums'],
     color: semantic.color.accent,
@@ -405,8 +460,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   gridLocationText: {
-    fontSize: 11.5,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 14.5,
     color: semantic.color.textSecondary,
     flex: 1,
   },
@@ -426,14 +481,14 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   gridTrustText: {
-    fontSize: 11,
+    fontSize: 10.5,
     lineHeight: 14,
     fontWeight: primitive.fontWeight.medium,
     fontVariant: ['tabular-nums'],
     color: semantic.color.textSecondary,
   },
   gridTrustTextHigh: {
-    color: semantic.color.success,
+    color: semantic.color.freeFg,
     fontWeight: primitive.fontWeight.semibold,
   },
   gridDateText: {
@@ -480,6 +535,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  listFreeOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: primitive.radius.xs,
+    backgroundColor: semantic.color.freeFg,
+  },
+  listFreeOverlayText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.bold,
+    color: semantic.color.textInverse,
+  },
   listPhotoCountPill: {
     position: 'absolute',
     bottom: 6,
@@ -499,10 +569,14 @@ const styles = StyleSheet.create({
     gap: primitive.space[1.5],
   },
   topGroup: {
-    gap: primitive.space[1],
+    gap: 3,
   },
   title: {
     ...semantic.type.cardTitle,
+  },
+  listConditionText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
   metaRow: {
     flexDirection: 'row',
