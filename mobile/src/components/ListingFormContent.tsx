@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -194,7 +194,7 @@ export default function ListingFormContent({
   const [longitude, setLongitude] = useState<number | null>(initialValues?.longitude ?? null);
   const [description, setDescription] = useState(initialValues?.description ?? '');
   const [images, setImages] = useState<string[]>(initialValues?.images ?? []);
-  const scrollViewRef = useRef<ScrollView | null>(null);
+  const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [activeSubmitAction, setActiveSubmitAction] = useState<'PUBLISH' | 'DRAFT' | 'KEEP' | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});

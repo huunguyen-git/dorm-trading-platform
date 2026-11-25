@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { api, RestrictedAccountError } from './client';
+import { api, resolveMediaUrl, RestrictedAccountError } from './client';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -8,7 +8,7 @@ jest.mock('../auth/tokenStore', () => ({
 }));
 
 const store = tokenStore as jest.Mocked<typeof tokenStore>;
-const fetchMock = jest.fn<() => Promise<unknown>>();
+const fetchMock = jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 const activeUser: User = {
   id: 'u-1',
@@ -472,4 +472,34 @@ test('logout clears local tokens and session state even when /auth/logout fails'
   expect(useSession.getState().token).toBeNull();
   expect(useSession.getState().user).toBeNull();
   expect(useSession.getState().restriction).toBeNull();
+});
+
+test('resolveMediaUrl rewrites local/private /api/v1/media URLs to EXPO_PUBLIC_API_URL for iOS and Android devices', () => {
+  const sampleId = '7f255386-74df-4ed0-8334-c0a345ea24f4';
+  expect(resolveMediaUrl(`http://127.0.0.1:8082/api/v1/media/${sampleId}`)).toBe(
+    `http://127.0.0.1:8082/api/v1/media/${sampleId}`,
+  );
+
+  process.env.EXPO_PUBLIC_API_URL = 'http://192.168.100.181:8082/api/v1/';
+  expect(resolveMediaUrl(`http://127.0.0.1:8082/api/v1/media/${sampleId}`)).toBe(
+    `http://192.168.100.181:8082/api/v1/media/${sampleId}`,
+  );
+  expect(resolveMediaUrl(`http://10.0.2.2:8082/api/v1/media/${sampleId}`)).toBe(
+    `http://192.168.100.181:8082/api/v1/media/${sampleId}`,
+  );
+  expect(resolveMediaUrl(`/api/v1/media/${sampleId}`)).toBe(
+    `http://192.168.100.181:8082/api/v1/media/${sampleId}`,
+  );
+
+  process.env.EXPO_PUBLIC_API_URL = 'http://10.0.2.2:8082/api/v1';
+  expect(resolveMediaUrl(`http://192.168.1.42:8082/api/v1/media/${sampleId}`)).toBe(
+    `http://10.0.2.2:8082/api/v1/media/${sampleId}`,
+  );
+
+  expect(resolveMediaUrl('https://cdn.example.com/books/se100.jpg')).toBe(
+    'https://cdn.example.com/books/se100.jpg',
+  );
+  expect(resolveMediaUrl(`https://api.dormtrading.vn/api/v1/media/${sampleId}`)).toBe(
+    `https://api.dormtrading.vn/api/v1/media/${sampleId}`,
+  );
 });

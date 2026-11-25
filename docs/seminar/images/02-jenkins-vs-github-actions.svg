@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="jenkinsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3f1616" />
+      <stop offset="100%" stop-color="#5c1d1d" />
+    </linearGradient>
+    <linearGradient id="ghaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f3460" />
+      <stop offset="100%" stop-color="#16213e" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="540" rx="16" fill="url(#bgGrad)" />
+  <rect x="1" y="1" width="958" height="538" rx="15" fill="none" stroke="#334155" stroke-width="2" />
+
+  <!-- Title -->
+  <text x="480" y="38" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="22" font-weight="700" fill="#f8fafc">
+    SO SÁNH KIẾN TRÚC: JENKINS VS. GITHUB ACTIONS
+  </text>
+  <text x="480" y="62" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13" fill="#94a3b8">
+    Đối chiếu 3 Trụ Cột: Hạ tầng Vận hành, Tích hợp Kho mã và Ngôn ngữ Cấu hình
+  </text>
+
+  <!-- Left Card: Jenkins -->
+  <g transform="translate(40, 85)" filter="url(#shadow)">
+    <rect width="420" height="375" rx="12" fill="url(#jenkinsGrad)" stroke="#ef4444" stroke-width="2" />
+    <!-- Header -->
+    <rect x="16" y="14" width="388" height="42" rx="8" fill="#7f1d1d" />
+    <text x="210" y="41" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#fee2e2">
+      JENKINS (Mô hình Self-Hosted Cổ điển)
+    </text>
+
+    <!-- Pillar 1: Infra -->
+    <rect x="20" y="70" width="380" height="85" rx="8" fill="#2d1515" stroke="#991b1b" stroke-width="1" />
+    <circle cx="38" cy="88" r="8" fill="#ef4444" />
+    <text x="38" y="92" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">1</text>
+    <text x="54" y="92" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#fca5a5">Hạ tầng: Controller - Agent (Stateful)</text>
+    <text x="35" y="112" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Cần thuê máy chủ riêng (VPS) chạy 24/7, tốn \$15-30/tháng</text>
+    <text x="35" y="128" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Tự vá lỗi OS, quản lý ổ đĩa, JVM tuning &amp; sao lưu JENKINS_HOME</text>
+    <text x="35" y="144" font-family="system-ui, sans-serif" font-size="11" fill="#f87171">• Rủi ro "Plugin Hell": Xung đột phiên bản treo toàn bộ server</text>
+
+    <!-- Pillar 2: Integration -->
+    <rect x="20" y="165" width="380" height="80" rx="8" fill="#2d1515" stroke="#991b1b" stroke-width="1" />
+    <circle cx="38" cy="183" r="8" fill="#ef4444" />
+    <text x="38" y="187" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">2</text>
+    <text x="54" y="187" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#fca5a5">Tích hợp Kho mã: Phụ thuộc Webhook</text>
+    <text x="35" y="207" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Cần IP tĩnh hoặc NAT / ngrok để nhận Webhook từ GitHub</text>
+    <text x="35" y="223" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Phải cấu hình GitHub Plugin, Personal Access Token (PAT)</text>
+    <text x="35" y="239" font-family="system-ui, sans-serif" font-size="11" fill="#f87171">• Phản hồi status check về PR chậm và dễ mất kết nối</text>
+
+    <!-- Pillar 3: Config -->
+    <rect x="20" y="255" width="380" height="75" rx="8" fill="#2d1515" stroke="#991b1b" stroke-width="1" />
+    <circle cx="38" cy="273" r="8" fill="#ef4444" />
+    <text x="38" y="277" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">3</text>
+    <text x="54" y="277" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#fca5a5">Cấu hình: Jenkinsfile (Groovy DSL)</text>
+    <text x="35" y="297" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Ngôn ngữ Groovy có đường cong học tập dốc (steep)</text>
+    <text x="35" y="313" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">• Dễ lỗi Serialization và sandbox security restriction</text>
+
+    <!-- Tag -->
+    <rect x="20" y="338" width="380" height="26" rx="6" fill="#450a0a" />
+    <text x="210" y="356" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="bold" fill="#f87171">
+      ❌ Không phù hợp cho đồ án sinh viên do gánh nặng Ops quá lớn
+    </text>
+  </g>
+
+  <!-- Right Card: GitHub Actions -->
+  <g transform="translate(500, 85)" filter="url(#shadow)">
+    <rect width="420" height="375" rx="12" fill="url(#ghaGrad)" stroke="#38bdf8" stroke-width="2" />
+    <!-- Header -->
+    <rect x="16" y="14" width="388" height="42" rx="8" fill="#0369a1" />
+    <text x="210" y="41" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#f0f9ff">
+      GITHUB ACTIONS (Cloud-Native Serverless)
+    </text>
+
+    <!-- Pillar 1: Infra -->
+    <rect x="20" y="70" width="380" height="85" rx="8" fill="#0c2340" stroke="#0284c7" stroke-width="1" />
+    <circle cx="38" cy="88" r="8" fill="#38bdf8" />
+    <text x="38" y="92" text-anchor="middle" font-size="11" font-weight="bold" fill="#0f172a">1</text>
+    <text x="54" y="92" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#7dd3fc">Hạ tầng: Ephemeral Runners (Serverless)</text>
+    <text x="35" y="112" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Hoàn toàn miễn phí 2.000 phút/tháng; Zero-Ops (không nuôi server)</text>
+    <text x="35" y="128" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Mỗi job chạy trên máy ảo Ubuntu 24.04 sạch 100%, tự hủy ngay sau khi xong</text>
+    <text x="35" y="144" font-family="system-ui, sans-serif" font-size="11" fill="#34d399">• Triệt tiêu hoàn toàn rủi ro ô nhiễm môi trường và xung đột phụ thuộc</text>
+
+    <!-- Pillar 2: Integration -->
+    <rect x="20" y="165" width="380" height="80" rx="8" fill="#0c2340" stroke="#0284c7" stroke-width="1" />
+    <circle cx="38" cy="183" r="8" fill="#38bdf8" />
+    <text x="38" y="187" text-anchor="middle" font-size="11" font-weight="bold" fill="#0f172a">2</text>
+    <text x="54" y="187" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#7dd3fc">Tích hợp Kho mã: Native cấp Hệ thống</text>
+    <text x="35" y="207" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Nằm trực tiếp trong GitHub, kích hoạt tức thì theo sự kiện PR / Push</text>
+    <text x="35" y="223" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Khóa nhánh chính qua Branch Protection Rules và cổng `required`</text>
+    <text x="35" y="239" font-family="system-ui, sans-serif" font-size="11" fill="#34d399">• Xuất báo cáo Step Summary trực quan dạng bảng Markdown ngay trên PR</text>
+
+    <!-- Pillar 3: Config -->
+    <rect x="20" y="255" width="380" height="75" rx="8" fill="#0c2340" stroke="#0284c7" stroke-width="1" />
+    <circle cx="38" cy="273" r="8" fill="#38bdf8" />
+    <text x="38" y="277" text-anchor="middle" font-size="11" font-weight="bold" fill="#0f172a">3</text>
+    <text x="54" y="277" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#7dd3fc">Cấu hình: Declarative YAML &amp; Marketplace</text>
+    <text x="35" y="297" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Cú pháp YAML dễ học, dễ chia sẻ cho mọi thành viên trong nhóm</text>
+    <text x="35" y="313" font-family="system-ui, sans-serif" font-size="11" fill="#e2e8f0">• Tái sử dụng hơn 15.000 Actions chuẩn hóa (`setup-java`, `setup-node`)</text>
+
+    <!-- Tag -->
+    <rect x="20" y="338" width="380" height="26" rx="6" fill="#082f49" />
+    <text x="210" y="356" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="bold" fill="#38bdf8">
+      ✅ Sự lựa chọn tối ưu tuyệt đối cho Đồ án Nhóm 14
+    </text>
+  </g>
+
+  <!-- VS Badge -->
+  <circle cx="480" cy="272" r="26" fill="#0f172a" stroke="#e2e8f0" stroke-width="3" filter="url(#shadow)" />
+  <text x="480" y="278" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="900" fill="#f8fafc">VS</text>
+
+  <!-- Bottom Takeaway -->
+  <g transform="translate(40, 475)">
+    <rect width="880" height="48" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1" />
+    <text x="440" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#e2e8f0">
+      🎯 <tspan font-weight="700" fill="#38bdf8">KẾT LUẬN:</tspan> Jenkins phù hợp doanh nghiệp lớn cô lập mạng nội bộ; <tspan font-weight="700" fill="#34d399">GitHub Actions</tspan> là tiêu chuẩn vàng cho các nhóm Agile, đồ án đại học và Cloud-Native.
+    </text>
+  </g>
+</svg>

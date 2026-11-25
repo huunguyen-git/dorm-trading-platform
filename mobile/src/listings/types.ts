@@ -1,3 +1,4 @@
+import { resolveMediaUrl } from '../api/client';
 import type { InventoryItemStatus } from '../inventory/types';
 import { semantic } from '../theme';
 
@@ -450,7 +451,7 @@ function normalizeListingItemSummary(raw: unknown): ListingItemSummary {
     name: asString(rec.name ?? rec.ten),
     condition: asString(rec.condition ?? rec.tinhTrang ?? rec.tinh_trang),
     status: normalizeItemStatus(rec.status ?? rec.trangThai ?? rec.trang_thai),
-    images: asStringArray(rec.images ?? rec.hinhAnh ?? rec.hinh_anh),
+    images: asStringArray(rec.images ?? rec.hinhAnh ?? rec.hinh_anh).map(resolveMediaUrl),
   };
 }
 
@@ -471,7 +472,7 @@ function normalizeViewerContext(raw: unknown): ListingViewerContext {
 
 export function normalizeListingSummary(raw: unknown): ListingSummary {
   const rec = asRecord(raw);
-  const images = asStringArray(rec.images ?? rec.hinhAnh ?? rec.hinh_anh);
+  const images = asStringArray(rec.images ?? rec.hinhAnh ?? rec.hinh_anh).map(resolveMediaUrl);
   const priceVnd = Math.max(0, asNumber(rec.priceVnd ?? rec.price_vnd ?? rec.giaVnd ?? rec.gia_vnd ?? rec.price, 0));
   const rawItems = Array.isArray(rec.items) ? rec.items : [];
   const itemCount = Math.max(0, asNumber(rec.itemCount ?? rec.item_count, rawItems.length));
@@ -485,7 +486,8 @@ export function normalizeListingSummary(raw: unknown): ListingSummary {
     isCombo,
     isFree,
   );
-  const thumbnailUrl = asNullableString(rec.thumbnailUrl ?? rec.thumbnail_url) ?? (images[0] ?? null);
+  const rawThumbnail = asNullableString(rec.thumbnailUrl ?? rec.thumbnail_url);
+  const thumbnailUrl = (rawThumbnail ? resolveMediaUrl(rawThumbnail) : null) ?? (images[0] ?? null);
 
   return {
     id: asString(rec.id ?? rec.maTin ?? rec.ma_tin),

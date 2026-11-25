@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -172,7 +172,7 @@ export default function ListingsScreen() {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [searchText, setSearchText] = useState(filters.q ?? '');
   const prevFilterQRef = useRef<string | undefined>(filters.q);
-  const heroScrollRef = useRef<ScrollView | null>(null);
+  const heroScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
 
   useEffect(() => {
     if (filters.q !== prevFilterQRef.current) {
@@ -842,7 +842,7 @@ export default function ListingsScreen() {
           primaryActionTestID="empty-create-listing-button"
         />
       )
-    ) : null;
+    ) : undefined;
 
   const listFooter = hasMore ? (
     <View style={styles.footerContainer}>
@@ -867,7 +867,7 @@ export default function ListingsScreen() {
         </Text>
       </Pressable>
     </View>
-  ) : null;
+  ) : undefined;
 
   const isGridMode = viewMode === 'grid';
   const isFilterTriggerActive = filterSheetOpen || activeFilterCount > 0;

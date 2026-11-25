@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <filter id="shadow4" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="560" rx="16" fill="url(#bgGrad4)" />
+  <rect x="1" y="1" width="958" height="558" rx="15" fill="none" stroke="#334155" stroke-width="2" />
+
+  <!-- Title -->
+  <text x="480" y="38" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="#f8fafc">
+    THÁP KIỂM THỬ TỰ ĐỘNG PHẢN CHIẾU KIẾN TRÚC PHÂN TẦNG OOAD
+  </text>
+  <text x="480" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#94a3b8">
+    Ứng dụng Nguyên lý Đảo ngược Phụ thuộc (DIP) &amp; Phân tách Bounded Contexts
+  </text>
+
+  <!-- Left Side: Pyramid Graphic -->
+  <g transform="translate(60, 95)" filter="url(#shadow4)">
+    <!-- Base Pyramid: Domain Unit Tests (70%) -->
+    <polygon points="190,20 30,360 350,360" fill="#0f172a" stroke="#334155" stroke-width="2" />
+
+    <!-- Tier 1 (Base - 70%): Pure Domain Unit Tests -->
+    <polygon points="70,250 30,360 350,360 310,250" fill="#065f46" stroke="#10b981" stroke-width="2" />
+    <text x="190" y="295" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="#ecfdf5">
+      PURE DOMAIN UNIT TESTS
+    </text>
+    <text x="190" y="318" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#a7f3d0">
+      ~70% Tổng số ca kiểm thử
+    </text>
+    <text x="190" y="338" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#d1fae5">
+      Tốc độ: &lt; 2 Giây | Không phụ thuộc DB
+    </text>
+
+    <!-- Tier 2 (Middle - 20%): Integration Tests -->
+    <polygon points="120,130 70,250 310,250 260,130" fill="#1e40af" stroke="#3b82f6" stroke-width="2" />
+    <text x="190" y="180" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="bold" fill="#eff6ff">
+      INTEGRATION TESTS
+    </text>
+    <text x="190" y="202" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#bfdbfe">
+      ~20% (Testcontainers + DB)
+    </text>
+    <text x="190" y="222" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#dbeafe">
+      PostgreSQL 16 thật trong Docker
+    </text>
+
+    <!-- Tier 3 (Top - 10%): E2E Tests -->
+    <polygon points="190,20 120,130 260,130" fill="#831843" stroke="#f43f5e" stroke-width="2" />
+    <text x="190" y="78" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="bold" fill="#fff1f2">
+      E2E TESTS
+    </text>
+    <text x="190" y="98" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="600" fill="#fecdd3">
+      ~10% (UI Flow)
+    </text>
+    <text x="190" y="115" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10.5" fill="#ffe4e6">
+      Playwright &amp; Maestro
+    </text>
+  </g>
+
+  <!-- Right Side: Detailed Breakdown Cards -->
+  <g transform="translate(460, 95)" filter="url(#shadow4)">
+    <!-- Card 1: Top E2E -->
+    <g transform="translate(0, 0)">
+      <rect width="440" height="95" rx="8" fill="#1e293b" stroke="#f43f5e" stroke-width="1.5" />
+      <rect x="12" y="10" width="130" height="24" rx="4" fill="#9f1239" />
+      <text x="77" y="26" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#fff">
+        Đỉnh: E2E User Flow
+      </text>
+      <text x="155" y="26" font-family="system-ui, sans-serif" font-size="11.5" font-weight="bold" fill="#fda4af">
+        Kiểm thử trọn vẹn Use Case trước Release
+      </text>
+      <text x="16" y="52" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#f43f5e">Web (Playwright):</tspan> Tự động mở trình duyệt headless, duyệt bài, khóa user.
+      </text>
+      <text x="16" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#f43f5e">Mobile (Maestro):</tspan> Mô phỏng sinh viên đặt cọc, thương lượng qua chat.
+      </text>
+      <text x="16" y="87" font-family="system-ui, sans-serif" font-size="10.5" fill="#94a3b8">
+        Chạy định kỳ hoặc khi tạo Release Tag; thời gian chạy: 1 - 3 phút.
+      </text>
+    </g>
+
+    <!-- Card 2: Middle Integration -->
+    <g transform="translate(0, 115)">
+      <rect width="440" height="105" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="1.5" />
+      <rect x="12" y="10" width="160" height="24" rx="4" fill="#1d4ed8" />
+      <text x="92" y="26" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#fff">
+        Giữa: Integration Testing
+      </text>
+      <text x="185" y="26" font-family="system-ui, sans-serif" font-size="11.5" font-weight="bold" fill="#93c5fd">
+        Kiểm thử Tầng Adapter &amp; Database Thật
+      </text>
+      <text x="16" y="52" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#60a5fa">Testcontainers:</tspan> Tự động kéo Docker <tspan fill="#38bdf8">postgres:16-alpine</tspan> trong runner CI.
+      </text>
+      <text x="16" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#60a5fa">Flyway Migration:</tspan> Chạy toàn bộ script V1, V2… xác nhận cấu trúc bảng.
+      </text>
+      <text x="16" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • Không dùng database giả lập H2 → Triệt tiêu 100% false-positive!
+      </text>
+      <text x="16" y="103" font-family="system-ui, sans-serif" font-size="10.5" fill="#94a3b8">
+        Chạy ở cấp độ Repository &amp; External Gateways.
+      </text>
+    </g>
+
+    <!-- Card 3: Base Unit Test -->
+    <g transform="translate(0, 240)">
+      <rect width="440" height="115" rx="8" fill="#1e293b" stroke="#10b981" stroke-width="1.5" />
+      <rect x="12" y="10" width="170" height="24" rx="4" fill="#047857" />
+      <text x="97" y="26" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#fff">
+        Đáy: Pure Domain Unit Test
+      </text>
+      <text x="195" y="26" font-family="system-ui, sans-serif" font-size="11.5" font-weight="bold" fill="#6ee7b7">
+        Bảo vệ Tính Bất Biến (Domain Invariants)
+      </text>
+      <text x="16" y="52" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#34d399">Kiến trúc Hướng đối tượng:</tspan> Domain Entities là POJO thuần túy.
+      </text>
+      <text x="16" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • Không phụ thuộc Spring Framework (`@Autowired`) hay Database.
+      </text>
+      <text x="16" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#cbd5e1">
+        • <tspan font-weight="bold" fill="#34d399">Ví dụ:</tspan> Test chuyển trạng thái Order PENDING → RESERVED trong &lt;10ms.
+      </text>
+      <text x="16" y="106" font-family="system-ui, sans-serif" font-size="10.5" fill="#94a3b8">
+        Tốc độ siêu nhanh: Hàng trăm test chạy xong trong 1-2 giây trên CI.
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Metric Bar -->
+  <g transform="translate(40, 480)">
+    <rect width="880" height="55" rx="8" fill="#1e293b" stroke="#475569" stroke-width="1" />
+    <text x="440" y="24" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="#f8fafc">
+      QUY TẮC VÀNG VẬN HÀNH: Tốc độ kiểm thử càng nhanh ở đáy tháp, chu kỳ phản hồi (Feedback Loop) càng ngắn!
+    </text>
+    <text x="440" y="42" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">
+      Phần lớn lỗi nghiệp vụ được chặn đứng ngay từ tầng Pure Unit Test trước khi tốn tài nguyên chạy Integration &amp; E2E.
+    </text>
+  </g>
+</svg>

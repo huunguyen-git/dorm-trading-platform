@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="ooadGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="cicdGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b" />
+      <stop offset="100%" stop-color="#065f46" />
+    </linearGradient>
+    <linearGradient id="dockerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c4a6e" />
+      <stop offset="100%" stop-color="#075985" />
+    </linearGradient>
+    <linearGradient id="accentBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="520" rx="16" fill="url(#bgGrad)" />
+  <rect x="1" y="1" width="958" height="518" rx="15" fill="none" stroke="#334155" stroke-width="2" />
+
+  <!-- Header -->
+  <text x="480" y="42" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="22" font-weight="700" fill="#f8fafc">
+    CẦU NỐI TRIẾT LÝ: TỪ THIẾT KẾ OOAD ĐẾN CI/CD &amp; DOCKER
+  </text>
+  <text x="480" y="68" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13" fill="#94a3b8">
+    Bảo toàn tính đúng đắn của Bounded Contexts, Domain Invariants &amp; Kiến trúc Phân tầng
+  </text>
+
+  <!-- Pillar 1: OOAD Design -->
+  <g transform="translate(40, 95)" filter="url(#shadow)">
+    <rect width="260" height="300" rx="12" fill="url(#ooadGrad)" stroke="#6366f1" stroke-width="2" />
+    <rect x="12" y="12" width="236" height="36" rx="6" fill="#4338ca" />
+    <text x="130" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#ffffff">
+      1. THIẾT KẾ OOAD
+    </text>
+
+    <!-- Content Items -->
+    <rect x="20" y="65" width="220" height="48" rx="8" fill="#1e1b4b" stroke="#4f46e5" stroke-width="1" />
+    <text x="32" y="86" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#c7d2fe">Use Cases &amp; Bounded Context</text>
+    <text x="32" y="103" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">iam, catalog, order, chat, review</text>
+
+    <rect x="20" y="125" width="220" height="48" rx="8" fill="#1e1b4b" stroke="#4f46e5" stroke-width="1" />
+    <text x="32" y="146" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#c7d2fe">Class &amp; Domain Model</text>
+    <text x="32" y="163" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Entities, Value Objects, Invariants</text>
+
+    <rect x="20" y="185" width="220" height="48" rx="8" fill="#1e1b4b" stroke="#4f46e5" stroke-width="1" />
+    <text x="32" y="206" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#c7d2fe">Giao ước &amp; Ranh giới (Ports)</text>
+    <text x="32" y="223" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Interface, DTO, Contracts</text>
+
+    <rect x="20" y="245" width="220" height="42" rx="6" fill="#312e81" />
+    <text x="130" y="271" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#a5b4fc">
+      Nguyên lý: SRP, DIP, Cohesion
+    </text>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <g transform="translate(305, 230)">
+    <line x1="0" y1="0" x2="40" y2="0" stroke="#818cf8" stroke-width="3" stroke-dasharray="4 2" />
+    <polygon points="45,0 35,-6 35,6" fill="#818cf8" />
+    <text x="22" y="-12" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#a5b4fc">Ánh xạ test</text>
+  </g>
+
+  <!-- Pillar 2: CI/CD Pipeline -->
+  <g transform="translate(350, 95)" filter="url(#shadow)">
+    <rect width="260" height="300" rx="12" fill="url(#cicdGrad)" stroke="#10b981" stroke-width="2" />
+    <rect x="12" y="12" width="236" height="36" rx="6" fill="#047857" />
+    <text x="130" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#ffffff">
+      2. CI/CD AUTOMATION
+    </text>
+
+    <!-- Content Items -->
+    <rect x="20" y="65" width="220" height="48" rx="8" fill="#064e3b" stroke="#059669" stroke-width="1" />
+    <text x="32" y="86" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#a7f3d0">Domain Unit Testing (Pure)</text>
+    <text x="32" y="103" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Test logic &amp; bất biến nghiệp vụ (&lt;2s)</text>
+
+    <rect x="20" y="125" width="220" height="48" rx="8" fill="#064e3b" stroke="#059669" stroke-width="1" />
+    <text x="32" y="146" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#a7f3d0">Integration Test (Database)</text>
+    <text x="32" y="163" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Testcontainers + PostgreSQL 16</text>
+
+    <rect x="20" y="185" width="220" height="48" rx="8" fill="#064e3b" stroke="#059669" stroke-width="1" />
+    <text x="32" y="206" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#a7f3d0">Status Gate Kiểm duyệt</text>
+    <text x="32" y="223" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Job `required` bảo vệ nhánh main</text>
+
+    <rect x="20" y="245" width="220" height="42" rx="6" fill="#065f46" />
+    <text x="130" y="271" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#6ee7b7">
+      Tự động hóa kiểm thử liên tục
+    </text>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <g transform="translate(615, 230)">
+    <line x1="0" y1="0" x2="40" y2="0" stroke="#34d399" stroke-width="3" stroke-dasharray="4 2" />
+    <polygon points="45,0 35,-6 35,6" fill="#34d399" />
+    <text x="22" y="-12" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#6ee7b7">Đóng gói</text>
+  </g>
+
+  <!-- Pillar 3: Docker & Delivery -->
+  <g transform="translate(660, 95)" filter="url(#shadow)">
+    <rect width="260" height="300" rx="12" fill="url(#dockerGrad)" stroke="#0ea5e9" stroke-width="2" />
+    <rect x="12" y="12" width="236" height="36" rx="6" fill="#0369a1" />
+    <text x="130" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#ffffff">
+      3. ĐÓNG GÓI DOCKER &amp; BẢN CÀI
+    </text>
+
+    <!-- Content Items -->
+    <rect x="20" y="65" width="220" height="48" rx="8" fill="#0c4a6e" stroke="#0284c7" stroke-width="1" />
+    <text x="32" y="86" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#bae6fd">Multi-Stage Dockerfile</text>
+    <text x="32" y="103" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">JRE 21 rút gọn, non-root user (&lt;150MB)</text>
+
+    <rect x="20" y="125" width="220" height="48" rx="8" fill="#0c4a6e" stroke="#0284c7" stroke-width="1" />
+    <text x="32" y="146" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#bae6fd">Immutable Image (GHCR)</text>
+    <text x="32" y="163" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Bản build bất biến, gắn tag SHA/semver</text>
+
+    <rect x="20" y="185" width="220" height="48" rx="8" fill="#0c4a6e" stroke="#0284c7" stroke-width="1" />
+    <text x="32" y="206" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#bae6fd">Mobile Standalone APK</text>
+    <text x="32" y="223" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">Artifact sẵn sàng cài đặt trên thiết bị</text>
+
+    <rect x="20" y="245" width="220" height="42" rx="6" fill="#075985" />
+    <text x="130" y="271" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#7dd3fc">
+      Tính đóng gói (Encapsulation)
+    </text>
+  </g>
+
+  <!-- Bottom Core Value Bar -->
+  <g transform="translate(40, 420)">
+    <rect width="880" height="65" rx="10" fill="#1e293b" stroke="#475569" stroke-width="1.5" />
+    <text x="25" y="38" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#38bdf8">KẾT QUẢ KIẾN TRÚC:</text>
+    <text x="180" y="38" font-family="system-ui, sans-serif" font-size="12.5" fill="#f1f5f9">
+      Triệt tiêu "Hố sâu triển khai" — Đảm bảo mã nguồn merge vào <tspan fill="#34d399" font-weight="700">main</tspan> luôn thỏa mãn 100% Use Case và sẵn sàng chạy trên Production.
+    </text>
+  </g>
+</svg>

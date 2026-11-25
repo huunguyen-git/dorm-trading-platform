@@ -572,7 +572,7 @@ export default function MyListingsScreen() {
               primaryActionTestID="my-listings-empty-create-btn"
               onPrimaryAction={() => navigation.navigate('CreateListing')}
             />
-          ) : null
+          ) : undefined
         }
         ListFooterComponent={
           page + 1 < totalPages ? (
@@ -595,7 +595,7 @@ export default function MyListingsScreen() {
                 </Text>
               </Pressable>
             </View>
-          ) : null
+          ) : undefined
         }
         renderItem={({ item }) => {
           const statusMeta = LISTING_STATUS_META[item.status];

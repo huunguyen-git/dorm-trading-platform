@@ -358,12 +358,12 @@ describe('uploadListingImages', () => {
         uri: 'file:///book-cover.jpg',
         name: 'book-cover.jpg',
         type: 'image/jpeg',
-      });
+      } as unknown as Blob);
       expect(appendSpy).toHaveBeenNthCalledWith(2, 'files', {
         uri: 'file:///book-page.png',
         name: 'book-page.png',
         type: 'image/png',
-      });
+      } as unknown as Blob);
     } finally {
       appendSpy.mockRestore();
     }

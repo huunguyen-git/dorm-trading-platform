@@ -6,6 +6,7 @@ Sàn giao dịch đồ dùng sinh viên (Nhóm 14, OOAD). Mobile cho thành viê
 | --- | --- | --- |
 | [architecture/](architecture/README.md) | Kiến trúc tổng thể, ranh giới module và vai trò, C4 Model, ADR, build/phân phối mobile | Tô Thành Nguyên (P0-05) |
 | [conventions/](conventions/git-conventions.md) | Quy ước Git: trunk-based, Conventional Commits, PR | Tô Thành Nguyên (P0-05) |
+| [huong-dan-trai-nghiem-mobile-ios-android.md](huong-dan-trai-nghiem-mobile-ios-android.md) | Hướng dẫn chạy thử ứng dụng mobile trên iOS & Android (thiết bị thật, giả lập, LAN/USB) | Nhóm 14 |
 | product/ | Yêu cầu nghiệp vụ, use case (bổ sung khi có) | Nguyễn Bảo Việt |
 | api/ | OpenAPI và hướng dẫn hợp đồng API (bổ sung khi có) | Nguyễn Hữu Nguyên |
 

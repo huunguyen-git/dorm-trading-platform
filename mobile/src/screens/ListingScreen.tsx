@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentRef,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -113,8 +122,8 @@ export default function ListingScreen() {
   }, [params?.listing]);
 
   const listingId = params?.id ?? previewSummary?.id ?? '';
-  const carouselRef = useRef<ScrollView | null>(null);
-  const lightboxScrollRef = useRef<ScrollView | null>(null);
+  const carouselRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  const lightboxScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [reputationSheetOpen, setReputationSheetOpen] = useState(false);
@@ -1325,7 +1334,7 @@ export default function ListingScreen() {
           onRequestClose={() => setLightboxOpen(false)}
         >
           <View style={styles.lightboxBackdrop} testID="photo-lightbox-modal">
-            <StatusBar barStyle="light-content" backgroundColor={semantic.color.lightboxBg} />
+            <StatusBar barStyle="light-content" />
             <View
               style={[
                 styles.lightboxHeader,

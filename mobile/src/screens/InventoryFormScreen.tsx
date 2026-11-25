@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -65,7 +65,7 @@ export default function InventoryFormScreen() {
     };
   }, [clearError]);
 
-  const scrollViewRef = useRef<ScrollView | null>(null);
+  const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const pickerInFlightRef = useRef(false);
   const [ten, setTen] = useState(existingItem?.ten || '');
   const [tinhTrang, setTinhTrang] = useState(existingItem?.tinhTrang || '');

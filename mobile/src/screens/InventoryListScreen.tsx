@@ -205,7 +205,7 @@ export default function InventoryListScreen() {
               }
               primaryActionTestID="empty-add-inventory-item-button"
             />
-          ) : null
+          ) : undefined
         }
         renderItem={({ item }) => {
           const isEditable =

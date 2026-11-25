@@ -1,5 +1,5 @@
 // Lucian UX/UI Prompt #048 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#048
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   Animated,
   Easing,
@@ -47,7 +47,7 @@ export function UnderlineTabs<T extends string = string>({
   style,
 }: UnderlineTabsProps<T>) {
   const reduceMotion = useReduceMotion();
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [rects, setRects] = useState<Record<string, TabRect>>({});
   const hasInit = useRef(false);

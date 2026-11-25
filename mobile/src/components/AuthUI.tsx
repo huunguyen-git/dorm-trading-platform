@@ -9,8 +9,7 @@ import {
   Text,
   TextInput,
   View,
-  type NativeSyntheticEvent,
-  type TextInputFocusEventData,
+  type TextInputFocusEvent,
   type TextInputProps,
 } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
@@ -166,12 +165,12 @@ export function Field({
   const [focused, setFocused] = useState(false);
   const isDisabled = props.editable === false;
 
-  const handleFocus = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleFocus = (e: TextInputFocusEvent) => {
     setFocused(true);
     onFocus?.(e);
   };
 
-  const handleBlur = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleBlur = (e: TextInputFocusEvent) => {
     setFocused(false);
     onBlur?.(e);
   };
@@ -210,12 +209,12 @@ export function PasswordField({
   const [focused, setFocused] = useState(false);
   const isDisabled = props.editable === false;
 
-  const handleFocus = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleFocus = (e: TextInputFocusEvent) => {
     setFocused(true);
     onFocus?.(e);
   };
 
-  const handleBlur = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleBlur = (e: TextInputFocusEvent) => {
     setFocused(false);
     onBlur?.(e);
   };

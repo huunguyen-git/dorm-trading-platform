@@ -41,10 +41,7 @@ export default function AppNavigator() {
         setActiveRoute(getActiveRouteName(state));
       }}
     >
-      <StatusBar
-        style={hasTerracottaHeader ? 'light' : 'dark'}
-        backgroundColor={hasTerracottaHeader ? semantic.color.accent : semantic.color.bgSurface}
-      />
+      <StatusBar style={hasTerracottaHeader ? 'light' : 'dark'} />
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: semantic.color.bgSurface },

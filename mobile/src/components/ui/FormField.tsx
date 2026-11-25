@@ -8,9 +8,8 @@ import {
   Text,
   TextInput,
   View,
-  type NativeSyntheticEvent,
   type StyleProp,
-  type TextInputFocusEventData,
+  type TextInputFocusEvent,
   type TextInputProps,
   type TextStyle,
   type ViewStyle,
@@ -145,12 +144,12 @@ export function FormField({
           ? component.input.validHalo
           : 'transparent';
 
-  const handleFocus = (event: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleFocus = (event: TextInputFocusEvent) => {
     setFocused(true);
     onFocus?.(event);
   };
 
-  const handleBlur = (event: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleBlur = (event: TextInputFocusEvent) => {
     setFocused(false);
     onBlur?.(event);
   };

@@ -33,6 +33,58 @@ const baseUrl = () => {
   return url;
 };
 
+function isLocalOrPrivateHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '10.0.2.2') {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) {
+    return true;
+  }
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) {
+    return true;
+  }
+  const m172 = /^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  if (m172) {
+    const second = Number(m172[1]);
+    return second >= 16 && second <= 31;
+  }
+  return false;
+}
+
+/**
+ * Chuẩn hóa URL ảnh từ `/api/v1/media/{id}` sang gốc `EXPO_PUBLIC_API_URL` của thiết bị hiện tại
+ * để ảnh hiển thị nhất quán trên cả iOS (Simulator / Expo Go), Android Emulator (`10.0.2.2`) và máy thật qua LAN.
+ */
+export function resolveMediaUrl(rawUrl: string): string {
+  if (typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+
+  const configuredOrigin = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
+  if (!configuredOrigin) return trimmed;
+
+  if (trimmed.startsWith('/api/v1/media/')) {
+    return `${configuredOrigin}${trimmed.slice('/api/v1'.length)}`;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.pathname.startsWith('/api/v1/media/') &&
+      isLocalOrPrivateHost(parsed.hostname)
+    ) {
+      return `${configuredOrigin}${parsed.pathname.slice('/api/v1'.length)}${parsed.search}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
 async function readResponseText(response: Response): Promise<string> {
   if (typeof response.text === 'function') {
     return response.text();
