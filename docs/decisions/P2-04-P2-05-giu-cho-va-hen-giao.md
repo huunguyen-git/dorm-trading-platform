@@ -19,12 +19,14 @@ Các yêu cầu cốt lõi bắt buộc:
 - **Vấn đề**: Một đồ vật (`do_vats`) có thể tham gia đồng thời nhiều tin lẻ/combo của cùng một người bán. Cần bảo đảm tuyệt đối không xảy ra bán/giữ trùng kể cả dưới tải đồng thời cao, đồng thời không phát sinh deadlock với `ListingService` (`P2-01`) và `InventoryService` (`P1-03`).
 - **Quyết định**:
   1. **Lớp ứng dụng (Pessimistic Locking theo thứ tự toàn cục)**: Mọi thao tác ghi trong `OrderService` (`accept`, `cancel`, `startDelivery`) tuân thủ nghiêm ngặt thứ tự khóa tương thích với `P2-01`:
-     `thanh_viens (nguoi_ban_id)` → `tin_dangs (ma_tin)` → `giao_dichs (ma_giao_dich)` → `do_vats (ORDER BY ma_vat ASC)`.
-     (Riêng `createReservationRequest` chỉ đọc trạng thái người mua rồi khóa `tin_dangs` → `do_vats ORDER BY ma_vat ASC`, không bao giờ khóa ngược chiều.)
-  2. **Lớp cơ sở dữ liệu (`V7` Partial Unique Indexes)**:
+     `thanh_viens (theo thứ tự UUID tăng dần khi chạm cả người mua và người bán)` → `tin_dangs (ma_tin)` → `giao_dichs (ma_giao_dich)` → `do_vats (ORDER BY ma_vat ASC)`.
+     (Riêng `createReservationRequest` kiểm tra chỉ-đọc trạng thái người mua rồi khóa `tin_dangs` → kiểm tra chỉ-đọc trạng thái người bán → khóa `do_vats ORDER BY ma_vat ASC`; `acceptReservation` kiểm tra chỉ-đọc trạng thái người mua theo `FR-12`, không bao giờ khóa ngược chiều.)
+  2. **Lớp cơ sở dữ liệu (`V7` Partial Unique Indexes & tương thích `UC-09`)**:
      - `uq_giao_dichs_active_listing ON giao_dichs(ma_tin) WHERE trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')` — bảo đảm tối đa 1 giữ chỗ hiệu lực/tin.
-     - Bảng `giao_dich_do_vat(ma_giao_dich, ma_vat, giu_hieu_luc)` kèm `uq_giao_dich_do_vat_active_item ON giao_dich_do_vat(ma_vat) WHERE giu_hieu_luc = TRUE` — bảo đảm tối đa 1 giữ chỗ hiệu lực/đồ vật ở cấp PostgreSQL và lưu snapshot chính xác các đồ vật mà giao dịch đã khóa để `UC-24` giải phóng an toàn.
+     - Bảng `giao_dich_do_vat(ma_giao_dich, ma_vat, giu_hieu_luc)` kèm `uq_giao_dich_do_vat_active_item ON giao_dich_do_vat(ma_vat) WHERE giu_hieu_luc = TRUE` — bảo đảm tối đa 1 giữ chỗ hiệu lực/đồ vật ở cấp PostgreSQL và lưu snapshot chính xác các đồ vật mà giao dịch đã khóa để `UC-24` giải phóng an toàn. Khóa ngoại `ma_vat` dùng `ON DELETE CASCADE` để `InventoryService.deleteItem` (`UC-09`) vẫn xóa được đồ vật `KHA_DUNG` sau khi tin đã rút và yêu cầu/giữ chỗ đã hủy (trong khi đồ vật `DANG_GIU`/`DA_CHUYEN_GIAO` được `InventoryService` chặn chặt ở tầng dịch vụ).
      - `uq_giao_dichs_pending_buyer_listing ON giao_dichs(ma_tin, nguoi_mua_id) WHERE trang_thai = 'YEU_CAU'` — ngăn nhấn đúp tạo nhiều yêu cầu trùng trên cùng một tin trong khi vẫn cho phép người mua gửi không giới hạn yêu cầu trên các tin khác nhau.
+  3. **Chống trạng thái treo `GIU_CHO` khi hủy giữ chỗ (`UC-24` bước 6 & `E3`)**:
+     - Khi hủy giữ chỗ trên tin đang `GIU_CHO` và không còn giữ chỗ hiệu lực nào, hệ thống chuyển `tin_dangs` về `HET_HAN` nếu đã quá hạn `FR-13`, về `CONG_KHAI` nếu toàn bộ đồ vật đều `KHA_DUNG`, hoặc về `DA_RUT` (`closed_at = now`) nếu vẫn còn đồ vật `DA_CHUYEN_GIAO`/đang bị giữ ở giao dịch hợp lệ khác (không để tin bị treo vĩnh viễn ở `GIU_CHO` chiếm hạn mức `FR-05`, đồng thời không tự mở lại tin không còn đủ điều kiện khả dụng).
 
 ### 2. Tách biệt rạch ròi `thoi_diem_bat_dau_giao` (`UC-26`) và `thoi_diem_bao_giao` (`UC-27`)
 - Bổ sung cột `thoi_diem_bat_dau_giao TIMESTAMPTZ` trên `giao_dichs` trong `V7`, giữ nguyên `thoi_diem_bao_giao` và `anh_ban_giao` cho `P3-02` (`UC-27`).
@@ -36,7 +38,11 @@ Các yêu cầu cốt lõi bắt buộc:
 - Khi đổi lịch (`UC-25 A3`, `UC-26 A3`), lịch đã thống nhất trước đó được bảo toàn cho đến khi đề xuất mới được hai bên đồng ý.
 
 ### 4. Hộp thông báo trong ứng dụng (`thong_baos`) và consumer sự kiện `P2-01`
-- Bổ sung bảng `thong_baos` phục vụ thông báo theo giao dịch (`UC-22`–`UC-26`) và gắn `@EventListener` cho `ListingUpdatedWithPendingRequestsEvent` do `ListingService` phát ra khi người bán sửa tin đang có `YEU_CAU`.
+- Bổ sung bảng `thong_baos` phục vụ thông báo theo giao dịch (`UC-22`–`UC-26`) và gắn `@EventListener` cho `ListingUpdatedWithPendingRequestsEvent` do `ListingService` phát ra khi người bán sửa tin đang có `YEU_CAU` (đồng thời đồng bộ snapshot `giao_dich_do_vat` cho các đơn `YEU_CAU` theo danh sách đồ vật mới của tin).
+
+### 5. Đồng bộ hệ thiết kế Editorial Commerce & Lucian UX/UI trên Mobile
+- Toàn bộ màn hình `ReservationRequestScreen`, `OrdersScreen`, `OrderDetailScreen` và các điểm nối người bán tại `ListingScreen`, `MyListingsScreen`, `ProfileScreen` sử dụng nhất quán `SafeAreaInsetsContext`, `theme.ts`, `useReduceMotion()` và bố cục phẳng + `HairlineDivider` + sticky CTA dock của `P2-01`/`P2-02`.
+- Cổng mới hai thành phần tương tác từ Lucian UX/UI Prompt (giữ đầy đủ header MIT và token nội bộ): `#444` (`OrderProgressStepper.tsx`, `https://lucianlabs.dev/uxui-prompt/#444`) cho tiến trình 4 mốc đơn hàng kèm nhánh hủy và `#072` (`CollapsibleAlert.tsx`, `https://lucianlabs.dev/uxui-prompt/#072`) cho thông báo chưa đọc & phản hồi thu gọn; tái sử dụng `#048` (`UnderlineTabs`), `#305` (`BottomSheet`), `#416` (`SegmentedControl`), `#434` (`FormField`) và `#092` (`EmptyState`).
 
 ## Tác động lên các task tiếp theo
 
