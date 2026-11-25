@@ -52,6 +52,8 @@ export default function InventoryListScreen() {
   const [actionError, setActionError] = useState<string>('');
 
   const canCreate = Boolean(token) && !(user && !user.roles.includes('MEMBER'));
+  const readyCount = items.filter((entry) => entry.trangThai === 'KHA_DUNG').length;
+  const linkedCount = items.filter((entry) => entry.linkedListingCount > 0).length;
 
   useFocusEffect(
     useCallback(() => {
@@ -145,6 +147,23 @@ export default function InventoryListScreen() {
         </Pressable>
       </View>
 
+      {items.length > 0 ? (
+        <View style={styles.summaryStrip} testID="inventory-summary-strip">
+          <View style={styles.summaryTile}>
+            <Text style={styles.summaryValue}>{items.length}</Text>
+            <Text style={styles.summaryLabel}>Tổng món</Text>
+          </View>
+          <View style={styles.summaryTile}>
+            <Text style={[styles.summaryValue, styles.summaryValueReady]}>{readyCount}</Text>
+            <Text style={styles.summaryLabel}>Sẵn sàng</Text>
+          </View>
+          <View style={styles.summaryTile}>
+            <Text style={styles.summaryValue}>{linkedCount}</Text>
+            <Text style={styles.summaryLabel}>Đang gắn tin</Text>
+          </View>
+        </View>
+      ) : null}
+
       {error || actionError ? (
         <View style={styles.bannerWrap}>
           <InlineBanner tone="danger" message={actionError || error || ''} />
@@ -208,17 +227,25 @@ export default function InventoryListScreen() {
                   pressed && styles.itemMainRowPressed,
                 ]}
               >
-                {item.hinhAnh && item.hinhAnh.length > 0 ? (
-                  <Image
-                    source={{ uri: item.hinhAnh[0] }}
-                    style={styles.thumbnail}
-                    accessibilityLabel={item.ten}
-                  />
-                ) : (
-                  <View style={styles.thumbnailPlaceholder}>
-                    <Icon name="image" size={22} color={semantic.color.textSecondary} />
-                  </View>
-                )}
+                <View style={styles.thumbWrap}>
+                  {item.hinhAnh && item.hinhAnh.length > 0 ? (
+                    <Image
+                      source={{ uri: item.hinhAnh[0] }}
+                      style={styles.thumbnail}
+                      accessibilityLabel={item.ten}
+                    />
+                  ) : (
+                    <View style={styles.thumbnailPlaceholder}>
+                      <Icon name="image" size={22} color={semantic.color.textSecondary} />
+                    </View>
+                  )}
+                  {item.hinhAnh && item.hinhAnh.length > 1 ? (
+                    <View style={styles.photoCountBadge}>
+                      <Icon name="camera" size={10} color={semantic.color.textInverse} />
+                      <Text style={styles.photoCountText}>{item.hinhAnh.length}</Text>
+                    </View>
+                  ) : null}
+                </View>
 
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName} numberOfLines={1}>
@@ -252,6 +279,22 @@ export default function InventoryListScreen() {
               </Pressable>
 
               <View style={styles.rowActions}>
+                {canCreate && item.trangThai === 'KHA_DUNG' ? (
+                  <Pressable
+                    testID={`quick-list-item-${item.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Đăng tin cho ${item.ten}`}
+                    hitSlop={4}
+                    onPress={() =>
+                      navigation.navigate('CreateListing', { preselectedItemId: item.id })
+                    }
+                    style={({ pressed }) => [styles.quickListBtn, pressed && styles.pressed]}
+                  >
+                    <Icon name="tag" size={13} color={semantic.color.accent} />
+                    <Text style={styles.quickListText}>Đăng tin</Text>
+                  </Pressable>
+                ) : null}
+
                 <Pressable
                   testID={`edit-item-${item.id}`}
                   accessibilityRole="button"
@@ -358,6 +401,40 @@ const styles = StyleSheet.create({
     fontWeight: primitive.fontWeight.semibold,
     color: component.button.primaryFg,
   },
+  summaryStrip: {
+    flexDirection: 'row',
+    gap: primitive.space[2],
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
+    borderBottomWidth: 1,
+    borderBottomColor: semantic.color.borderHairline,
+  },
+  summaryTile: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingVertical: primitive.space[2],
+    paddingHorizontal: primitive.space[2],
+    alignItems: 'center',
+    gap: 2,
+  },
+  summaryValue: {
+    fontSize: primitive.fontSize.lg,
+    lineHeight: 22,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textPrimary,
+  },
+  summaryValueReady: {
+    color: semantic.color.freeFg,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
+  },
   bannerWrap: {
     paddingHorizontal: semantic.spacing.pageX,
     paddingTop: primitive.space[3],
@@ -386,6 +463,11 @@ const styles = StyleSheet.create({
   itemMainRowPressed: {
     backgroundColor: semantic.color.bgSubtle,
   },
+  thumbWrap: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+  },
   thumbnail: {
     width: 80,
     height: 80,
@@ -401,6 +483,24 @@ const styles = StyleSheet.create({
     backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  photoCountBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: semantic.color.overlayDark,
+    borderRadius: primitive.radius.xs,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  photoCountText: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textInverse,
   },
   itemInfo: {
     flex: 1,
@@ -432,10 +532,25 @@ const styles = StyleSheet.create({
   rowActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: primitive.space[3],
+    flexWrap: 'wrap',
+    gap: primitive.space[2],
     paddingLeft: semantic.spacing.pageX + 80 + primitive.space[3],
     paddingRight: semantic.spacing.pageX,
     paddingBottom: primitive.space[3],
+  },
+  quickListBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1.5],
+    minHeight: 34,
+    paddingHorizontal: primitive.space[2.5],
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.accentSoft,
+  },
+  quickListText: {
+    ...semantic.type.micro,
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.semibold,
   },
   inlineActionBtn: {
     flexDirection: 'row',

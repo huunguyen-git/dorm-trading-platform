@@ -112,6 +112,7 @@ export default function MyListingsScreen() {
   const {
     myListings,
     page,
+    totalElements,
     totalPages,
     statusFilter,
     quota,
@@ -291,7 +292,8 @@ export default function MyListingsScreen() {
     const item = actionSheetItem;
     const isBusy = busyId === item.id;
     const canEdit = EDITABLE_STATUSES.has(item.status);
-    const canPublish = item.status === 'NHAP' || item.status === 'DA_RUT';
+    const canPublish =
+      item.status === 'NHAP' || item.status === 'DA_RUT' || item.status === 'HET_HAN';
     const canWithdraw = item.status === 'CONG_KHAI' || item.status === 'CHO_DUYET';
     const canRenew =
       (item.status === 'CONG_KHAI' && item.renewalReminderDue) || item.status === 'HET_HAN';
@@ -321,7 +323,7 @@ export default function MyListingsScreen() {
     if (canPublish) {
       options.push({
         key: 'publish',
-        label: 'Công khai',
+        label: item.status === 'NHAP' ? 'Công khai' : 'Công khai lại',
         icon: 'send',
         disabled: isBusy || Boolean(quota && !quota.canPublish),
         testID: `action-sheet-publish-${item.id}`,
@@ -468,9 +470,33 @@ export default function MyListingsScreen() {
         </Pressable>
       </View>
 
-      {/* Flush Lucian #299 QuotaMeter */}
+      {/* Flush Seller Summary + Lucian #299 QuotaMeter */}
       {quota ? (
         <View style={styles.quotaStrip} testID="my-listings-quota-card">
+          <View style={styles.metricsRow} testID="seller-summary-metrics">
+            <View style={styles.metricTile}>
+              <Text style={styles.metricValue}>
+                {quota.activeCount}/{quota.limit}
+              </Text>
+              <Text style={styles.metricLabel}>Đang mở</Text>
+            </View>
+            <View style={styles.metricTile}>
+              <Text style={styles.metricValue}>{totalElements}</Text>
+              <Text style={styles.metricLabel}>Tổng tin</Text>
+            </View>
+            <View style={styles.metricTile}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  quota.reputationScore >= quota.highTierThreshold && styles.metricValueHighTrust,
+                ]}
+              >
+                {quota.reputationScore}
+              </Text>
+              <Text style={styles.metricLabel}>Điểm uy tín</Text>
+            </View>
+          </View>
+
           <QuotaMeter
             activeCount={quota.activeCount}
             limit={quota.limit}
@@ -589,18 +615,26 @@ export default function MyListingsScreen() {
                 onPress={() => navigation.navigate('Listing', { id: item.id, listing: item })}
                 style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
               >
-                {thumb ? (
-                  <Image
-                    source={{ uri: thumb }}
-                    style={styles.thumb}
-                    resizeMode="cover"
-                    accessibilityLabel={item.title}
-                  />
-                ) : (
-                  <View style={styles.thumbPlaceholder}>
-                    <Icon name="image" size={22} color={semantic.color.textSecondary} />
-                  </View>
-                )}
+                <View style={styles.thumbWrap}>
+                  {thumb ? (
+                    <Image
+                      source={{ uri: thumb }}
+                      style={styles.thumb}
+                      resizeMode="cover"
+                      accessibilityLabel={item.title}
+                    />
+                  ) : (
+                    <View style={styles.thumbPlaceholder}>
+                      <Icon name="image" size={22} color={semantic.color.textSecondary} />
+                    </View>
+                  )}
+                  {item.images.length > 1 ? (
+                    <View style={styles.thumbCountBadge}>
+                      <Icon name="camera" size={10} color={semantic.color.textInverse} />
+                      <Text style={styles.thumbCountText}>{item.images.length}</Text>
+                    </View>
+                  ) : null}
+                </View>
 
                 <View style={styles.rowInfo}>
                   <Text style={styles.rowTitle} numberOfLines={2}>
@@ -760,7 +794,7 @@ export default function MyListingsScreen() {
   );
 }
 
-const THUMB_SIZE = 80;
+const THUMB_SIZE = 88;
 
 const styles = StyleSheet.create({
   screen: {
@@ -800,7 +834,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: semantic.spacing.pageX,
     paddingBottom: primitive.space[3],
     backgroundColor: semantic.color.bgSurface,
-    gap: primitive.space[1.5],
+    gap: primitive.space[2],
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2],
+  },
+  metricTile: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: primitive.space[2],
+    alignItems: 'center',
+    gap: 2,
+  },
+  metricValue: {
+    fontSize: primitive.fontSize.lg,
+    lineHeight: 22,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textPrimary,
+  },
+  metricValueHighTrust: {
+    color: semantic.color.freeFg,
+  },
+  metricLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
   },
   quotaMeterFlush: {
     paddingVertical: 0,
@@ -863,6 +926,11 @@ const styles = StyleSheet.create({
   rowPressed: {
     opacity: primitive.opacity.pressed,
   },
+  thumbWrap: {
+    position: 'relative',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+  },
   thumb: {
     width: THUMB_SIZE,
     height: THUMB_SIZE,
@@ -879,6 +947,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  thumbCountBadge: {
+    position: 'absolute',
+    right: 5,
+    bottom: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: semantic.color.overlayDark,
+    borderRadius: primitive.radius.xs,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  thumbCountText: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textInverse,
+  },
   rowInfo: {
     flex: 1,
     gap: primitive.space[1],
@@ -894,9 +980,10 @@ const styles = StyleSheet.create({
   },
   priceText: {
     ...semantic.type.price,
+    color: semantic.color.accent,
   },
   priceFreeText: {
-    color: semantic.color.success,
+    color: semantic.color.freeFg,
   },
   metaLine: {
     ...semantic.type.micro,

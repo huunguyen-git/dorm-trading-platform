@@ -22,9 +22,8 @@ import {
   InlineBanner,
   SegmentedControl,
   SwitchRow,
-  UnderlineTabs,
+  type AppIconName,
   type SegmentedOption,
-  type UnderlineTabItem,
 } from './ui';
 
 export interface ListingFilterBarProps {
@@ -50,18 +49,70 @@ const TYPE_SEGMENT_OPTIONS: SegmentedOption<TypeSegmentValue>[] = [
 const SORT_OPTIONS: Array<{
   value: ListingSortOption;
   label: string;
+  shortLabel: string;
   requiresLocation?: boolean;
 }> = [
-  { value: 'newest', label: 'Mới nhất' },
-  { value: 'price_asc', label: 'Giá thấp đến cao' },
-  { value: 'price_desc', label: 'Giá cao đến thấp' },
-  { value: 'distance_asc', label: 'Gần nhất', requiresLocation: true },
+  { value: 'newest', label: 'Mới nhất', shortLabel: 'Mới nhất' },
+  { value: 'price_asc', label: 'Giá thấp đến cao', shortLabel: 'Giá tăng' },
+  { value: 'price_desc', label: 'Giá cao đến thấp', shortLabel: 'Giá giảm' },
+  { value: 'distance_asc', label: 'Gần nhất', shortLabel: 'Gần nhất', requiresLocation: true },
 ];
+
+const QUICK_PRICE_PRESETS = [
+  { label: '50k', value: '50000' },
+  { label: '100k', value: '100000' },
+  { label: '250k', value: '250000' },
+  { label: '500k', value: '500000' },
+];
+
+const QUICK_COURSE_PRESETS = ['SE100', 'IT003', 'MA006'];
+const QUICK_RADIUS_PRESETS = ['1', '2', '5'];
 
 interface ActiveFilterChip {
   key: string;
   label: string;
   onRemove: () => void;
+}
+
+function getCategoryIcon(categoryId: string): AppIconName {
+  switch (categoryId) {
+    case ALL_CATEGORY_VALUE:
+      return 'grid';
+    case 'GIAO_TRINH':
+    case 'GT_CNTT':
+    case 'GT_DAI_CUONG':
+    case 'GT_KINH_TE':
+    case 'GT_NGOAI_NGU':
+      return 'book-open';
+    case 'DO_CHO_TANG':
+      return 'gift';
+    case 'DO_GIA_DUNG':
+      return 'coffee';
+    case 'NOI_THAT_TRO':
+      return 'home';
+    case 'THIET_BI_DIEN':
+    case 'TB_DIEN_TU':
+      return 'cpu';
+    default:
+      return 'tag';
+  }
+}
+
+function getShortCategoryLabel(id: string, name: string): string {
+  switch (id) {
+    case 'GIAO_TRINH':
+      return 'Giáo trình';
+    case 'DO_CHO_TANG':
+      return 'Cho tặng';
+    case 'DO_GIA_DUNG':
+      return 'Gia dụng';
+    case 'NOI_THAT_TRO':
+      return 'Nội thất';
+    case 'THIET_BI_DIEN':
+      return 'Điện tử';
+    default:
+      return name;
+  }
 }
 
 function findRootForCategory(
@@ -156,24 +207,15 @@ export function ListingFilterBar({
     [rootCategories, filters.categoryId],
   );
 
-  const categoryTabs = useMemo<UnderlineTabItem<string>[]>(
-    () => [
-      { value: ALL_CATEGORY_VALUE, label: 'Tất cả', testID: 'category-chip-all' },
-      ...rootCategories.map((root) => ({
-        value: root.id,
-        label: root.name,
-        testID: `category-chip-${root.id}`,
-      })),
-    ],
-    [rootCategories],
-  );
-
   const selectedZone = useMemo(
     () => locations.find((zone) => zone.code === locationCode) ?? null,
     [locations, locationCode],
   );
 
   const activeFilterCount = useMemo(() => countActiveDiscoveryFilters(filters), [filters]);
+  const hasOriginZone = Boolean(
+    filters.locationCode || (typeof filters.lat === 'number' && typeof filters.lng === 'number'),
+  );
 
   const handleSearchSubmit = () => {
     setValidationError('');
@@ -200,6 +242,38 @@ export function ListingFilterBar({
     onApply({
       ...filters,
       categoryId,
+      page: 0,
+    });
+  };
+
+  const handleQuickSort = (nextSort: ListingSortOption) => {
+    setValidationError('');
+    if (nextSort === 'distance_asc' && !hasOriginZone) return;
+    onApply({
+      ...filters,
+      sort: nextSort,
+      page: 0,
+    });
+  };
+
+  const handleQuickToggleFree = () => {
+    setValidationError('');
+    const nextFree = !filters.freeOnly;
+    onApply({
+      ...filters,
+      freeOnly: nextFree ? true : undefined,
+      maxPrice: nextFree ? undefined : filters.maxPrice,
+      minPrice: nextFree ? undefined : filters.minPrice,
+      page: 0,
+    });
+  };
+
+  const handleQuickToggleCombo = () => {
+    setValidationError('');
+    const isComboActive = normalizeSearchTypeParam(filters.type) === 'COMBO';
+    onApply({
+      ...filters,
+      type: isComboActive ? undefined : 'COMBO',
       page: 0,
     });
   };
@@ -401,102 +475,158 @@ export function ListingFilterBar({
   const isFilterActive = expanded || activeFilterCount > 0;
   const segmentValue: TypeSegmentValue =
     listingType === 'SINGLE' || listingType === 'COMBO' ? listingType : 'ALL';
+  const activeSort = filters.sort ?? 'newest';
+  const isFreeQuickActive = filters.freeOnly === true;
+  const isComboQuickActive = normalizeSearchTypeParam(filters.type) === 'COMBO';
 
   return (
     <View style={styles.container} testID="listing-filter-bar">
-      {/* Compact soft-filled search bar + Filter trigger */}
-      <View style={styles.searchBarRow}>
-        <View style={styles.searchField}>
-          <Pressable
-            testID="search-submit-button"
-            accessibilityRole="button"
-            accessibilityLabel="Tìm kiếm"
-            disabled={loading}
-            hitSlop={6}
-            onPress={handleSearchSubmit}
-            style={({ pressed }) => [
-              styles.searchIconBtn,
-              pressed && styles.pressed,
-              loading && styles.disabled,
-            ]}
-          >
-            <Icon name="search" size={18} color={semantic.color.textSecondary} />
-          </Pressable>
-
-          <TextInput
-            testID="search-input"
-            accessibilityLabel="Tìm kiếm tin đăng"
-            placeholder="Tìm giáo trình, đồ dùng, mã môn..."
-            placeholderTextColor={semantic.color.textSecondary}
-            value={queryText}
-            onChangeText={setQueryText}
-            returnKeyType="search"
-            onSubmitEditing={handleSearchSubmit}
-            style={styles.searchInput}
-          />
-
-          {queryText.length > 0 ? (
+      {/* Branded Terracotta Search Dock (Shopee / Tiki style) */}
+      <View style={styles.brandedSearchWrap}>
+        <View style={styles.searchBarRow}>
+          <View style={styles.searchField}>
             <Pressable
-              testID="clear-search-input"
+              testID="search-submit-button"
               accessibilityRole="button"
-              accessibilityLabel="Xóa từ khóa tìm kiếm"
-              hitSlop={8}
-              onPress={handleClearSearchText}
-              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+              accessibilityLabel="Tìm kiếm"
+              disabled={loading}
+              hitSlop={6}
+              onPress={handleSearchSubmit}
+              style={({ pressed }) => [
+                styles.searchIconBtn,
+                pressed && styles.pressed,
+                loading && styles.disabled,
+              ]}
             >
-              <Icon name="x" size={15} color={semantic.color.textSecondary} />
+              <Icon name="search" size={17} color={semantic.color.accent} />
             </Pressable>
-          ) : null}
-        </View>
 
-        <Pressable
-          testID="toggle-advanced-filters"
-          accessibilityRole="button"
-          accessibilityLabel={
-            activeFilterCount > 0 ? `Lọc (${activeFilterCount} bộ lọc đang áp dụng)` : 'Lọc'
-          }
-          accessibilityState={{ expanded }}
-          onPress={handleToggleSheet}
-          style={({ pressed }) => [
-            styles.filterTrigger,
-            isFilterActive && styles.filterTriggerActive,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Icon
-            name="sliders"
-            size={16}
-            color={isFilterActive ? semantic.color.accent : semantic.color.textPrimary}
-          />
-          <Text
-            style={[
-              styles.filterTriggerLabel,
-              isFilterActive && styles.filterTriggerLabelActive,
+            <TextInput
+              testID="search-input"
+              accessibilityLabel="Tìm kiếm tin đăng"
+              placeholder="Tìm giáo trình, mã môn SE100, quạt, đèn..."
+              placeholderTextColor={semantic.color.textSecondary}
+              value={queryText}
+              onChangeText={setQueryText}
+              returnKeyType="search"
+              onSubmitEditing={handleSearchSubmit}
+              style={styles.searchInput}
+            />
+
+            {queryText.length > 0 ? (
+              <Pressable
+                testID="clear-search-input"
+                accessibilityRole="button"
+                accessibilityLabel="Xóa từ khóa tìm kiếm"
+                hitSlop={8}
+                onPress={handleClearSearchText}
+                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+              >
+                <Icon name="x" size={14} color={semantic.color.textSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <Pressable
+            testID="toggle-advanced-filters"
+            accessibilityRole="button"
+            accessibilityLabel={
+              activeFilterCount > 0 ? `Lọc (${activeFilterCount} bộ lọc đang áp dụng)` : 'Lọc'
+            }
+            accessibilityState={{ expanded }}
+            onPress={handleToggleSheet}
+            style={({ pressed }) => [
+              styles.filterTrigger,
+              isFilterActive && styles.filterTriggerActive,
+              pressed && styles.pressed,
             ]}
           >
-            Lọc
-          </Text>
-          {activeFilterCount > 0 ? (
-            <View style={styles.countBadge} testID="active-filter-count-badge">
-              <Text style={styles.countBadgeText}>{activeFilterCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+            <Icon
+              name="sliders"
+              size={15}
+              color={isFilterActive ? semantic.color.accent : semantic.color.textInverse}
+            />
+            <Text
+              style={[
+                styles.filterTriggerLabel,
+                isFilterActive && styles.filterTriggerLabelActive,
+              ]}
+            >
+              Lọc
+            </Text>
+            {activeFilterCount > 0 ? (
+              <View style={styles.countBadge} testID="active-filter-count-badge">
+                <Text style={styles.countBadgeText}>{activeFilterCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
 
-      {/* Category UnderlineTabs + flush child strip */}
+      {/* Visual Icon Category Strip (Lazada / Shopee / Tiki style) */}
       {rootCategories.length > 0 ? (
         <View style={styles.categorySection}>
-          <UnderlineTabs
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryStripContent}
             testID="category-underline-tabs"
-            accessibilityLabel="Danh mục tin đăng"
-            items={categoryTabs}
-            value={activeRoot?.id ?? ALL_CATEGORY_VALUE}
-            onChange={(nextValue) =>
-              handleSelectCategory(nextValue === ALL_CATEGORY_VALUE ? undefined : nextValue)
-            }
-          />
+          >
+            {[
+              { id: ALL_CATEGORY_VALUE, name: 'Tất cả', isAll: true },
+              ...rootCategories.map((root) => ({
+                id: root.id,
+                name: getShortCategoryLabel(root.id, root.name),
+                isAll: false,
+              })),
+            ].map((item) => {
+              const selected = item.isAll
+                ? !activeRoot
+                : activeRoot?.id === item.id;
+              return (
+                <Pressable
+                  key={item.id}
+                  testID={item.isAll ? 'category-chip-all' : `category-chip-${item.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.name}
+                  accessibilityState={{ selected }}
+                  onPress={() => handleSelectCategory(item.isAll ? undefined : item.id)}
+                  style={({ pressed }) => [
+                    styles.catTile,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.catIconBox,
+                      selected && styles.catIconBoxActive,
+                      item.id === 'DO_CHO_TANG' && !selected && styles.catIconBoxFree,
+                    ]}
+                  >
+                    <Icon
+                      name={getCategoryIcon(item.id)}
+                      size={20}
+                      color={
+                        selected
+                          ? semantic.color.textInverse
+                          : item.id === 'DO_CHO_TANG'
+                            ? semantic.color.freeFg
+                            : semantic.color.accent
+                      }
+                    />
+                  </View>
+                  <Text
+                    style={[styles.catTileLabel, selected && styles.catTileLabelActive]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
+          {/* Sub-category pill strip when a parent category has children */}
           {activeRoot && activeRoot.children.length > 0 ? (
             <View style={styles.subCategoryBar}>
               <ScrollView
@@ -522,7 +652,7 @@ export function ListingFilterBar({
                       filters.categoryId === activeRoot.id && styles.subChipTextActive,
                     ]}
                   >
-                    Tất cả {activeRoot.name}
+                    Tất cả {getShortCategoryLabel(activeRoot.id, activeRoot.name)}
                   </Text>
                 </Pressable>
                 {activeRoot.children.map((child) => {
@@ -556,6 +686,95 @@ export function ListingFilterBar({
           ) : null}
         </View>
       ) : null}
+
+      {/* Quick 1-Tap Sort & Marketplace Discovery Pills (Shopee / Tiki bar) */}
+      <View style={styles.quickSortBar}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickSortContent}
+        >
+          {SORT_OPTIONS.filter((opt) => !opt.requiresLocation || hasOriginZone).map((opt) => {
+            const active = activeSort === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                testID={`quick-sort-${opt.value}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Sắp xếp ${opt.label}`}
+                accessibilityState={{ selected: active }}
+                onPress={() => handleQuickSort(opt.value)}
+                style={({ pressed }) => [
+                  styles.quickPill,
+                  active && styles.quickPillActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.quickPillText, active && styles.quickPillTextActive]}>
+                  {opt.shortLabel}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          <View style={styles.quickDivider} />
+
+          <Pressable
+            testID="quick-pill-free"
+            accessibilityRole="button"
+            accessibilityLabel="Lọc tin cho tặng miễn phí"
+            accessibilityState={{ selected: isFreeQuickActive }}
+            onPress={handleQuickToggleFree}
+            style={({ pressed }) => [
+              styles.quickPill,
+              isFreeQuickActive && styles.quickPillFreeActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Icon
+              name="gift"
+              size={12}
+              color={isFreeQuickActive ? semantic.color.textInverse : semantic.color.freeFg}
+            />
+            <Text
+              style={[
+                styles.quickPillText,
+                styles.quickPillFreeText,
+                isFreeQuickActive && styles.quickPillTextInverse,
+              ]}
+            >
+              Tặng 0đ
+            </Text>
+          </Pressable>
+
+          <Pressable
+            testID="quick-pill-combo"
+            accessibilityRole="button"
+            accessibilityLabel="Lọc tin bộ combo"
+            accessibilityState={{ selected: isComboQuickActive }}
+            onPress={handleQuickToggleCombo}
+            style={({ pressed }) => [
+              styles.quickPill,
+              isComboQuickActive && styles.quickPillActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Icon
+              name="layers"
+              size={12}
+              color={isComboQuickActive ? semantic.color.accent : semantic.color.textSecondary}
+            />
+            <Text
+              style={[
+                styles.quickPillText,
+                isComboQuickActive && styles.quickPillTextActive,
+              ]}
+            >
+              Bộ Combo
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
 
       {/* 1-tap dismissible active filter chips */}
       {activeChips.length > 0 ? (
@@ -643,7 +862,7 @@ export function ListingFilterBar({
 
         <HairlineDivider />
 
-        {/* Price & Course Code */}
+        {/* Price & Course Code with quick presets */}
         <View style={styles.sheetSection}>
           <FormField
             testID="filter-max-price"
@@ -658,16 +877,56 @@ export function ListingFilterBar({
             helperText={freeOnly ? 'Đã tắt mức giá khi chọn chỉ tin miễn phí.' : undefined}
           />
 
+          {!freeOnly ? (
+            <View style={styles.presetRow}>
+              {QUICK_PRICE_PRESETS.map((preset) => {
+                const selected = maxPriceText.replace(/[.,\s]/g, '') === preset.value;
+                return (
+                  <Pressable
+                    key={preset.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Chọn giá tối đa ${preset.label}`}
+                    onPress={() => setMaxPriceText(selected ? '' : preset.value)}
+                    style={[styles.presetChip, selected && styles.presetChipActive]}
+                  >
+                    <Text style={[styles.presetChipText, selected && styles.presetChipTextActive]}>
+                      ≤ {preset.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
           <FormField
             testID="filter-course-code"
             label="Mã môn học"
             accessibilityLabel="Mã môn học"
-            placeholder="VD: SE100, IT001"
+            placeholder="VD: SE100, IT003"
             autoCapitalize="characters"
             autoCorrect={false}
             value={courseCode}
             onChangeText={setCourseCode}
           />
+
+          <View style={styles.presetRow}>
+            {QUICK_COURSE_PRESETS.map((code) => {
+              const selected = courseCode.trim().toUpperCase() === code;
+              return (
+                <Pressable
+                  key={code}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Chọn mã môn ${code}`}
+                  onPress={() => setCourseCode(selected ? '' : code)}
+                  style={[styles.presetChip, selected && styles.presetChipActive]}
+                >
+                  <Text style={[styles.presetChipText, selected && styles.presetChipTextActive]}>
+                    {code}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         <HairlineDivider />
@@ -722,7 +981,7 @@ export function ListingFilterBar({
             suffix="km"
             placeholder={
               selectedZone
-                ? `Từ ${selectedZone.name} (VD: 1.5)`
+                ? `Từ ${selectedZone.name} (nhập số km bất kỳ)`
                 : 'Chọn khu vực trước để nhập bán kính'
             }
             keyboardType="decimal-pad"
@@ -731,6 +990,27 @@ export function ListingFilterBar({
             onChangeText={setRadiusText}
             containerStyle={styles.radiusField}
           />
+
+          {selectedZone ? (
+            <View style={styles.presetRow}>
+              {QUICK_RADIUS_PRESETS.map((km) => {
+                const selected = radiusText.trim() === km;
+                return (
+                  <Pressable
+                    key={km}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Chọn nhanh bán kính ${km} km`}
+                    onPress={() => setRadiusText(selected ? '' : km)}
+                    style={[styles.presetChip, selected && styles.presetChipActive]}
+                  >
+                    <Text style={[styles.presetChipText, selected && styles.presetChipTextActive]}>
+                      {km} km
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
         </View>
 
         <HairlineDivider />
@@ -769,7 +1049,9 @@ export function ListingFilterBar({
                         {option.label}
                       </Text>
                       {disabled ? (
-                        <Text style={styles.sortHint}>Chọn khu vực ĐHQG-HCM để bật sắp xếp gần nhất</Text>
+                        <Text style={styles.sortHint}>
+                          Chọn khu vực ĐHQG-HCM để bật sắp xếp gần nhất
+                        </Text>
                       ) : null}
                     </View>
 
@@ -791,14 +1073,16 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: semantic.color.bgSurface,
   },
+  brandedSearchWrap: {
+    backgroundColor: semantic.color.accent,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[1],
+    paddingBottom: primitive.space[3],
+  },
   searchBarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: semantic.spacing.pageX,
-    paddingTop: primitive.space[1],
-    paddingBottom: primitive.space[2.5],
     gap: primitive.space[2],
-    backgroundColor: semantic.color.bgSurface,
   },
   searchField: {
     flex: 1,
@@ -806,14 +1090,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 44,
     borderRadius: primitive.radius.lg,
-    backgroundColor: semantic.color.bgSubtle,
+    backgroundColor: semantic.color.bgSurface,
     paddingLeft: primitive.space[2],
     paddingRight: primitive.space[2],
     gap: primitive.space[1.5],
+    ...primitive.elevation.thumb,
   },
   searchIconBtn: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: primitive.radius.full,
     alignItems: 'center',
     justifyContent: 'center',
@@ -821,13 +1106,13 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     minHeight: 40,
-    fontSize: primitive.fontSize.base,
+    fontSize: 14,
     color: semantic.color.textPrimary,
     paddingVertical: primitive.space[1.5],
   },
   clearBtn: {
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderRadius: primitive.radius.full,
     backgroundColor: semantic.color.bgTrack,
     alignItems: 'center',
@@ -840,18 +1125,18 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: primitive.space[3],
     borderRadius: primitive.radius.lg,
-    backgroundColor: semantic.color.bgSubtle,
+    backgroundColor: semantic.color.inversePillBg,
     borderWidth: 1,
-    borderColor: semantic.color.bgSubtle,
+    borderColor: semantic.color.inversePillBorder,
     gap: primitive.space[1.5],
   },
   filterTriggerActive: {
-    backgroundColor: semantic.color.accentSoft,
-    borderColor: semantic.color.accentBorder,
+    backgroundColor: semantic.color.bgSurface,
+    borderColor: semantic.color.bgSurface,
   },
   filterTriggerLabel: {
     ...semantic.type.label,
-    color: semantic.color.textPrimary,
+    color: semantic.color.textInverse,
   },
   filterTriggerLabelActive: {
     color: semantic.color.accent,
@@ -872,13 +1157,59 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     color: semantic.color.textInverse,
   },
+
+  // Visual Icon Category Strip
   categorySection: {
-    backgroundColor: semantic.color.bgSurface,
-  },
-  subCategoryBar: {
     backgroundColor: semantic.color.bgSurface,
     borderBottomWidth: 1,
     borderBottomColor: semantic.color.borderHairline,
+  },
+  categoryStripContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
+    gap: primitive.space[3],
+  },
+  catTile: {
+    width: 68,
+    alignItems: 'center',
+    gap: primitive.space[1.5],
+  },
+  catIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: primitive.radius.lg,
+    backgroundColor: semantic.color.accentSoft,
+    borderWidth: 1,
+    borderColor: semantic.color.accentBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catIconBoxFree: {
+    backgroundColor: semantic.color.freeBg,
+    borderColor: semantic.color.successSoft,
+  },
+  catIconBoxActive: {
+    backgroundColor: semantic.color.accent,
+    borderColor: semantic.color.accent,
+    ...primitive.elevation.thumb,
+  },
+  catTileLabel: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
+    textAlign: 'center',
+  },
+  catTileLabelActive: {
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.bold,
+  },
+  subCategoryBar: {
+    backgroundColor: semantic.color.bgWarmTint,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: semantic.color.borderHairline,
     paddingVertical: primitive.space[2],
   },
   subChipRow: {
@@ -892,12 +1223,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: primitive.space[3],
     paddingVertical: primitive.space[1],
     borderRadius: component.chip.radius,
-    backgroundColor: semantic.color.bgSubtle,
+    backgroundColor: semantic.color.bgSurface,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
     alignItems: 'center',
     justifyContent: 'center',
   },
   subChipActive: {
     backgroundColor: semantic.color.textPrimary,
+    borderColor: semantic.color.textPrimary,
   },
   subChipText: {
     ...semantic.type.micro,
@@ -907,6 +1241,63 @@ const styles = StyleSheet.create({
     color: semantic.color.textInverse,
     fontWeight: primitive.fontWeight.semibold,
   },
+
+  // Quick Sort & Discovery Strip
+  quickSortBar: {
+    backgroundColor: semantic.color.bgSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: semantic.color.borderHairline,
+  },
+  quickSortContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[2],
+    gap: primitive.space[2],
+  },
+  quickPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 30,
+    paddingHorizontal: primitive.space[2.5],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+  },
+  quickPillActive: {
+    backgroundColor: semantic.color.accentSoft,
+    borderColor: semantic.color.accentBorder,
+  },
+  quickPillFreeActive: {
+    backgroundColor: semantic.color.freeFg,
+    borderColor: semantic.color.freeFg,
+  },
+  quickPillText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
+  },
+  quickPillTextActive: {
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  quickPillFreeText: {
+    color: semantic.color.freeFg,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  quickPillTextInverse: {
+    color: semantic.color.textInverse,
+  },
+  quickDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: semantic.color.borderStrong,
+  },
+
+  // Active Filter Chips
   activeChipsBar: {
     backgroundColor: semantic.color.bgSurface,
     borderBottomWidth: 1,
@@ -946,6 +1337,8 @@ const styles = StyleSheet.create({
     color: semantic.color.textSecondary,
     fontWeight: primitive.fontWeight.semibold,
   },
+
+  // Advanced Filter Sheet
   sheetBody: {
     paddingTop: primitive.space[2],
     paddingBottom: primitive.space[5],
@@ -963,6 +1356,35 @@ const styles = StyleSheet.create({
   sectionLabel: {
     ...semantic.type.label,
     color: semantic.color.textPrimary,
+  },
+  presetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: primitive.space[2],
+    marginTop: -primitive.space[1],
+  },
+  presetChip: {
+    height: 30,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  presetChipActive: {
+    backgroundColor: semantic.color.accentSoft,
+    borderColor: semantic.color.accentBorder,
+  },
+  presetChipText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+    fontWeight: primitive.fontWeight.semibold,
+    fontVariant: ['tabular-nums'],
+  },
+  presetChipTextActive: {
+    color: semantic.color.accent,
   },
   zoneWrap: {
     flexDirection: 'row',

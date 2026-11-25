@@ -1,7 +1,10 @@
-import { useContext, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Platform,
+  Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -11,6 +14,8 @@ import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
 import { api, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession, type User } from '../auth/session';
+import { useSellerListings } from '../listings/sellerStore';
+import { formatReputationSummary } from '../listings/types';
 import { Action, Field, Notice } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
@@ -58,13 +63,17 @@ function getInitials(name?: string | null, email?: string | null): string {
 export default function ProfileScreen() {
   const nav = useNavigation<Nav>();
   const insets = useContext(SafeAreaInsetsContext);
+  const token = useSession((s) => s.token);
   const user = useSession((s) => s.user);
   const sessionRestriction = useSession((s) => s.restriction);
   const restrictionDismissed = useSession((s) => s.restrictionDismissed);
+  const quota = useSellerListings((s) => s.quota);
+  const loadQuota = useSellerListings((s) => s.loadQuota);
   const isLocked = user?.accountStatus === 'BI_KHOA';
   const hasRestriction = Boolean(
     sessionRestriction ?? (restrictionDismissed ? null : resolveUserRestriction(user)),
   );
+  const isActiveMember = Boolean(token && user?.roles.includes('MEMBER') && !isLocked);
   const showPendingNotice = !isLocked && !user?.roles.includes('MEMBER');
   const [name, setName] = useState(user?.name ?? '');
   const [message, setMessage] = useState('');
@@ -72,6 +81,55 @@ export default function ProfileScreen() {
   const [busy, setBusy] = useState(false);
 
   const initials = getInitials(user?.name, user?.email);
+
+  const syncQuota = useCallback(() => {
+    if (!isActiveMember) return;
+    void loadQuota().catch(() => {});
+  }, [isActiveMember, loadQuota]);
+
+  useEffect(() => {
+    syncQuota();
+  }, [syncQuota]);
+
+  useEffect(() => {
+    const applyLightStatus = () => {
+      if (typeof StatusBar.setBarStyle === 'function') {
+        StatusBar.setBarStyle('light-content', true);
+      }
+      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
+        StatusBar.setBackgroundColor(semantic.color.accent, true);
+      }
+    };
+    const restoreDarkStatus = () => {
+      if (typeof StatusBar.setBarStyle === 'function') {
+        StatusBar.setBarStyle('dark-content', true);
+      }
+      if (Platform.OS === 'android' && typeof StatusBar.setBackgroundColor === 'function') {
+        StatusBar.setBackgroundColor(semantic.color.bgSurface, true);
+      }
+    };
+    applyLightStatus();
+    if (typeof nav?.addListener !== 'function') {
+      return restoreDarkStatus;
+    }
+    const unsubFocus = nav.addListener('focus', applyLightStatus);
+    const unsubBlur = nav.addListener('blur', restoreDarkStatus);
+    return () => {
+      unsubFocus();
+      unsubBlur();
+      restoreDarkStatus();
+    };
+  }, [nav]);
+
+  useEffect(() => {
+    if (typeof nav?.addListener !== 'function') return;
+    return nav.addListener('focus', syncQuota);
+  }, [nav, syncQuota]);
+
+  const reputationSummary =
+    isActiveMember && quota && quota.limit > 0
+      ? formatReputationSummary(quota.reputationScore)
+      : null;
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -104,10 +162,34 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.topBar, { paddingTop: (insets?.top ?? 0) + primitive.space[3] }]}>
-        <Text accessibilityRole="header" style={styles.topBarTitle}>
+      {/* Branded Terracotta Identity Header */}
+      <View style={[styles.heroHeader, { paddingTop: (insets?.top ?? 0) + primitive.space[3] }]}>
+        <Text accessibilityRole="header" style={styles.heroTitle}>
           Hồ sơ của bạn
         </Text>
+
+        <View style={styles.identityRow}>
+          <View style={styles.avatar}>
+            {initials ? (
+              <Text style={styles.avatarText}>{initials}</Text>
+            ) : (
+              <Icon name="user" size={22} color={semantic.color.accent} />
+            )}
+          </View>
+          <View style={styles.identityMeta}>
+            <Text style={styles.displayName} numberOfLines={1}>
+              {user?.name || 'Thành viên'}
+            </Text>
+            {user?.email ? (
+              <Text style={styles.emailText} numberOfLines={1}>
+                {user.email}
+              </Text>
+            ) : null}
+            {user?.studentId ? (
+              <Text style={styles.studentIdText}>MSSV · {user.studentId}</Text>
+            ) : null}
+          </View>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -119,31 +201,8 @@ export default function ProfileScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Identity Summary Band */}
-          <View style={styles.surfaceSection}>
-            <View style={styles.identityRow}>
-              <View style={styles.avatar}>
-                {initials ? (
-                  <Text style={styles.avatarText}>{initials}</Text>
-                ) : (
-                  <Icon name="user" size={22} color={semantic.color.accent} />
-                )}
-              </View>
-              <View style={styles.identityMeta}>
-                <Text style={styles.displayName} numberOfLines={1}>
-                  {user?.name || 'Thành viên'}
-                </Text>
-                {user?.email ? (
-                  <Text style={styles.emailText} numberOfLines={1}>
-                    {user.email}
-                  </Text>
-                ) : null}
-                {user?.studentId ? (
-                  <Text style={styles.studentIdText}>MSSV · {user.studentId}</Text>
-                ) : null}
-              </View>
-            </View>
-
+          {/* Verification Status Bar */}
+          <View style={styles.statusBand}>
             <View style={styles.statusRow}>
               <StatusIndicator
                 variant="dot"
@@ -167,6 +226,76 @@ export default function ProfileScreen() {
           </View>
 
           <HairlineDivider />
+
+          {/* Active Member Reputation & Quick Commerce Shortcuts */}
+          {isActiveMember ? (
+            <>
+              <View style={styles.surfaceSection} testID="profile-commerce-hub">
+                <SectionHeading
+                  title="Hoạt động trao đổi"
+                  subtitle="Theo dõi điểm uy tín, hạn mức đăng tin và quản lý đồ dùng."
+                />
+
+                {quota && quota.limit > 0 && reputationSummary ? (
+                  <View style={styles.statsRow}>
+                    <View style={styles.statTile}>
+                      <View style={styles.statIconRow}>
+                        <Icon name="shield" size={14} color={semantic.color.accent} />
+                        <Text style={styles.statValue}>{quota.reputationScore}</Text>
+                      </View>
+                      <Text style={styles.statLabel}>{reputationSummary.tierLabel}</Text>
+                    </View>
+                    <View style={styles.statTile}>
+                      <View style={styles.statIconRow}>
+                        <Icon name="tag" size={14} color={semantic.color.freeFg} />
+                        <Text style={styles.statValue}>
+                          {quota.activeCount}/{quota.limit}
+                        </Text>
+                      </View>
+                      <Text style={styles.statLabel}>Hạn mức tin đang mở</Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                <View style={styles.quickLinksRow}>
+                  <Pressable
+                    testID="profile-shortcut-my-listings"
+                    accessibilityRole="button"
+                    accessibilityLabel="Mở Tin của tôi"
+                    onPress={() => nav.navigate('MyListings')}
+                    style={({ pressed }) => [styles.quickLinkTile, pressed && styles.tilePressed]}
+                  >
+                    <View style={styles.quickLinkIcon}>
+                      <Icon name="layers" size={18} color={semantic.color.accent} />
+                    </View>
+                    <View style={styles.quickLinkTextWrap}>
+                      <Text style={styles.quickLinkTitle}>Tin của tôi</Text>
+                      <Text style={styles.quickLinkSub}>Quản lý & gia hạn</Text>
+                    </View>
+                    <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
+                  </Pressable>
+
+                  <Pressable
+                    testID="profile-shortcut-inventory"
+                    accessibilityRole="button"
+                    accessibilityLabel="Mở Kho đồ cá nhân"
+                    onPress={() => nav.navigate('InventoryList')}
+                    style={({ pressed }) => [styles.quickLinkTile, pressed && styles.tilePressed]}
+                  >
+                    <View style={[styles.quickLinkIcon, styles.quickLinkIconEmerald]}>
+                      <Icon name="package" size={18} color={semantic.color.freeFg} />
+                    </View>
+                    <View style={styles.quickLinkTextWrap}>
+                      <Text style={styles.quickLinkTitle}>Kho đồ</Text>
+                      <Text style={styles.quickLinkSub}>Đồ dùng cá nhân</Text>
+                    </View>
+                    <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
+                  </Pressable>
+                </View>
+              </View>
+              <HairlineDivider />
+            </>
+          ) : null}
 
           {/* Account Alerts */}
           {hasRestriction || showPendingNotice ? (
@@ -299,23 +428,28 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: semantic.color.bgPage,
+    backgroundColor: semantic.color.bgCanvas,
   },
-  topBar: {
-    backgroundColor: semantic.color.bgSurface,
+  heroHeader: {
+    backgroundColor: semantic.color.accent,
     paddingHorizontal: semantic.spacing.pageX,
-    paddingBottom: primitive.space[3],
-    borderBottomWidth: 1,
-    borderBottomColor: semantic.color.borderHairline,
+    paddingBottom: primitive.space[5],
+    gap: primitive.space[3],
   },
-  topBarTitle: {
+  heroTitle: {
     ...semantic.type.screenTitle,
+    color: semantic.color.textInverse,
   },
   bodyWrap: {
     flex: 1,
   },
   scrollContent: {
     paddingBottom: primitive.space[8],
+  },
+  statusBand: {
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
   },
   surfaceSection: {
     backgroundColor: semantic.color.bgSurface,
@@ -329,10 +463,10 @@ const styles = StyleSheet.create({
     gap: primitive.space[3],
   },
   avatar: {
-    width: 52,
-    height: 52,
+    width: 54,
+    height: 54,
     borderRadius: primitive.radius.full,
-    backgroundColor: semantic.color.accentSoft,
+    backgroundColor: semantic.color.bgSurface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -346,14 +480,18 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   displayName: {
-    ...semantic.type.sectionTitle,
+    fontSize: primitive.fontSize.lg,
+    lineHeight: 24,
+    fontWeight: primitive.fontWeight.bold,
+    color: semantic.color.textInverse,
   },
   emailText: {
     ...semantic.type.caption,
-    color: semantic.color.textPrimary,
+    color: semantic.color.textInverseMuted,
   },
   studentIdText: {
     ...semantic.type.micro,
+    color: semantic.color.textInverseMuted,
   },
   statusRow: {
     flexDirection: 'row',
@@ -361,13 +499,82 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: primitive.space[3],
   },
+  statsRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
+  },
+  statTile: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[3],
+    gap: 4,
+  },
+  statIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1.5],
+  },
+  statValue: {
+    fontSize: primitive.fontSize.xl,
+    lineHeight: 26,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textPrimary,
+  },
+  statLabel: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+  },
+  quickLinksRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
+  },
+  quickLinkTile: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: primitive.space[2.5],
+  },
+  tilePressed: {
+    opacity: primitive.opacity.pressed,
+  },
+  quickLinkIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickLinkIconEmerald: {
+    backgroundColor: semantic.color.freeBg,
+  },
+  quickLinkTextWrap: {
+    flex: 1,
+    gap: 1,
+  },
+  quickLinkTitle: {
+    ...semantic.type.label,
+    fontSize: primitive.fontSize.sm,
+  },
+  quickLinkSub: {
+    fontSize: 11,
+    lineHeight: 14,
+    color: semantic.color.textSecondary,
+  },
   noticeStack: {
     paddingHorizontal: semantic.spacing.pageX,
     paddingVertical: primitive.space[3],
     gap: primitive.space[2.5],
   },
   sectionSpacer: {
-    height: primitive.space[3],
+    height: primitive.space[2],
   },
   actionStack: {
     gap: primitive.space[2.5],

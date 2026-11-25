@@ -1343,4 +1343,51 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
     });
     expect(await screen.findByText('5 / 5 tin')).toBeTruthy();
   });
+
+  test('FR-13: MyListingsScreen exposes both Gia hạn and Công khai lại for HET_HAN listing', async () => {
+    const expiredListing = makeListingSummary({
+      id: 'tin-expired-1',
+      title: 'Quạt đứng Senko đã hết hạn',
+      status: 'HET_HAN',
+      version: 3,
+    });
+    mockedSellerApi.fetchMyListings.mockResolvedValueOnce({
+      items: [expiredListing],
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+      quota: sampleQuota,
+    });
+    mockedSellerApi.publishListing.mockResolvedValueOnce({
+      listing: makeListingDetail({ ...expiredListing, status: 'CONG_KHAI', version: 4 }),
+      quota: { ...sampleQuota, activeCount: 2, remaining: 3 },
+    });
+
+    render(<MyListingsScreen />);
+    expect(await screen.findByTestId('my-listing-renew-tin-expired-1')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('my-listing-more-tin-expired-1'));
+    expect(screen.getByTestId('action-sheet-renew-tin-expired-1')).toBeTruthy();
+    const republishOption = screen.getByTestId('action-sheet-publish-tin-expired-1');
+    fireEvent.press(republishOption);
+
+    await waitFor(() => {
+      expect(mockedSellerApi.publishListing).toHaveBeenCalledWith('tin-expired-1', 3);
+      expect(
+        screen.getByText('Đã công khai tin "Quạt đứng Senko đã hết hạn".'),
+      ).toBeTruthy();
+    });
+  });
+
+  test('CreateListingScreen quick condition and price preset chips fill inputs cleanly', async () => {
+    render(<CreateListingScreen />);
+    expect(await screen.findByTestId('form-readiness-strip')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('condition-preset-Mới 95%'));
+    expect(screen.getByTestId('listing-condition-input').props.value).toBe('Mới 95%');
+
+    fireEvent.press(screen.getByTestId('price-preset-100000'));
+    expect(screen.getByTestId('listing-price-input').props.value).toBe('100000');
+  });
 });

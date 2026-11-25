@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,6 +20,8 @@ import type { Nav, RootStack } from '../navigation';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import type { InventoryItemStatus } from '../inventory/types';
 import { useDiscovery } from '../listings/discoveryStore';
+import { extractApiError, isRestrictedError } from '../listings/sellerApi';
+import { useSellerListings } from '../listings/sellerStore';
 import {
   formatReputationSummary,
   formatShortDate,
@@ -42,8 +45,22 @@ import {
 } from '../components/ui';
 import { component, primitive, semantic } from '../theme';
 
-const PHOTO_HEIGHT = 300;
+const PHOTO_HEIGHT = 344;
 const HIGH_TRUST_THRESHOLD = 120;
+
+function formatListingExpiryChip(status: string, expiresAt?: string | null): string {
+  if (status === 'NHAP') return 'Chưa công khai';
+  if (status === 'DA_RUT') return 'Đã rút tin';
+  if (status === 'HET_HAN') return 'Đã hết hạn';
+  if (status === 'KET_THUC') return 'Đã kết thúc';
+  if (status === 'GIU_CHO') return 'Đang giữ chỗ';
+  if (!expiresAt) return '30 ngày';
+  const ms = new Date(expiresAt).getTime();
+  if (Number.isNaN(ms)) return '30 ngày';
+  const daysLeft = Math.ceil((ms - Date.now()) / (24 * 60 * 60 * 1000));
+  if (daysLeft <= 0) return 'Hết hạn hôm nay';
+  return `Còn ${daysLeft} ngày`;
+}
 
 function getItemStatusMeta(status: InventoryItemStatus): { label: string; tone: StatusTone } {
   if (status === 'DANG_GIU') {
@@ -97,13 +114,20 @@ export default function ListingScreen() {
   const listingId = params?.id ?? previewSummary?.id ?? '';
   const carouselRef = useRef<ScrollView | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [reputationSheetOpen, setReputationSheetOpen] = useState(false);
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
+  const [ownerBusy, setOwnerBusy] = useState(false);
+  const [ownerNotice, setOwnerNotice] = useState('');
+  const [ownerError, setOwnerError] = useState('');
 
   useEffect(() => {
     setActivePhotoIndex(0);
+    setLightboxOpen(false);
     setReputationSheetOpen(false);
     setMoreSheetOpen(false);
+    setOwnerNotice('');
+    setOwnerError('');
     if (listingId) {
       void loadDetail(listingId);
     } else {
@@ -256,7 +280,17 @@ export default function ListingScreen() {
   const comboItemCount = Math.max(2, detail?.items.length || display.itemCount);
   const showUrgentStatusBadge = display.status !== 'CONG_KHAI';
 
-  const canOwnerEdit = detail ? detail.viewer.canEdit : display.status !== 'GIU_CHO';
+  const canOwnerEdit = detail
+    ? detail.viewer.canEdit
+    : display.status !== 'GIU_CHO' && display.status !== 'AN' && display.status !== 'KET_THUC';
+  const canOwnerWithdraw = detail
+    ? detail.viewer.canWithdraw
+    : display.status === 'CONG_KHAI' || display.status === 'CHO_DUYET';
+  const canOwnerRenew = Boolean(
+    detail?.viewer.canRenew &&
+      ((display.status === 'CONG_KHAI' && display.renewalReminderDue) ||
+        display.status === 'HET_HAN'),
+  );
   const reserveBlockedByListing = isReserved || display.hasUnavailableItems;
   const reserveDisabledForMember =
     isAuthenticated &&
@@ -280,6 +314,63 @@ export default function ListingScreen() {
       'Tính năng sắp ra mắt',
       `Tính năng ${featureLabel} đang được hoàn thiện và sẽ sớm ra mắt.`,
     );
+  };
+
+  const performOwnerWithdraw = async () => {
+    if (!display || ownerBusy) return;
+    setOwnerBusy(true);
+    setOwnerNotice('');
+    setOwnerError('');
+    try {
+      await useSellerListings.getState().withdraw(display.id, display.version);
+      await loadDetail(display.id);
+      setOwnerNotice('Đã rút tin khỏi hiển thị công khai và giải phóng liên kết đồ vật.');
+    } catch (err) {
+      if (!isRestrictedError(err)) {
+        const parsed = extractApiError(err, 'Không thể rút tin đăng.');
+        setOwnerError(parsed.message);
+      }
+    } finally {
+      setOwnerBusy(false);
+    }
+  };
+
+  const handleOwnerWithdrawPress = () => {
+    if (!canOwnerWithdraw || ownerBusy) return;
+    const comboNote = display.isCombo
+      ? `Toàn bộ ${comboItemCount} đồ vật trong combo sẽ được giải phóng liên kết khỏi tin này.`
+      : 'Đồ vật gắn với tin sẽ được giải phóng liên kết khỏi tin này.';
+    Alert.alert(
+      'Xác nhận rút tin',
+      `Rút tin "${display.title}" sẽ ngừng hiển thị với người mua và hoàn lại 1 suất hạn mức (nếu đang công khai). ${comboNote}`,
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Rút tin',
+          style: 'destructive',
+          onPress: () => void performOwnerWithdraw(),
+        },
+      ],
+    );
+  };
+
+  const handleOwnerRenewPress = async () => {
+    if (!canOwnerRenew || ownerBusy) return;
+    setOwnerBusy(true);
+    setOwnerNotice('');
+    setOwnerError('');
+    try {
+      await useSellerListings.getState().renew(display.id, display.version);
+      await loadDetail(display.id);
+      setOwnerNotice('Đã gia hạn tin thêm 30 ngày.');
+    } catch (err) {
+      if (!isRestrictedError(err)) {
+        const parsed = extractApiError(err, 'Không thể gia hạn tin đăng.');
+        setOwnerError(parsed.message);
+      }
+    } finally {
+      setOwnerBusy(false);
+    }
   };
 
   const handleMessagePress = () => {
@@ -350,10 +441,35 @@ export default function ListingScreen() {
           key: 'edit',
           label: 'Sửa tin',
           icon: 'edit-2',
-          disabled: !canOwnerEdit,
+          disabled: !canOwnerEdit || ownerBusy,
           onPress: () => navigation.navigate('EditListing', { id: display.id }),
           testID: 'action-sheet-edit',
         },
+        ...(canOwnerRenew
+          ? [
+              {
+                key: 'renew',
+                label: 'Gia hạn +30 ngày',
+                icon: 'refresh-cw' as const,
+                disabled: ownerBusy,
+                onPress: () => void handleOwnerRenewPress(),
+                testID: 'action-sheet-renew',
+              },
+            ]
+          : []),
+        ...(canOwnerWithdraw
+          ? [
+              {
+                key: 'withdraw',
+                label: 'Rút tin',
+                icon: 'eye-off' as const,
+                destructive: true,
+                disabled: ownerBusy,
+                onPress: handleOwnerWithdrawPress,
+                testID: 'action-sheet-withdraw',
+              },
+            ]
+          : []),
         {
           key: 'manage',
           label: 'Quản lý tin của tôi',
@@ -395,6 +511,14 @@ export default function ListingScreen() {
         },
       ];
 
+  const expiryChipText = formatListingExpiryChip(display.status, display.expiresAt);
+  const displayItemCount = detail?.items.length || Math.max(1, display.itemCount);
+  const listingTypeReadable = display.isCombo
+    ? 'Bán theo bộ'
+    : isFree
+      ? 'Cho tặng'
+      : 'Bán lẻ';
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -402,8 +526,8 @@ export default function ListingScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Non-blocking sync error & restriction strips */}
-        {detailError || hasVisibleRestriction ? (
+        {/* Non-blocking sync error, owner feedback & restriction strips */}
+        {detailError || ownerError || ownerNotice || hasVisibleRestriction ? (
           <View style={styles.topNoticesWrap}>
             {detailError ? (
               <InlineBanner
@@ -415,11 +539,15 @@ export default function ListingScreen() {
                 onActionPress={handleRetry}
               />
             ) : null}
+            {ownerError ? <InlineBanner tone="danger" message={ownerError} /> : null}
+            {ownerNotice ? (
+              <InlineBanner testID="owner-action-notice" tone="success" message={ownerNotice} />
+            ) : null}
             {hasVisibleRestriction ? <RestrictedAccountNotice /> : null}
           </View>
         ) : null}
 
-        {/* 1. Edge-to-Edge Full-Bleed Photo Carousel */}
+        {/* 1. Edge-to-Edge Full-Bleed Photo Carousel + Tap-to-Zoom Lightbox */}
         <View style={styles.galleryRoot} testID="listing-gallery">
           {images.length > 0 ? (
             <>
@@ -434,24 +562,38 @@ export default function ListingScreen() {
                     scrollEventThrottle={16}
                   >
                     {images.map((uri, index) => (
-                      <Image
+                      <Pressable
                         key={`${uri}-${index}`}
-                        testID={index === activePhotoIndex ? 'gallery-main-image' : undefined}
-                        source={{ uri }}
-                        style={{ width: stageWidth, height: PHOTO_HEIGHT }}
-                        resizeMode="cover"
-                        accessibilityLabel={`${display.title} - ảnh ${index + 1}`}
-                      />
+                        testID={index === activePhotoIndex ? 'gallery-zoom-trigger' : undefined}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Xem ảnh lớn ${index + 1}/${images.length}`}
+                        onPress={() => setLightboxOpen(true)}
+                      >
+                        <Image
+                          testID={index === activePhotoIndex ? 'gallery-main-image' : undefined}
+                          source={{ uri }}
+                          style={{ width: stageWidth, height: PHOTO_HEIGHT }}
+                          resizeMode="cover"
+                          accessibilityLabel={`${display.title} - ảnh ${index + 1}`}
+                        />
+                      </Pressable>
                     ))}
                   </ScrollView>
                 ) : (
-                  <Image
-                    testID="gallery-main-image"
-                    source={{ uri: images[0] }}
-                    style={styles.singlePhoto}
-                    resizeMode="cover"
-                    accessibilityLabel={`${display.title} - ảnh 1`}
-                  />
+                  <Pressable
+                    testID="gallery-zoom-trigger"
+                    accessibilityRole="button"
+                    accessibilityLabel="Xem ảnh phóng to"
+                    onPress={() => setLightboxOpen(true)}
+                  >
+                    <Image
+                      testID="gallery-main-image"
+                      source={{ uri: images[0] }}
+                      style={styles.singlePhoto}
+                      resizeMode="cover"
+                      accessibilityLabel={`${display.title} - ảnh 1`}
+                    />
+                  </Pressable>
                 )}
 
                 <Pressable
@@ -463,6 +605,18 @@ export default function ListingScreen() {
                   style={({ pressed }) => [styles.galleryMoreBtn, pressed && styles.pressedControl]}
                 >
                   <Icon name="more-horizontal" size={18} color={semantic.color.textInverse} />
+                </Pressable>
+
+                <Pressable
+                  testID="gallery-lightbox-button"
+                  onPress={() => setLightboxOpen(true)}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Phóng to ảnh"
+                  style={({ pressed }) => [styles.zoomPill, pressed && styles.pressedControl]}
+                >
+                  <Icon name="maximize-2" size={12} color={semantic.color.textInverse} />
+                  <Text style={styles.counterText}>Phóng to</Text>
                 </Pressable>
 
                 <View style={styles.counterBadge} testID="gallery-counter">
@@ -552,69 +706,8 @@ export default function ListingScreen() {
           )}
         </View>
 
-        {/* Section A — Compact Seller Trust Strip (public fields only) */}
-        <Pressable
-          testID="seller-trust-card"
-          onPress={() => setReputationSheetOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Xem thông tin uy tín của ${display.seller.displayName}`}
-          style={({ pressed }) => [styles.sellerStrip, pressed && styles.rowPressed]}
-        >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{sellerInitial}</Text>
-          </View>
-
-          <View style={styles.sellerIdentity}>
-            <Text style={styles.sellerName} numberOfLines={1} testID="seller-display-name">
-              {display.seller.displayName}
-            </Text>
-            <Text style={styles.sellerZone} numberOfLines={1}>
-              Khu vực {locationZoneName}
-            </Text>
-          </View>
-
-          <View style={styles.sellerMetrics}>
-            <Text style={styles.reputationText}>
-              Điểm uy tín: {display.seller.reputationScore}
-            </Text>
-            <View style={styles.ratingRow}>
-              <Icon name="award" size={13} color={semantic.color.textSecondary} />
-              <Text style={styles.ratingText} testID="seller-rating">
-                {ratingText}
-              </Text>
-            </View>
-            {isHighTrustSeller ? (
-              <StatusIndicator variant="dot" tone="success" label="Tin cậy cao" />
-            ) : null}
-          </View>
-
-          <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
-        </Pressable>
-
-        <HairlineDivider />
-
-        {/* Section B — Title, Price & Status */}
+        {/* Section A — Price, Title, Badges & Quick Spec Grid (E-commerce PDP priority) */}
         <View style={styles.section}>
-          {categoryBreadcrumb || postedDate ? (
-            <View style={styles.breadcrumbRow}>
-              {categoryBreadcrumb ? (
-                <Text style={styles.breadcrumbText} testID="listing-category">
-                  Danh mục: {categoryBreadcrumb}
-                </Text>
-              ) : null}
-              {categoryBreadcrumb && postedDate ? (
-                <Text style={styles.breadcrumbDot}>·</Text>
-              ) : null}
-              {postedDate ? (
-                <Text style={styles.breadcrumbText}>Đăng ngày: {postedDate}</Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          <Text style={styles.title} testID="listing-title">
-            {display.title}
-          </Text>
-
           <View style={styles.priceRow}>
             <Text style={[styles.price, isFree && styles.priceFree]} testID="listing-price">
               {formatVnd(display.priceVnd)}
@@ -632,10 +725,52 @@ export default function ListingScreen() {
             {display.isCombo ? (
               <StatusIndicator
                 variant="soft"
-                tone="neutral"
+                tone="accent"
                 label={`Combo · ${comboItemCount} món`}
               />
             ) : null}
+          </View>
+
+          <Text style={styles.title} testID="listing-title">
+            {display.title}
+          </Text>
+
+          {categoryBreadcrumb || postedDate ? (
+            <View style={styles.breadcrumbRow}>
+              {categoryBreadcrumb ? (
+                <Text style={styles.breadcrumbText} testID="listing-category">
+                  Danh mục: {categoryBreadcrumb}
+                </Text>
+              ) : null}
+              {categoryBreadcrumb && postedDate ? (
+                <Text style={styles.breadcrumbDot}>·</Text>
+              ) : null}
+              {postedDate ? (
+                <Text style={styles.breadcrumbText}>Đăng ngày: {postedDate}</Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Quick Spec Strip (flat tonal tiles, zero nested cards) */}
+          <View style={styles.quickSpecGrid} testID="listing-quick-specs">
+            <View style={styles.quickSpecCell}>
+              <Text style={styles.quickSpecLabel}>Hình thức</Text>
+              <Text style={styles.quickSpecValue} numberOfLines={1}>
+                {listingTypeReadable}
+              </Text>
+            </View>
+            <View style={styles.quickSpecCell}>
+              <Text style={styles.quickSpecLabel}>Số lượng</Text>
+              <Text style={styles.quickSpecValue} numberOfLines={1}>
+                {displayItemCount} món đồ
+              </Text>
+            </View>
+            <View style={styles.quickSpecCell}>
+              <Text style={styles.quickSpecLabel}>Thời hạn</Text>
+              <Text style={styles.quickSpecValue} numberOfLines={1}>
+                {expiryChipText}
+              </Text>
+            </View>
           </View>
 
           {isReserved && !isOwner ? (
@@ -675,7 +810,62 @@ export default function ListingScreen() {
           ) : null}
         </View>
 
-        <HairlineDivider />
+        <View style={styles.sectionGap} />
+
+        {/* Section B — Seller Trust Strip (public fields only, NFR-01) */}
+        <Pressable
+          testID="seller-trust-card"
+          onPress={() => setReputationSheetOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Xem thông tin uy tín của ${display.seller.displayName}`}
+          style={({ pressed }) => [styles.sellerStrip, pressed && styles.rowPressed]}
+        >
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{sellerInitial}</Text>
+          </View>
+
+          <View style={styles.sellerIdentity}>
+            <View style={styles.sellerNameRow}>
+              <Text style={styles.sellerName} numberOfLines={1} testID="seller-display-name">
+                {display.seller.displayName}
+              </Text>
+              <View style={styles.verifiedTag}>
+                <Icon name="check-circle" size={11} color={semantic.color.freeFg} />
+                <Text style={styles.verifiedTagText}>ĐHQG</Text>
+              </View>
+            </View>
+            <Text style={styles.sellerZone} numberOfLines={1}>
+              Khu vực {locationZoneName}
+            </Text>
+          </View>
+
+          <View style={styles.sellerMetrics}>
+            <Text style={styles.reputationText}>
+              Điểm uy tín: {display.seller.reputationScore}
+            </Text>
+            <View style={styles.ratingRow}>
+              <Icon
+                name={display.seller.reviewCount > 0 ? 'star' : 'award'}
+                size={13}
+                color={
+                  display.seller.reviewCount > 0
+                    ? semantic.color.ratingStar
+                    : semantic.color.textSecondary
+                }
+              />
+              <Text style={styles.ratingText} testID="seller-rating">
+                {ratingText}
+              </Text>
+            </View>
+            {isHighTrustSeller ? (
+              <StatusIndicator variant="dot" tone="success" label="Tin cậy cao" />
+            ) : null}
+          </View>
+
+          <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
+        </Pressable>
+
+        <View style={styles.sectionGap} />
 
         {/* Section C — Description, Condition & Textbook Metadata */}
         <View style={styles.section}>
@@ -799,6 +989,14 @@ export default function ListingScreen() {
             </View>
           </View>
 
+          <View style={styles.handoffTipRow}>
+            <Icon name="shield" size={15} color={semantic.color.freeFg} />
+            <Text style={styles.handoffTipText}>
+              Nên hẹn xem và bàn giao trực tiếp tại sảnh KTX, cổng trường hoặc khu vực đông sinh
+              viên.
+            </Text>
+          </View>
+
           {isOwner && !canOwnerEdit ? (
             <Text style={styles.helperNote}>
               Tin đang giữ chỗ hoặc đã đóng nên không thể chỉnh sửa.
@@ -872,18 +1070,39 @@ export default function ListingScreen() {
               </Text>
             </Pressable>
 
+            {canOwnerWithdraw ? (
+              <Pressable
+                testID="owner-withdraw-button"
+                disabled={ownerBusy}
+                onPress={handleOwnerWithdrawPress}
+                accessibilityRole="button"
+                accessibilityLabel="Rút tin"
+                accessibilityState={{ disabled: ownerBusy, busy: ownerBusy }}
+                style={({ pressed }) => [
+                  styles.withdrawBtn,
+                  ownerBusy && styles.disabledControl,
+                  pressed && !ownerBusy && styles.pressedControl,
+                ]}
+              >
+                <Icon name="eye-off" size={15} color={semantic.color.danger} />
+                <Text style={styles.withdrawBtnText} numberOfLines={1}>
+                  Rút tin
+                </Text>
+              </Pressable>
+            ) : null}
+
             <Pressable
               testID="owner-edit-button"
-              disabled={!canOwnerEdit}
+              disabled={!canOwnerEdit || ownerBusy}
               onPress={() => navigation.navigate('EditListing', { id: display.id })}
               accessibilityRole="button"
               accessibilityLabel="Sửa tin"
-              accessibilityState={{ disabled: !canOwnerEdit }}
+              accessibilityState={{ disabled: !canOwnerEdit || ownerBusy }}
               style={({ pressed }) => [
                 styles.primaryBtn,
                 styles.ownerEditBtn,
-                !canOwnerEdit && styles.disabledControl,
-                pressed && canOwnerEdit && styles.primaryBtnPressed,
+                (!canOwnerEdit || ownerBusy) && styles.disabledControl,
+                pressed && canOwnerEdit && !ownerBusy && styles.primaryBtnPressed,
               ]}
             >
               <Text style={styles.primaryBtnText} numberOfLines={1}>
@@ -954,6 +1173,87 @@ export default function ListingScreen() {
           </View>
         )}
       </View>
+
+      {/* Full-Screen Photo Lightbox Modal */}
+      {lightboxOpen && images.length > 0 ? (
+        <Modal
+          visible={lightboxOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setLightboxOpen(false)}
+        >
+          <View style={styles.lightboxBackdrop} testID="photo-lightbox-modal">
+            <View
+              style={[
+                styles.lightboxHeader,
+                { paddingTop: Math.max((insets?.top ?? 0) + primitive.space[4], primitive.space[8]) },
+              ]}
+            >
+              <Text style={styles.lightboxCounter} testID="lightbox-counter">
+                Ảnh {activePhotoIndex + 1} / {images.length}
+              </Text>
+              <Pressable
+                testID="lightbox-close-button"
+                onPress={() => setLightboxOpen(false)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Đóng xem ảnh lớn"
+                style={({ pressed }) => [styles.lightboxCloseBtn, pressed && styles.pressedControl]}
+              >
+                <Icon name="x" size={20} color={semantic.color.textInverse} />
+              </Pressable>
+            </View>
+
+            <View style={styles.lightboxStage}>
+              <Image
+                source={{ uri: images[activePhotoIndex] ?? images[0] }}
+                style={{ width: stageWidth, height: stageWidth * 1.1 }}
+                resizeMode="contain"
+                accessibilityLabel={`${display.title} - ảnh phóng to ${activePhotoIndex + 1}`}
+              />
+
+              {images.length > 1 ? (
+                <>
+                  <Pressable
+                    testID="lightbox-prev"
+                    accessibilityRole="button"
+                    accessibilityLabel="Ảnh trước trong trình xem lớn"
+                    hitSlop={8}
+                    onPress={() => goToPhoto(activePhotoIndex - 1)}
+                    style={({ pressed }) => [
+                      styles.galleryNavBtn,
+                      styles.galleryNavPrev,
+                      pressed && styles.pressedControl,
+                    ]}
+                  >
+                    <Icon name="chevron-left" size={22} color={semantic.color.textInverse} />
+                  </Pressable>
+                  <Pressable
+                    testID="lightbox-next"
+                    accessibilityRole="button"
+                    accessibilityLabel="Ảnh tiếp theo trong trình xem lớn"
+                    hitSlop={8}
+                    onPress={() => goToPhoto(activePhotoIndex + 1)}
+                    style={({ pressed }) => [
+                      styles.galleryNavBtn,
+                      styles.galleryNavNext,
+                      pressed && styles.pressedControl,
+                    ]}
+                  >
+                    <Icon name="chevron-right" size={22} color={semantic.color.textInverse} />
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+
+            <View style={[styles.lightboxFooter, { paddingBottom: stickyBottomPad }]}>
+              <Text style={styles.lightboxTitle} numberOfLines={2}>
+                {display.title}
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
 
       {/* Seller Reputation Explanation BottomSheet */}
       <BottomSheet
@@ -1052,10 +1352,14 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    backgroundColor: semantic.color.bgSurface,
+    backgroundColor: semantic.color.bgCanvas,
   },
   scrollContent: {
     paddingBottom: primitive.space[6],
+  },
+  sectionGap: {
+    height: primitive.space[2],
+    backgroundColor: semantic.color.bgCanvas,
   },
   topNoticesWrap: {
     paddingHorizontal: semantic.spacing.pageX,
@@ -1096,6 +1400,18 @@ const styles = StyleSheet.create({
     backgroundColor: semantic.color.overlayDark,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  zoomPill: {
+    position: 'absolute',
+    left: primitive.space[3],
+    bottom: primitive.space[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: semantic.color.overlayDark,
+    borderRadius: primitive.radius.full,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: primitive.space[1],
   },
   counterBadge: {
     position: 'absolute',
@@ -1171,27 +1487,48 @@ const styles = StyleSheet.create({
     backgroundColor: semantic.color.bgSubtle,
   },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: primitive.radius.full,
-    backgroundColor: semantic.color.accentSoft,
+    backgroundColor: semantic.color.heroEspresso,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: semantic.color.accent,
+    color: semantic.color.textInverse,
     fontSize: primitive.fontSize.md,
     fontWeight: primitive.fontWeight.bold,
   },
   sellerIdentity: {
     flex: 1,
-    gap: 2,
+    gap: 3,
+  },
+  sellerNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1.5],
   },
   sellerName: {
     fontSize: primitive.fontSize.base,
     lineHeight: 20,
     fontWeight: primitive.fontWeight.semibold,
     color: semantic.color.textPrimary,
+    flexShrink: 1,
+  },
+  verifiedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.freeBg,
+  },
+  verifiedTagText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.freeFg,
   },
   sellerZone: {
     ...semantic.type.caption,
@@ -1242,14 +1579,39 @@ const styles = StyleSheet.create({
     gap: primitive.space[2.5],
   },
   price: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 26,
+    lineHeight: 32,
     fontWeight: primitive.fontWeight.bold,
     fontVariant: semantic.type.price.fontVariant,
-    color: semantic.color.textPrimary,
+    color: semantic.color.accent,
   },
   priceFree: {
-    color: semantic.color.success,
+    color: semantic.color.freeFg,
+  },
+  quickSpecGrid: {
+    flexDirection: 'row',
+    gap: primitive.space[2],
+    marginTop: primitive.space[1],
+  },
+  quickSpecCell: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: primitive.space[2],
+    gap: 2,
+  },
+  quickSpecLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
+  },
+  quickSpecValue: {
+    fontSize: primitive.fontSize.sm,
+    lineHeight: 18,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
   },
   statusBannerSpacing: {
     marginTop: primitive.space[1],
@@ -1348,6 +1710,21 @@ const styles = StyleSheet.create({
   locationPrimary: {
     ...semantic.type.cardTitle,
   },
+  handoffTipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: primitive.space[2],
+    backgroundColor: semantic.color.freeBg,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+  },
+  handoffTipText: {
+    flex: 1,
+    ...semantic.type.micro,
+    color: semantic.color.freeFg,
+    lineHeight: 17,
+  },
   helperNote: {
     ...semantic.type.caption,
     marginTop: primitive.space[1],
@@ -1432,14 +1809,72 @@ const styles = StyleSheet.create({
   ownerManageBtn: {
     flex: 1,
   },
+  withdrawBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeight,
+    borderRadius: component.button.radius,
+    backgroundColor: semantic.color.dangerSoft,
+    paddingHorizontal: primitive.space[3],
+  },
+  withdrawBtnText: {
+    fontSize: primitive.fontSize.sm,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.danger,
+  },
   ownerEditBtn: {
-    flex: 1.3,
+    flex: 1.15,
   },
   offerBtn: {
     paddingHorizontal: primitive.space[3],
   },
   reserveBtn: {
     flex: 1,
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: semantic.color.lightboxBg,
+    justifyContent: 'space-between',
+  },
+  lightboxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingBottom: primitive.space[3],
+  },
+  lightboxCounter: {
+    fontSize: primitive.fontSize.sm,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textInverse,
+    fontVariant: ['tabular-nums'],
+  },
+  lightboxCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.inversePillBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  lightboxFooter: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+  },
+  lightboxTitle: {
+    fontSize: primitive.fontSize.sm,
+    lineHeight: 20,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textInverseMuted,
+    textAlign: 'center',
   },
   disabledControl: {
     opacity: primitive.opacity.disabled,

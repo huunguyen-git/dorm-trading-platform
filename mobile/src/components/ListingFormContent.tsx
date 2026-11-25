@@ -456,6 +456,36 @@ export default function ListingFormContent({
   const canPublishNow = !formDisabled && !imageUploading && !publishDisabledByQuota;
   const canSaveDraftOrKeep = !formDisabled && !imageUploading;
 
+  const readinessSteps = [
+    { key: 'photos', label: 'Ảnh', done: images.length > 0 },
+    { key: 'items', label: 'Đồ vật', done: selectedItemIds.length > 0 },
+    {
+      key: 'details',
+      label: 'Thông tin',
+      done: Boolean(
+        title.trim() && condition.trim() && description.trim() && categoryId.trim(),
+      ),
+    },
+    {
+      key: 'pricing',
+      label: 'Giá & Vị trí',
+      done: Boolean(
+        (isFree || (Number.isFinite(parsedPricePreview) && parsedPricePreview > 0)) &&
+          (locationCode || locationText.trim()),
+      ),
+    },
+  ];
+  const readyCount = readinessSteps.filter((s) => s.done).length;
+
+  const conditionPresets = ['Mới 99%', 'Mới 95%', 'Mới 90%', 'Dùng tốt'];
+  const pricePresets = [
+    { label: '30k', value: '30000' },
+    { label: '50k', value: '50000' },
+    { label: '100k', value: '100000' },
+    { label: '200k', value: '200000' },
+    { label: '500k', value: '500000' },
+  ];
+
   const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
 
   return (
@@ -563,6 +593,51 @@ export default function ListingFormContent({
           </>
         ) : null}
 
+        {/* Readiness Checklist Strip */}
+        {!readOnly ? (
+          <>
+            <View style={styles.readinessStrip} testID="form-readiness-strip">
+              <View style={styles.readinessHeader}>
+                <Text style={styles.readinessTitle}>Mức độ hoàn thiện tin</Text>
+                <Text
+                  style={[
+                    styles.readinessCount,
+                    readyCount === readinessSteps.length && styles.readinessCountDone,
+                  ]}
+                >
+                  {readyCount === readinessSteps.length
+                    ? 'Sẵn sàng công khai'
+                    : `${readyCount}/${readinessSteps.length} mục`}
+                </Text>
+              </View>
+              <View style={styles.readinessRow}>
+                {readinessSteps.map((step) => (
+                  <View
+                    key={step.key}
+                    style={[styles.readinessPill, step.done && styles.readinessPillDone]}
+                  >
+                    <Icon
+                      name={step.done ? 'check-circle' : 'circle'}
+                      size={12}
+                      color={step.done ? semantic.color.freeFg : semantic.color.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.readinessPillText,
+                        step.done && styles.readinessPillTextDone,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {step.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            <HairlineDivider />
+          </>
+        ) : null}
+
         {/* Section 2: Photo-First Rail */}
         <View style={styles.section}>
           <ListingImageManager
@@ -627,19 +702,54 @@ export default function ListingFormContent({
             error={fieldErrors.title}
           />
 
-          <FormField
-            label="Tình trạng"
-            required
-            testID="listing-condition-input"
-            placeholder="VD: Mới 95%, không ghi chú, còn đủ phụ kiện"
-            value={condition}
-            onChangeText={(value) => {
-              clearFieldError('condition');
-              setCondition(value);
-            }}
-            editable={!formDisabled}
-            error={fieldErrors.condition}
-          />
+          <View style={styles.subGroup}>
+            <FormField
+              label="Tình trạng"
+              required
+              testID="listing-condition-input"
+              placeholder="VD: Mới 95%, không ghi chú, còn đủ phụ kiện"
+              value={condition}
+              onChangeText={(value) => {
+                clearFieldError('condition');
+                setCondition(value);
+              }}
+              editable={!formDisabled}
+              error={fieldErrors.condition}
+            />
+            {!formDisabled ? (
+              <View style={styles.presetRow} testID="condition-presets-row">
+                {conditionPresets.map((preset) => {
+                  const active = condition.trim() === preset;
+                  return (
+                    <Pressable
+                      key={preset}
+                      testID={`condition-preset-${preset}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => {
+                        clearFieldError('condition');
+                        setCondition(preset);
+                      }}
+                      style={({ pressed }) => [
+                        styles.presetChip,
+                        active && styles.presetChipActive,
+                        pressed && styles.pressedState,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          active && styles.presetChipTextActive,
+                        ]}
+                      >
+                        {preset}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
 
           {/* Price & Free Giveaway */}
           <View style={styles.subGroup}>
@@ -676,6 +786,40 @@ export default function ListingFormContent({
               }
               error={fieldErrors.priceVnd}
             />
+
+            {!isFree && !formDisabled ? (
+              <View style={styles.presetRow} testID="price-presets-row">
+                {pricePresets.map((preset) => {
+                  const active = priceInput.replace(/[^\d]/g, '') === preset.value;
+                  return (
+                    <Pressable
+                      key={preset.value}
+                      testID={`price-preset-${preset.value}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => {
+                        clearFieldError('priceVnd');
+                        setPriceInput(preset.value);
+                      }}
+                      style={({ pressed }) => [
+                        styles.presetChip,
+                        active && styles.presetChipActive,
+                        pressed && styles.pressedState,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          active && styles.presetChipTextActive,
+                        ]}
+                      >
+                        {preset.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
 
             {isFree ? (
               <InlineBanner
@@ -1159,6 +1303,87 @@ const styles = StyleSheet.create({
   quotaRuleCaption: {
     ...semantic.type.micro,
     color: semantic.color.textSecondary,
+  },
+  readinessStrip: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
+    backgroundColor: semantic.color.bgWarmTint,
+    gap: primitive.space[2],
+  },
+  readinessHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
+  },
+  readinessTitle: {
+    ...semantic.type.micro,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  readinessCount: {
+    ...semantic.type.micro,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
+  readinessCountDone: {
+    color: semantic.color.freeFg,
+  },
+  readinessRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: primitive.space[1.5],
+  },
+  readinessPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: primitive.space[2],
+    paddingVertical: 4,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSurface,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+  },
+  readinessPillDone: {
+    backgroundColor: semantic.color.freeBg,
+    borderColor: semantic.color.freeBg,
+  },
+  readinessPillText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textSecondary,
+  },
+  readinessPillTextDone: {
+    color: semantic.color.freeFg,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  presetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: primitive.space[1.5],
+  },
+  presetChip: {
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: 5,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+  },
+  presetChipActive: {
+    backgroundColor: semantic.color.accentSoft,
+    borderColor: semantic.color.accent,
+  },
+  presetChipText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+  },
+  presetChipTextActive: {
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.semibold,
   },
   section: {
     paddingHorizontal: semantic.spacing.pageX,

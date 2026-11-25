@@ -616,6 +616,59 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     expect(fetchCount).toBe(2);
     expect(useDiscovery.getState().stale).toBe(false);
   });
+
+  test('recovers references on retry after initial network failure (UC-19 E1 resilience)', async () => {
+    let failRefs = true;
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path === '/categories') {
+        if (failRefs) throw new Error('Network offline');
+        return { items: sampleCategories, tree: sampleCategoryTree };
+      }
+      if (path === '/locations') {
+        if (failRefs) throw new Error('Network offline');
+        return { items: sampleLocations };
+      }
+      return { items: [sampleListing1], page: 0, size: 20, totalElements: 1, totalPages: 1 };
+    });
+
+    await useDiscovery.getState().loadReferences();
+    expect(useDiscovery.getState().referencesLoaded).toBe(false);
+    expect(useDiscovery.getState().categories).toHaveLength(0);
+
+    failRefs = false;
+    await useDiscovery.getState().loadReferences();
+    expect(useDiscovery.getState().referencesLoaded).toBe(true);
+    expect(useDiscovery.getState().categories.length).toBeGreaterThan(0);
+    expect(useDiscovery.getState().locations.length).toBeGreaterThan(0);
+  });
+
+  test('supports grid/list view switcher, header campus zone picker, and quick commerce sort pills', async () => {
+    setupDefaultApiMock();
+    render(<ListingsScreen />);
+
+    expect(await screen.findByText('Tìm thấy 2 tin đăng')).toBeTruthy();
+    expect(screen.getByTestId('view-mode-grid').props.accessibilityState.selected).toBe(true);
+
+    // Toggle to 1-column list view and back to 2-column grid
+    fireEvent.press(screen.getByTestId('view-mode-list'));
+    expect(screen.getByTestId('view-mode-list').props.accessibilityState.selected).toBe(true);
+    fireEvent.press(screen.getByTestId('view-mode-grid'));
+    expect(screen.getByTestId('view-mode-grid').props.accessibilityState.selected).toBe(true);
+
+    // Quick-pick campus zone from terracotta header
+    fireEvent.press(screen.getByTestId('header-zone-picker'));
+    expect(screen.getByTestId('campus-zone-sheet')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('quick-zone-KTX_KHU_A'));
+    await waitFor(() => {
+      expect(mockedApi).toHaveBeenCalledWith(expect.stringContaining('locationCode=KTX_KHU_A'));
+    });
+
+    // Quick free-only toggle
+    fireEvent.press(screen.getByTestId('quick-pill-free'));
+    await waitFor(() => {
+      expect(mockedApi).toHaveBeenCalledWith(expect.stringContaining('freeOnly=true'));
+    });
+  });
 });
 
 describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alternatives)', () => {
@@ -1000,5 +1053,97 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     expect(await screen.findByTestId('unavailable-items-banner')).toBeTruthy();
     expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
     expect(screen.getByTestId('reserve-button').props.accessibilityState.disabled).toBe(true);
+  });
+
+  test('opens full-screen photo lightbox, navigates images, and closes cleanly', async () => {
+    mockRouteParams.id = 'listing-1';
+    mockedApi.mockResolvedValueOnce(sampleDetail1);
+
+    render(<ListingScreen />);
+    await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú');
+
+    fireEvent.press(screen.getByTestId('gallery-lightbox-button'));
+    expect(screen.getByTestId('photo-lightbox-modal')).toBeTruthy();
+    expect(screen.getByTestId('lightbox-counter').props.children.join('')).toBe('Ảnh 1 / 3');
+
+    fireEvent.press(screen.getByTestId('lightbox-next'));
+    expect(screen.getByTestId('lightbox-counter').props.children.join('')).toBe('Ảnh 2 / 3');
+
+    fireEvent.press(screen.getByTestId('lightbox-close-button'));
+    expect(screen.queryByTestId('photo-lightbox-modal')).toBeNull();
+  });
+
+  test('UC-20 Alt 1: owner can directly withdraw listing from detail screen with confirmation', async () => {
+    useSession.setState({ token: 'seller-jwt', user: sellerUser, loading: false });
+    mockRouteParams.id = 'listing-1';
+    const ownerPublicDetail: ListingDetail = {
+      ...sampleDetail1,
+      viewer: {
+        isOwner: true,
+        canEdit: true,
+        canWithdraw: true,
+        canDelete: true,
+        canPublish: false,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: false,
+        canMessage: false,
+      },
+    };
+    const withdrawnDetail: ListingDetail = {
+      ...ownerPublicDetail,
+      status: 'DA_RUT',
+      version: 2,
+      viewer: {
+        ...ownerPublicDetail.viewer,
+        canWithdraw: false,
+        canPublish: true,
+      },
+    };
+
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/listings/listing-1/withdraw' && init?.method === 'POST') {
+        return {
+          listing: withdrawnDetail,
+          quota: {
+            reputationScore: 125,
+            activeCount: 0,
+            limit: 10,
+            remaining: 10,
+            canPublish: true,
+            highTierThreshold: 120,
+            standardLimit: 5,
+            highTierLimit: 10,
+          },
+        };
+      }
+      if (path.startsWith('/listings/listing-1')) {
+        return mockedApi.mock.calls.some((call) => String(call[0]).includes('/withdraw'))
+          ? withdrawnDetail
+          : ownerPublicDetail;
+      }
+      return [];
+    });
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+      const destructive = buttons?.find((b) => b.style === 'destructive');
+      destructive?.onPress?.();
+    });
+
+    try {
+      render(<ListingScreen />);
+      const withdrawBtn = await screen.findByTestId('owner-withdraw-button');
+      fireEvent.press(withdrawBtn);
+
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Xác nhận rút tin',
+        expect.stringContaining('Combo Giáo trình Nhập môn CNPM SE100'),
+        expect.any(Array),
+      );
+      expect(await screen.findByTestId('owner-action-notice')).toBeTruthy();
+      expect(screen.queryByTestId('owner-withdraw-button')).toBeNull();
+    } finally {
+      alertSpy.mockRestore();
+    }
   });
 });

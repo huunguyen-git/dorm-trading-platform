@@ -39,6 +39,7 @@ export type AppIconName =
   | 'star'
   | 'check'
   | 'check-circle'
+  | 'circle'
   | 'alert-circle'
   | 'alert-triangle'
   | 'info'
@@ -56,7 +57,20 @@ export type AppIconName =
   | 'link'
   | 'bookmark'
   | 'key'
-  | 'send';
+  | 'send'
+  | 'grid'
+  | 'list'
+  | 'cpu'
+  | 'shopping-bag'
+  | 'zap'
+  | 'maximize-2'
+  | 'trending-up'
+  | 'navigation'
+  | 'coffee'
+  | 'headphones'
+  | 'music'
+  | 'sun'
+  | 'heart';
 
 export interface IconProps {
   name: AppIconName;

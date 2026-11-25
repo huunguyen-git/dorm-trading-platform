@@ -96,12 +96,15 @@ function mergeUpdatedListing(
   return prependIfMissing ? [updated, ...current] : current;
 }
 
+let myListingsRequestSeq = 0;
+
 export const useSellerListings = create<SellerListingsState>((set, get) => ({
   ...INITIAL_STATE,
 
   setStatusFilter: (status) => set({ statusFilter: status }),
   clearError: () => set({ error: null }),
   reset: () => {
+    myListingsRequestSeq += 1;
     sellerApi.clearReferenceDataCache();
     set({ ...INITIAL_STATE });
   },
@@ -110,6 +113,7 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
     const nextStatus = params?.status !== undefined ? params.status : get().statusFilter;
     const nextPage = params?.page ?? 0;
     const nextSize = params?.size ?? get().size;
+    const requestId = ++myListingsRequestSeq;
 
     set({ loading: true, error: null, statusFilter: nextStatus });
     try {
@@ -118,6 +122,9 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         page: nextPage,
         size: nextSize,
       });
+      if (requestId !== myListingsRequestSeq) {
+        return response;
+      }
       const existing = nextPage > 0 ? get().myListings : [];
       const mergedItems =
         nextPage > 0
@@ -137,6 +144,9 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
       });
       return response;
     } catch (err) {
+      if (requestId !== myListingsRequestSeq) {
+        throw err;
+      }
       if (syncRestrictionIfNeeded(err)) {
         set({ error: null });
         throw err;
@@ -145,7 +155,9 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
       set({ error: parsed.message });
       throw err;
     } finally {
-      set({ loading: false });
+      if (requestId === myListingsRequestSeq) {
+        set({ loading: false });
+      }
     }
   },
 
@@ -350,6 +362,9 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
         quota: nextQuota,
       });
       useDiscovery.getState().markStale();
+      if (!target) {
+        void get().loadQuota().catch(() => {});
+      }
     } catch (err) {
       if (syncRestrictionIfNeeded(err)) {
         set({ error: null });

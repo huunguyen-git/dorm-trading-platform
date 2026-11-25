@@ -160,12 +160,13 @@ export function BottomNavBar({ activeTab, onNavigate, testID, style }: BottomNav
               >
                 <Icon
                   name={item.icon}
-                  size={18}
+                  size={20}
                   color={component.bottomNav.focalFg}
                 />
               </View>
             ) : (
               <View style={styles.iconSlot}>
+                {item.isActive ? <View style={styles.activeIndicator} /> : null}
                 <Icon name={item.icon} size={20} color={tint} />
               </View>
             )}
@@ -195,15 +196,16 @@ const styles = StyleSheet.create({
     backgroundColor: component.bottomNav.bg,
     borderTopWidth: 1,
     borderTopColor: component.bottomNav.border,
-    paddingTop: primitive.space[2],
+    paddingTop: primitive.space[1.5],
     paddingHorizontal: primitive.space[1],
+    ...primitive.elevation.thumb,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 46,
-    gap: primitive.space[1],
+    minHeight: 48,
+    gap: 3,
     paddingHorizontal: primitive.space[1],
   },
   tabItemDisabled: {
@@ -213,17 +215,27 @@ const styles = StyleSheet.create({
     opacity: primitive.opacity.pressed,
   },
   iconSlot: {
-    height: 28,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  activeIndicator: {
+    position: 'absolute',
+    top: -6,
+    width: 18,
+    height: 2.5,
+    borderRadius: primitive.radius.full,
+    backgroundColor: component.bottomNav.activeFg,
   },
   focalPill: {
-    width: 40,
-    height: 28,
+    width: 44,
+    height: 30,
     borderRadius: primitive.radius.full,
     backgroundColor: component.bottomNav.focalBg,
     alignItems: 'center',
     justifyContent: 'center',
+    ...primitive.elevation.floating,
   },
   focalPillDisabled: {
     backgroundColor: semantic.color.borderStrong,

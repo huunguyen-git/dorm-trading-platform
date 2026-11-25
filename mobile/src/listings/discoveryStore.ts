@@ -176,11 +176,12 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
       discoveryApi.fetchCategories(),
       discoveryApi.fetchLocations(),
     ]);
+    const hasLoadedData = categoriesRes.items.length > 0 || locations.length > 0;
     set({
       categories: categoriesRes.items,
       categoryTree: categoriesRes.tree,
       locations,
-      referencesLoaded: true,
+      referencesLoaded: hasLoadedData,
     });
   },
 

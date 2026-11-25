@@ -1,4 +1,4 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import {
   formatReputationSummary,
   formatShortDate,
@@ -8,15 +8,27 @@ import {
 import { component, primitive, semantic } from '../theme';
 import { HairlineDivider, Icon, StatusIndicator } from './ui';
 
+export type ListingCardVariant = 'grid' | 'list';
+
 export interface ListingCardProps {
   listing: ListingSummary;
   onPress: (listing: ListingSummary) => void;
+  variant?: ListingCardVariant;
+  testID?: string;
+  style?: StyleProp<ViewStyle>;
 }
 
-const THUMB_SIZE = 104;
+const LIST_THUMB_SIZE = 108;
 
-export function ListingCard({ listing, onPress }: ListingCardProps) {
+export function ListingCard({
+  listing,
+  onPress,
+  variant = 'grid',
+  testID,
+  style,
+}: ListingCardProps) {
   const thumb = listing.thumbnailUrl ?? listing.images[0] ?? null;
+  const photoCount = listing.images.length;
   const isFree = listing.isFree || listing.priceVnd === 0;
   const priceLabel = formatVnd(listing.priceVnd);
   const postedDate = formatShortDate(listing.publishedAt ?? listing.createdAt);
@@ -31,28 +43,148 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
     : locationLabel;
   const reputation = formatReputationSummary(listing.seller.reputationScore);
   const isReserved = listing.status === 'GIU_CHO';
+  const isHighTrust = listing.seller.reputationScore >= 120;
+  const hasRating =
+    listing.seller.reviewCount > 0 &&
+    typeof listing.seller.averageRating === 'number' &&
+    Number.isFinite(listing.seller.averageRating);
+  const cardTestID = testID ?? `listing-card-${listing.id}`;
+
+  if (variant === 'grid') {
+    return (
+      <Pressable
+        testID={cardTestID}
+        accessibilityRole="button"
+        accessibilityLabel={`${listing.title}, ${priceLabel}, ${locationLabel}`}
+        onPress={() => onPress(listing)}
+        style={({ pressed }) => [styles.gridCard, pressed && styles.gridCardPressed, style]}
+      >
+        <View style={styles.gridPhotoStage}>
+          {thumb ? (
+            <Image
+              source={{ uri: thumb }}
+              style={styles.gridPhoto}
+              resizeMode="cover"
+              accessibilityLabel={`Ảnh đại diện ${listing.title}`}
+            />
+          ) : (
+            <View style={styles.gridPhotoPlaceholder}>
+              <Icon name="image" size={28} color={semantic.color.textSecondary} />
+            </View>
+          )}
+
+          {/* Top-left corner badge: reserved OR combo */}
+          {isReserved ? (
+            <View style={[styles.photoBadgeTopLeft, styles.photoBadgeReserved]}>
+              <Text style={styles.photoBadgeText}>Đang giữ chỗ</Text>
+            </View>
+          ) : listing.isCombo ? (
+            <View style={styles.photoBadgeTopLeft}>
+              <Icon name="layers" size={11} color={semantic.color.textInverse} />
+              <Text style={styles.photoBadgeText}>
+                Combo · {Math.max(2, listing.itemCount)} món
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Top-right course code pill for textbooks */}
+          {listing.courseCode ? (
+            <View style={styles.courseOverlayPill}>
+              <Text style={styles.courseOverlayText} numberOfLines={1}>
+                {listing.courseCode}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Bottom-right photo count pill when multiple photos */}
+          {photoCount > 1 ? (
+            <View style={styles.photoCountPill}>
+              <Icon name="camera" size={10} color={semantic.color.textInverse} />
+              <Text style={styles.photoCountText}>{photoCount}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.gridBody}>
+          <Text style={styles.gridTitle} numberOfLines={2}>
+            {listing.title}
+          </Text>
+
+          <View style={styles.gridPriceRow}>
+            <Text style={[styles.gridPrice, isFree && styles.priceFree]} numberOfLines={1}>
+              {priceLabel}
+            </Text>
+            {hasRating ? (
+              <View style={styles.ratingPill}>
+                <Icon name="star" size={11} color={semantic.color.ratingStar} />
+                <Text style={styles.ratingValue}>
+                  {listing.seller.averageRating!.toFixed(1)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.gridLocationRow}>
+            <Icon name="map-pin" size={11} color={semantic.color.textSecondary} />
+            <Text style={styles.gridLocationText} numberOfLines={1} ellipsizeMode="tail">
+              {locationDistanceLabel}
+            </Text>
+          </View>
+
+          <View style={styles.gridFooterRow}>
+            <View style={styles.gridTrustGroup}>
+              <Icon
+                name="shield"
+                size={11}
+                color={isHighTrust ? semantic.color.success : semantic.color.textSecondary}
+              />
+              <Text
+                style={[styles.gridTrustText, isHighTrust && styles.gridTrustTextHigh]}
+                numberOfLines={1}
+              >
+                {reputation.scoreText}
+              </Text>
+            </View>
+            {postedDate ? (
+              <Text style={styles.gridDateText} numberOfLines={1}>
+                {postedDate}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.listWrapper, style]}>
       <Pressable
-        testID={`listing-card-${listing.id}`}
+        testID={cardTestID}
         accessibilityRole="button"
         accessibilityLabel={`${listing.title}, ${priceLabel}, ${locationLabel}`}
         onPress={() => onPress(listing)}
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       >
-        {thumb ? (
-          <Image
-            source={{ uri: thumb }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-            accessibilityLabel={`Ảnh đại diện ${listing.title}`}
-          />
-        ) : (
-          <View style={styles.thumbnailPlaceholder}>
-            <Icon name="image" size={26} color={semantic.color.textSecondary} />
-          </View>
-        )}
+        <View style={styles.listThumbStage}>
+          {thumb ? (
+            <Image
+              source={{ uri: thumb }}
+              style={styles.thumbnail}
+              resizeMode="cover"
+              accessibilityLabel={`Ảnh đại diện ${listing.title}`}
+            />
+          ) : (
+            <View style={styles.thumbnailPlaceholder}>
+              <Icon name="image" size={26} color={semantic.color.textSecondary} />
+            </View>
+          )}
+          {photoCount > 1 ? (
+            <View style={styles.listPhotoCountPill}>
+              <Icon name="camera" size={9} color={semantic.color.textInverse} />
+              <Text style={styles.photoCountText}>{photoCount}</Text>
+            </View>
+          ) : null}
+        </View>
 
         <View style={styles.content}>
           <View style={styles.topGroup}>
@@ -61,6 +193,7 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
             </Text>
 
             <View style={styles.metaRow}>
+              <Icon name="map-pin" size={12} color={semantic.color.textSecondary} />
               <Text style={styles.metaLocation} numberOfLines={1} ellipsizeMode="tail">
                 {locationDistanceLabel}
               </Text>
@@ -105,22 +238,214 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
                 {listing.seller.displayName}
               </Text>
               <Text style={styles.trustSep}>·</Text>
-              <Icon name="shield" size={12} color={semantic.color.textSecondary} />
-              <Text style={styles.reputationText} numberOfLines={1}>
+              <Icon
+                name="shield"
+                size={12}
+                color={isHighTrust ? semantic.color.success : semantic.color.textSecondary}
+              />
+              <Text
+                style={[styles.reputationText, isHighTrust && styles.gridTrustTextHigh]}
+                numberOfLines={1}
+              >
                 {reputation.scoreText}
               </Text>
+              {hasRating ? (
+                <>
+                  <Text style={styles.trustSep}>·</Text>
+                  <Icon name="star" size={11} color={semantic.color.ratingStar} />
+                  <Text style={styles.ratingValue}>
+                    {listing.seller.averageRating!.toFixed(1)}
+                  </Text>
+                </>
+              ) : null}
             </View>
           </View>
         </View>
       </Pressable>
 
-      <HairlineDivider insetLeft={component.listRow.paddingX} insetRight={component.listRow.paddingX} />
+      <HairlineDivider
+        insetLeft={component.listRow.paddingX}
+        insetRight={component.listRow.paddingX}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
+  // 2-Column E-commerce Grid Card
+  gridCard: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
+    borderRadius: primitive.radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+    ...primitive.elevation.thumb,
+  },
+  gridCardPressed: {
+    opacity: primitive.opacity.pressed,
+  },
+  gridPhotoStage: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    position: 'relative',
+  },
+  gridPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  gridPhotoPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: semantic.color.bgTrack,
+  },
+  photoBadgeTopLeft: {
+    position: 'absolute',
+    top: primitive.space[2],
+    left: primitive.space[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: primitive.space[2],
+    paddingVertical: 3,
+    borderRadius: primitive.radius.sm,
+    backgroundColor: semantic.color.overlayDark,
+  },
+  photoBadgeReserved: {
+    backgroundColor: semantic.color.warning,
+  },
+  photoBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textInverse,
+  },
+  courseOverlayPill: {
+    position: 'absolute',
+    top: primitive.space[2],
+    right: primitive.space[2],
+    paddingHorizontal: primitive.space[1.5],
+    paddingVertical: 2.5,
+    borderRadius: primitive.radius.sm,
+    backgroundColor: semantic.color.overlayLight,
+  },
+  courseOverlayText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.bold,
+    color: semantic.color.textPrimary,
+    letterSpacing: 0.2,
+  },
+  photoCountPill: {
+    position: 'absolute',
+    bottom: primitive.space[2],
+    right: primitive.space[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.overlayDark,
+  },
+  photoCountText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.semibold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textInverse,
+  },
+  gridBody: {
+    padding: primitive.space[2.5],
+    gap: primitive.space[1.5],
+  },
+  gridTitle: {
+    fontSize: 13.5,
+    lineHeight: 18,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+    minHeight: 36,
+  },
+  gridPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[1],
+  },
+  gridPrice: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.accent,
+    flexShrink: 1,
+  },
+  ratingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: primitive.radius.sm,
+    backgroundColor: semantic.color.ratingBg,
+  },
+  ratingValue: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.semibold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.ratingText,
+  },
+  gridLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  gridLocationText: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: semantic.color.textSecondary,
+    flex: 1,
+  },
+  gridFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: primitive.space[1],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: semantic.color.borderHairline,
+    gap: primitive.space[1],
+  },
+  gridTrustGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    flexShrink: 1,
+  },
+  gridTrustText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textSecondary,
+  },
+  gridTrustTextHigh: {
+    color: semantic.color.success,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  gridDateText: {
+    fontSize: 10.5,
+    lineHeight: 14,
+    color: semantic.color.textSecondary,
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+  },
+
+  // 1-Column Horizontal List Card
+  listWrapper: {
     backgroundColor: component.listRow.bg,
   },
   row: {
@@ -134,25 +459,42 @@ const styles = StyleSheet.create({
   rowPressed: {
     backgroundColor: component.listRow.pressedBg,
   },
+  listThumbStage: {
+    width: LIST_THUMB_SIZE,
+    height: LIST_THUMB_SIZE,
+    position: 'relative',
+  },
   thumbnail: {
-    width: THUMB_SIZE,
-    height: THUMB_SIZE,
+    width: LIST_THUMB_SIZE,
+    height: LIST_THUMB_SIZE,
     borderRadius: component.listRow.thumbRadius,
     backgroundColor: semantic.color.bgSubtle,
     borderWidth: 1,
     borderColor: semantic.color.borderHairline,
   },
   thumbnailPlaceholder: {
-    width: THUMB_SIZE,
-    height: THUMB_SIZE,
+    width: LIST_THUMB_SIZE,
+    height: LIST_THUMB_SIZE,
     borderRadius: component.listRow.thumbRadius,
     backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  listPhotoCountPill: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.overlayDark,
+  },
   content: {
     flex: 1,
-    minHeight: THUMB_SIZE,
+    minHeight: LIST_THUMB_SIZE,
     justifyContent: 'space-between',
     gap: primitive.space[1.5],
   },
@@ -182,7 +524,8 @@ const styles = StyleSheet.create({
   },
   courseText: {
     ...semantic.type.caption,
-    fontWeight: primitive.fontWeight.medium,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.accent,
     flexShrink: 0,
   },
   bottomGroup: {
@@ -196,10 +539,11 @@ const styles = StyleSheet.create({
   },
   price: {
     ...semantic.type.price,
+    color: semantic.color.accent,
     flexShrink: 1,
   },
   priceFree: {
-    color: semantic.color.success,
+    color: semantic.color.freeFg,
   },
   trustRow: {
     flexDirection: 'row',
