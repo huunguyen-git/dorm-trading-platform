@@ -1,17 +1,16 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
   Image,
   Pressable,
   RefreshControl,
-  SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
@@ -24,17 +23,29 @@ import {
   type ListingSummary,
 } from '../listings/types';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
-import { Action, Notice, ui } from '../components/AuthUI';
-import { colors, radius, space, text } from '../theme';
+import {
+  ActionSheet,
+  BottomNavBar,
+  EmptyState,
+  HairlineDivider,
+  Icon,
+  InlineBanner,
+  QuotaMeter,
+  StatusIndicator,
+  UnderlineTabs,
+  type ActionSheetOption,
+  type UnderlineTabItem,
+} from '../components/ui';
+import { component, primitive, semantic } from '../theme';
 
-const STATUS_FILTERS: Array<{ value: ListingStatus | ''; label: string; testIdKey: string }> = [
-  { value: '', label: 'Tất cả', testIdKey: 'ALL' },
-  { value: 'CONG_KHAI', label: 'Đang hiển thị', testIdKey: 'CONG_KHAI' },
-  { value: 'NHAP', label: 'Bản nháp', testIdKey: 'NHAP' },
-  { value: 'GIU_CHO', label: 'Đang giữ chỗ', testIdKey: 'GIU_CHO' },
-  { value: 'CHO_DUYET', label: 'Chờ duyệt', testIdKey: 'CHO_DUYET' },
-  { value: 'HET_HAN', label: 'Hết hạn', testIdKey: 'HET_HAN' },
-  { value: 'DA_RUT', label: 'Đã rút', testIdKey: 'DA_RUT' },
+const STATUS_TABS: UnderlineTabItem<ListingStatus | ''>[] = [
+  { value: '', label: 'Tất cả', testID: 'filter-status-ALL' },
+  { value: 'CONG_KHAI', label: 'Đang hiển thị', testID: 'filter-status-CONG_KHAI' },
+  { value: 'NHAP', label: 'Bản nháp', testID: 'filter-status-NHAP' },
+  { value: 'GIU_CHO', label: 'Đang giữ chỗ', testID: 'filter-status-GIU_CHO' },
+  { value: 'CHO_DUYET', label: 'Chờ duyệt', testID: 'filter-status-CHO_DUYET' },
+  { value: 'HET_HAN', label: 'Hết hạn', testID: 'filter-status-HET_HAN' },
+  { value: 'DA_RUT', label: 'Đã rút', testID: 'filter-status-DA_RUT' },
 ];
 
 const EDITABLE_STATUSES: ReadonlySet<ListingStatus> = new Set([
@@ -53,39 +64,39 @@ const DELETABLE_STATUSES: ReadonlySet<ListingStatus> = new Set([
   'HET_HAN',
 ]);
 
-function formatExpiryLine(item: ListingSummary): string {
+function formatExpiryMeta(item: ListingSummary): string {
   if (item.status === 'NHAP') {
-    return 'Bản nháp · Chưa tính hạn 30 ngày';
+    return 'Bản nháp · Chưa công khai';
   }
   if (item.status === 'GIU_CHO') {
-    return 'Đang giữ chỗ · Không tự động đóng khi hết 30 ngày';
+    return 'Đang giữ chỗ cho giao dịch';
   }
   if (item.status === 'HET_HAN') {
     const dateStr = formatShortDate(item.expiresAt);
-    return dateStr ? `Đã hết hạn ngày ${dateStr}` : 'Đã hết hạn hiển thị';
+    return dateStr ? `Hết hạn ${dateStr}` : 'Đã hết hạn';
   }
   if (item.status === 'DA_RUT') {
-    return 'Đã rút khỏi tìm kiếm công khai';
+    return 'Đã rút tin';
   }
   if (item.status === 'CONG_KHAI' && item.expiresAt) {
     const expiresMs = new Date(item.expiresAt).getTime();
     if (!Number.isNaN(expiresMs)) {
       const daysLeft = Math.ceil((expiresMs - Date.now()) / (24 * 60 * 60 * 1000));
-      const formatted = formatShortDate(item.expiresAt);
       if (daysLeft <= 0) {
-        return `Sắp hết hạn hôm nay (${formatted})`;
+        return 'Hết hạn hôm nay';
       }
-      return `Còn ${daysLeft} ngày (hết hạn ${formatted})`;
+      return `Còn ${daysLeft} ngày`;
     }
   }
   if (item.createdAt) {
-    return `Tạo ngày ${formatShortDate(item.createdAt)}`;
+    return `Tạo ${formatShortDate(item.createdAt)}`;
   }
   return '';
 }
 
 export default function MyListingsScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useContext(SafeAreaInsetsContext);
   const token = useSession((state) => state.token);
   const user = useSession((state) => state.user);
   const restriction = useSession((state) => state.restriction);
@@ -120,6 +131,9 @@ export default function MyListingsScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
+  const [actionSheetItem, setActionSheetItem] = useState<ListingSummary | null>(null);
+
+  const topPad = (insets?.top ?? 0) + primitive.space[3];
 
   useFocusEffect(
     useCallback(() => {
@@ -150,291 +164,406 @@ export default function MyListingsScreen() {
     void loadMyListings({ status: statusFilter, page: page + 1 }).catch(() => {});
   };
 
-  const handleMutationError = (err: unknown, fallback: string) => {
+  const handleMutationError = useCallback((err: unknown, fallback: string) => {
     if (isRestrictedError(err)) {
       setActionError('');
       return;
     }
     const parsed = extractApiError(err, fallback);
     setActionError(parsed.message);
-  };
+  }, []);
 
-  const handlePublish = async (item: ListingSummary) => {
-    setBusyId(item.id);
-    setActionError('');
-    setActionSuccess('');
-    try {
-      await publish(item.id, item.version);
-      setActionSuccess(`Đã công khai tin "${item.title}".`);
-    } catch (err) {
-      handleMutationError(err, 'Không thể công khai tin đăng.');
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const handlePublish = useCallback(
+    async (item: ListingSummary) => {
+      setBusyId(item.id);
+      setActionError('');
+      setActionSuccess('');
+      try {
+        await publish(item.id, item.version);
+        setActionSuccess(`Đã công khai tin "${item.title}".`);
+      } catch (err) {
+        handleMutationError(err, 'Không thể công khai tin đăng.');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [publish, handleMutationError],
+  );
 
-  const handleRenew = async (item: ListingSummary) => {
-    setBusyId(item.id);
-    setActionError('');
-    setActionSuccess('');
-    try {
-      await renew(item.id, item.version);
-      setActionSuccess(`Đã gia hạn tin "${item.title}" thêm 30 ngày.`);
-    } catch (err) {
-      handleMutationError(err, 'Không thể gia hạn tin đăng.');
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const handleRenew = useCallback(
+    async (item: ListingSummary) => {
+      setBusyId(item.id);
+      setActionError('');
+      setActionSuccess('');
+      try {
+        await renew(item.id, item.version);
+        setActionSuccess(`Đã gia hạn tin "${item.title}" thêm 30 ngày.`);
+      } catch (err) {
+        handleMutationError(err, 'Không thể gia hạn tin đăng.');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [renew, handleMutationError],
+  );
 
-  const performWithdraw = async (item: ListingSummary) => {
-    setBusyId(item.id);
-    setActionError('');
-    setActionSuccess('');
-    try {
-      await withdraw(item.id, item.version);
-      setActionSuccess(
-        `Đã rút tin "${item.title}" khỏi hiển thị công khai và giải phóng liên kết đồ vật.`,
+  const performWithdraw = useCallback(
+    async (item: ListingSummary) => {
+      setBusyId(item.id);
+      setActionError('');
+      setActionSuccess('');
+      try {
+        await withdraw(item.id, item.version);
+        setActionSuccess(
+          `Đã rút tin "${item.title}" khỏi hiển thị công khai và giải phóng liên kết đồ vật.`,
+        );
+      } catch (err) {
+        handleMutationError(err, 'Không thể rút tin đăng.');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [withdraw, handleMutationError],
+  );
+
+  const confirmWithdraw = useCallback(
+    (item: ListingSummary) => {
+      setActionError('');
+      setActionSuccess('');
+      const comboNote = item.isCombo
+        ? `Toàn bộ ${item.itemCount} đồ vật trong combo sẽ được giải phóng liên kết khỏi tin này.`
+        : 'Đồ vật gắn với tin sẽ được giải phóng liên kết khỏi tin này.';
+      Alert.alert(
+        'Xác nhận rút tin',
+        `Rút tin "${item.title}" sẽ ngừng hiển thị tin với người mua và hoàn lại 1 suất hạn mức (nếu đang công khai). ${comboNote}`,
+        [
+          { text: 'Hủy', style: 'cancel' },
+          {
+            text: 'Rút tin',
+            style: 'destructive',
+            onPress: () => void performWithdraw(item),
+          },
+        ],
       );
-    } catch (err) {
-      handleMutationError(err, 'Không thể rút tin đăng.');
-    } finally {
-      setBusyId(null);
+    },
+    [performWithdraw],
+  );
+
+  const performDelete = useCallback(
+    async (item: ListingSummary) => {
+      setBusyId(item.id);
+      setActionError('');
+      setActionSuccess('');
+      try {
+        await remove(item.id, item.version);
+        setActionSuccess(`Đã xóa tin "${item.title}".`);
+      } catch (err) {
+        handleMutationError(err, 'Không thể xóa tin đăng.');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [remove, handleMutationError],
+  );
+
+  const confirmDelete = useCallback(
+    (item: ListingSummary) => {
+      setActionError('');
+      setActionSuccess('');
+      Alert.alert(
+        'Xác nhận xóa tin',
+        `Bạn có chắc chắn muốn xóa vĩnh viễn tin "${item.title}"? Các liên kết với Kho đồ cá nhân sẽ được gỡ bỏ (nếu tin đã có lịch sử giao dịch, vui lòng dùng nút "Rút tin").`,
+        [
+          { text: 'Hủy', style: 'cancel' },
+          {
+            text: 'Xóa tin',
+            style: 'destructive',
+            onPress: () => void performDelete(item),
+          },
+        ],
+      );
+    },
+    [performDelete],
+  );
+
+  const actionSheetOptions = useMemo<ActionSheetOption[]>(() => {
+    if (!actionSheetItem) return [];
+    const item = actionSheetItem;
+    const isBusy = busyId === item.id;
+    const canEdit = EDITABLE_STATUSES.has(item.status);
+    const canPublish = item.status === 'NHAP' || item.status === 'DA_RUT';
+    const canWithdraw = item.status === 'CONG_KHAI' || item.status === 'CHO_DUYET';
+    const canRenew =
+      (item.status === 'CONG_KHAI' && item.renewalReminderDue) || item.status === 'HET_HAN';
+    const canDelete = DELETABLE_STATUSES.has(item.status);
+
+    const options: ActionSheetOption[] = [
+      {
+        key: 'view',
+        label: 'Xem chi tiết',
+        icon: 'eye',
+        testID: `action-sheet-view-${item.id}`,
+        onPress: () => navigation.navigate('Listing', { id: item.id, listing: item }),
+      },
+    ];
+
+    if (canEdit) {
+      options.push({
+        key: 'edit',
+        label: 'Sửa tin',
+        icon: 'edit-2',
+        disabled: isBusy,
+        testID: `action-sheet-edit-${item.id}`,
+        onPress: () => navigation.navigate('EditListing', { id: item.id }),
+      });
     }
-  };
 
-  const confirmWithdraw = (item: ListingSummary) => {
-    setActionError('');
-    setActionSuccess('');
-    const comboNote = item.isCombo
-      ? `Toàn bộ ${item.itemCount} đồ vật trong combo sẽ được giải phóng liên kết khỏi tin này.`
-      : 'Đồ vật gắn với tin sẽ được giải phóng liên kết khỏi tin này.';
-    Alert.alert(
-      'Xác nhận rút tin',
-      `Rút tin "${item.title}" sẽ ngừng hiển thị tin với người mua và hoàn lại 1 suất hạn mức (nếu đang công khai). ${comboNote}`,
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Rút tin',
-          style: 'destructive',
-          onPress: () => void performWithdraw(item),
-        },
-      ],
-    );
-  };
-
-  const performDelete = async (item: ListingSummary) => {
-    setBusyId(item.id);
-    setActionError('');
-    setActionSuccess('');
-    try {
-      await remove(item.id, item.version);
-      setActionSuccess(`Đã xóa tin "${item.title}".`);
-    } catch (err) {
-      handleMutationError(err, 'Không thể xóa tin đăng.');
-    } finally {
-      setBusyId(null);
+    if (canPublish) {
+      options.push({
+        key: 'publish',
+        label: 'Công khai',
+        icon: 'send',
+        disabled: isBusy || Boolean(quota && !quota.canPublish),
+        testID: `action-sheet-publish-${item.id}`,
+        onPress: () => void handlePublish(item),
+      });
     }
-  };
 
-  const confirmDelete = (item: ListingSummary) => {
-    setActionError('');
-    setActionSuccess('');
-    Alert.alert(
-      'Xác nhận xóa tin',
-      `Bạn có chắc chắn muốn xóa vĩnh viễn tin "${item.title}"? Các liên kết với Kho đồ cá nhân sẽ được gỡ bỏ (nếu tin đã có lịch sử giao dịch, vui lòng dùng nút "Rút tin").`,
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Xóa tin',
-          style: 'destructive',
-          onPress: () => void performDelete(item),
-        },
-      ],
-    );
-  };
+    if (canRenew) {
+      options.push({
+        key: 'renew',
+        label: 'Gia hạn +30 ngày',
+        icon: 'refresh-cw',
+        disabled: isBusy,
+        testID: `action-sheet-renew-${item.id}`,
+        onPress: () => void handleRenew(item),
+      });
+    }
+
+    if (canWithdraw) {
+      options.push({
+        key: 'withdraw',
+        label: 'Rút tin',
+        icon: 'eye-off',
+        disabled: isBusy,
+        testID: `my-listing-withdraw-${item.id}`,
+        onPress: () => confirmWithdraw(item),
+      });
+    }
+
+    if (canDelete) {
+      options.push({
+        key: 'delete',
+        label: 'Xóa tin',
+        icon: 'trash-2',
+        destructive: true,
+        disabled: isBusy,
+        testID: `my-listing-delete-${item.id}`,
+        onPress: () => confirmDelete(item),
+      });
+    }
+
+    return options;
+  }, [
+    actionSheetItem,
+    busyId,
+    quota,
+    navigation,
+    handlePublish,
+    handleRenew,
+    confirmWithdraw,
+    confirmDelete,
+  ]);
 
   if (!token) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.gatedWrap}>
-          <Text style={ui.brand}>DORM TRADING</Text>
-          <Text style={text.title}>Tin của tôi</Text>
-          <Notice message="Vui lòng đăng nhập bằng tài khoản sinh viên để quản lý tin đăng cá nhân." />
-          <Action
-            title="Đăng nhập"
-            testID="my-listings-login-btn"
-            onPress={() => navigation.navigate('Login')}
+      <View style={styles.screen}>
+        <View style={[styles.topBar, { paddingTop: topPad }]}>
+          <Text accessibilityRole="header" style={styles.screenTitle}>
+            Tin của tôi
+          </Text>
+        </View>
+        <HairlineDivider />
+        <View style={styles.gatedBody}>
+          <EmptyState
+            icon="log-in"
+            title="Đăng nhập để quản lý tin"
+            subtitle="Vui lòng đăng nhập bằng tài khoản sinh viên để quản lý tin đăng cá nhân."
+            primaryActionLabel="Đăng nhập"
+            primaryActionTestID="my-listings-login-btn"
+            onPrimaryAction={() => navigation.navigate('Login')}
           />
         </View>
-      </SafeAreaView>
+        <BottomNavBar activeTab="MyListings" />
+      </View>
     );
   }
 
   if (isLocked) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.gatedWrap}>
-          <Text style={ui.brand}>DORM TRADING</Text>
-          <Text style={text.title}>Tin của tôi</Text>
-          <RestrictedAccountNotice />
-          <Action
-            secondary
-            title="Quay lại tin công khai"
-            onPress={() => navigation.navigate('Listings')}
-          />
+      <View style={styles.screen}>
+        <View style={[styles.topBar, { paddingTop: topPad }]}>
+          <Text accessibilityRole="header" style={styles.screenTitle}>
+            Tin của tôi
+          </Text>
         </View>
-      </SafeAreaView>
+        <HairlineDivider />
+        <View style={styles.lockedBody}>
+          <RestrictedAccountNotice />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Quay lại tin công khai"
+            onPress={() => navigation.navigate('Listings')}
+            style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressedState]}
+          >
+            <Text style={styles.secondaryBtnText}>Quay lại tin công khai</Text>
+          </Pressable>
+        </View>
+        <BottomNavBar activeTab="MyListings" />
+      </View>
     );
   }
 
   if (!isActiveMember) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.gatedWrap}>
-          <Text style={ui.brand}>DORM TRADING</Text>
-          <Text style={text.title}>Tin của tôi</Text>
-          <Notice message="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ. Bạn chưa thể quản lý tin đăng." />
-          <Action
-            secondary
-            title="Quay lại tin công khai"
-            onPress={() => navigation.navigate('Listings')}
+      <View style={styles.screen}>
+        <View style={[styles.topBar, { paddingTop: topPad }]}>
+          <Text accessibilityRole="header" style={styles.screenTitle}>
+            Tin của tôi
+          </Text>
+        </View>
+        <HairlineDivider />
+        <View style={styles.gatedBody}>
+          <EmptyState
+            icon="shield"
+            title="Tài khoản chưa kích hoạt"
+            subtitle="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ. Bạn chưa thể quản lý tin đăng."
+            primaryActionLabel="Quay lại tin công khai"
+            onPrimaryAction={() => navigation.navigate('Listings')}
           />
         </View>
-      </SafeAreaView>
+        <BottomNavBar activeTab="MyListings" />
+      </View>
     );
   }
-
-  const quotaProgressRatio =
-    quota && quota.limit > 0 ? Math.min(1, Math.max(0, quota.activeCount / quota.limit)) : 0;
 
   const visibleError = actionError || error || '';
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={ui.brand}>DORM TRADING</Text>
-            <Text style={[text.title, { marginTop: space.xs }]}>Tin của tôi</Text>
-          </View>
-          <Action
-            title="Tạo tin mới"
-            testID="my-listings-create-btn"
-            onPress={() => navigation.navigate('CreateListing')}
-          />
-        </View>
-
-        {/* FR-05 Quota Summary Card */}
-        {quota ? (
-          <View style={styles.quotaCard} testID="my-listings-quota-card">
-            <View style={styles.quotaHeaderRow}>
-              <Text style={styles.quotaTitle}>
-                Đang mở/giữ chỗ: {quota.activeCount} / {quota.limit} tin
-              </Text>
-              <View style={styles.reputationPill}>
-                <Text style={styles.reputationPillText}>Uy tín: {quota.reputationScore}</Text>
-              </View>
-            </View>
-            <View style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${Math.round(quotaProgressRatio * 100)}%`,
-                    backgroundColor: quota.remaining === 0 ? colors.danger : colors.brand,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={styles.quotaCaption}>
-              {quota.remaining > 0
-                ? `Còn ${quota.remaining} suất công khai · Hạn mức < ${quota.highTierThreshold} điểm: ${quota.standardLimit} tin, ≥ ${quota.highTierThreshold} điểm: ${quota.highTierLimit} tin.`
-                : 'Đã dùng hết hạn mức công khai. Bạn vẫn có thể lưu Bản nháp hoặc rút bớt tin cũ.'}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Status Filter Pills */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
+    <View style={styles.screen}>
+      {/* Top SafeArea Header */}
+      <View style={[styles.topBar, { paddingTop: topPad }]}>
+        <Text accessibilityRole="header" style={styles.screenTitle}>
+          Tin của tôi
+        </Text>
+        <Pressable
+          testID="my-listings-create-btn"
+          accessibilityRole="button"
+          accessibilityLabel="Tạo tin"
+          onPress={() => navigation.navigate('CreateListing')}
+          style={({ pressed }) => [styles.createBtn, pressed && styles.createBtnPressed]}
         >
-          {STATUS_FILTERS.map((filter) => {
-            const active = statusFilter === filter.value;
-            return (
-              <Pressable
-                key={filter.testIdKey}
-                testID={`filter-status-${filter.testIdKey}`}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => handleSelectFilter(filter.value)}
-                style={[styles.filterPill, active && styles.filterPillActive]}
-              >
-                <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>
-                  {filter.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+          <Icon name="plus" size={16} color={component.button.primaryFg} />
+          <Text style={styles.createBtnText}>Tạo tin</Text>
+        </Pressable>
       </View>
 
-      {visibleRestriction ? (
-        <View style={styles.bannerMargin}>
-          <RestrictedAccountNotice />
+      {/* Flush Lucian #299 QuotaMeter */}
+      {quota ? (
+        <View style={styles.quotaStrip} testID="my-listings-quota-card">
+          <QuotaMeter
+            activeCount={quota.activeCount}
+            limit={quota.limit}
+            reputationScore={quota.reputationScore}
+            highTierThreshold={quota.highTierThreshold}
+            standardLimit={quota.standardLimit}
+            highTierLimit={quota.highTierLimit}
+            label="Hạn mức tin đang mở"
+            showUnlockCue={false}
+            warningMessage={
+              quota.remaining === 0
+                ? 'Đã dùng hết hạn mức công khai. Bạn vẫn có thể lưu Bản nháp hoặc rút bớt tin cũ.'
+                : undefined
+            }
+            style={styles.quotaMeterFlush}
+          />
+          <View style={styles.quotaSubRow}>
+            <Text style={styles.quotaCountText}>
+              Đang mở/giữ chỗ: {quota.activeCount} / {quota.limit} tin
+            </Text>
+            <Text style={styles.quotaRepText}>Uy tín: {quota.reputationScore}</Text>
+          </View>
         </View>
       ) : null}
 
-      {visibleError ? (
-        <View style={styles.bannerMargin}>
-          <Notice message={visibleError} error />
-        </View>
-      ) : null}
+      {/* Lucian #048 UnderlineTabs */}
+      <UnderlineTabs
+        items={STATUS_TABS}
+        value={statusFilter}
+        onChange={handleSelectFilter}
+        accessibilityLabel="Lọc trạng thái tin đăng"
+        testID="my-listings-status-tabs"
+      />
 
-      {actionSuccess ? (
-        <View style={styles.bannerMargin}>
-          <Notice message={actionSuccess} />
+      {visibleRestriction || visibleError || actionSuccess ? (
+        <View style={styles.alertsStack}>
+          {visibleRestriction ? <RestrictedAccountNotice /> : null}
+          {visibleError ? <InlineBanner tone="danger" message={visibleError} /> : null}
+          {actionSuccess ? <InlineBanner tone="success" message={actionSuccess} /> : null}
         </View>
       ) : null}
 
       <FlatList
         data={myListings}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={handleRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={handleRefresh}
+            tintColor={semantic.color.accent}
+          />
+        }
+        ItemSeparatorComponent={() => <HairlineDivider insetLeft={semantic.spacing.pageX} />}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyBox} testID="my-listings-empty">
-              <Text style={styles.emptyTitle}>
-                {statusFilter ? 'Không có tin đăng ở trạng thái này' : 'Bạn chưa có tin đăng nào'}
-              </Text>
-              <Text style={ui.caption}>
-                {statusFilter
-                  ? 'Hãy thử chuyển sang bộ lọc khác hoặc tạo tin đăng mới từ Kho đồ cá nhân.'
-                  : 'Bắt đầu đăng bán hoặc cho tặng đồ dùng KTX ngay từ Kho đồ cá nhân của bạn.'}
-              </Text>
-              <View style={styles.emptyCtaWrap}>
-                <Action
-                  title="Tạo tin mới"
-                  testID="my-listings-empty-create-btn"
-                  onPress={() => navigation.navigate('CreateListing')}
-                />
-              </View>
-            </View>
+            <EmptyState
+              testID="my-listings-empty"
+              icon="tag"
+              title={
+                statusFilter ? 'Không có tin đăng ở trạng thái này' : 'Bạn chưa có tin đăng nào'
+              }
+              subtitle={
+                statusFilter
+                  ? 'Hãy thử chuyển sang mục khác hoặc tạo tin đăng mới từ Kho đồ cá nhân.'
+                  : 'Bắt đầu đăng bán hoặc cho tặng đồ dùng KTX ngay từ Kho đồ cá nhân của bạn.'
+              }
+              primaryActionLabel="Tạo tin mới"
+              primaryActionTestID="my-listings-empty-create-btn"
+              onPrimaryAction={() => navigation.navigate('CreateListing')}
+            />
           ) : null
         }
         ListFooterComponent={
           page + 1 < totalPages ? (
             <View style={styles.loadMoreWrap}>
-              <Action
-                secondary
-                title="Tải thêm tin"
+              <Pressable
                 testID="my-listings-load-more"
-                busy={loading}
+                accessibilityRole="button"
+                accessibilityLabel="Tải thêm tin"
+                accessibilityState={{ disabled: loading, busy: loading }}
+                disabled={loading}
                 onPress={handleLoadMore}
-              />
+                style={({ pressed }) => [
+                  styles.secondaryBtn,
+                  loading && styles.disabledState,
+                  pressed && !loading && styles.pressedState,
+                ]}
+              >
+                <Text style={styles.secondaryBtnText}>
+                  {loading ? 'Đang tải...' : 'Tải thêm tin'}
+                </Text>
+              </Pressable>
             </View>
           ) : null
         }
@@ -444,532 +573,400 @@ export default function MyListingsScreen() {
           const isReserved = item.status === 'GIU_CHO';
           const canEdit = EDITABLE_STATUSES.has(item.status);
           const canPublish = item.status === 'NHAP' || item.status === 'DA_RUT';
-          const canWithdraw = item.status === 'CONG_KHAI' || item.status === 'CHO_DUYET';
-          const canRenew =
-            (item.status === 'CONG_KHAI' && item.renewalReminderDue) || item.status === 'HET_HAN';
-          const canDelete = DELETABLE_STATUSES.has(item.status);
+          const canRenewExpired = item.status === 'HET_HAN';
           const thumb = item.thumbnailUrl ?? item.images[0] ?? null;
-          const expiryLine = formatExpiryLine(item);
+          const expiryMeta = formatExpiryMeta(item);
           const locationLabel = item.locationName || item.locationText || '';
+          const metaLine = [locationLabel, expiryMeta, item.courseCode].filter(Boolean).join(' · ');
+          const publishDisabled = isBusy || Boolean(quota && !quota.canPublish);
 
           return (
-            <View style={styles.card} testID={`my-listing-card-${item.id}`}>
-              <View style={styles.cardTop}>
+            <View style={styles.rowContainer} testID={`my-listing-card-${item.id}`}>
+              <Pressable
+                testID={`my-listing-view-${item.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Xem ${item.title}`}
+                onPress={() => navigation.navigate('Listing', { id: item.id, listing: item })}
+                style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
+              >
                 {thumb ? (
-                  <Image source={{ uri: thumb }} style={styles.thumb} accessibilityLabel={item.title} />
+                  <Image
+                    source={{ uri: thumb }}
+                    style={styles.thumb}
+                    resizeMode="cover"
+                    accessibilityLabel={item.title}
+                  />
                 ) : (
                   <View style={styles.thumbPlaceholder}>
-                    <Text style={styles.thumbPlaceholderText}>Chưa có ảnh</Text>
+                    <Icon name="image" size={22} color={semantic.color.textSecondary} />
                   </View>
                 )}
 
-                <View style={styles.cardInfo}>
-                  <View style={styles.titleRow}>
-                    <Text style={styles.cardTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <View
-                      style={[styles.statusBadge, { backgroundColor: statusMeta.bg }]}
-                      testID={`my-listing-status-${item.id}`}
-                    >
-                      <Text style={[styles.statusBadgeText, { color: statusMeta.fg }]}>
-                        {statusMeta.label}
-                      </Text>
-                    </View>
-                  </View>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle} numberOfLines={2}>
+                    {item.title}
+                  </Text>
 
-                  <View style={styles.metaBadgesRow}>
+                  <View style={styles.priceRow}>
+                    <Text style={[styles.priceText, item.isFree && styles.priceFreeText]}>
+                      {formatVnd(item.priceVnd)}
+                    </Text>
                     {item.isCombo ? (
-                      <View style={styles.comboPill}>
-                        <Text style={styles.comboPillText}>
-                          Combo ({item.itemCount} món)
-                        </Text>
-                      </View>
-                    ) : null}
-                    {item.isFree ? (
-                      <View style={styles.freePill}>
-                        <Text style={styles.freePillText}>Cho tặng 0đ</Text>
-                      </View>
-                    ) : null}
-                    {item.courseCode ? (
-                      <View style={styles.coursePill}>
-                        <Text style={styles.coursePillText}>{item.courseCode}</Text>
-                      </View>
+                      <StatusIndicator
+                        label={`Combo · ${item.itemCount} món`}
+                        tone="neutral"
+                        variant="soft"
+                      />
                     ) : null}
                   </View>
 
-                  <Text style={styles.priceText}>{formatVnd(item.priceVnd)}</Text>
-
-                  {locationLabel ? (
-                    <Text style={styles.metaCaption} numberOfLines={1}>
-                      Khu vực: {locationLabel}
+                  {metaLine ? (
+                    <Text style={styles.metaLine} numberOfLines={1}>
+                      {metaLine}
                     </Text>
                   ) : null}
 
-                  {expiryLine ? (
-                    <Text style={styles.expiryCaption}>{expiryLine}</Text>
-                  ) : null}
-                </View>
-              </View>
-
-              {item.hasUnavailableItems ? (
-                <View style={styles.warningStrip} testID={`unavailable-items-${item.id}`}>
-                  <Text style={styles.warningStripText}>
-                    Một đồ vật trong tin hiện đang được giữ hoặc đã chuyển giao ở tin khác.
-                  </Text>
-                </View>
-              ) : null}
-
-              {/* FR-13 7-day Renewal Reminder Banner */}
-              {item.renewalReminderDue && item.status === 'CONG_KHAI' ? (
-                <View style={styles.renewalBanner} testID={`renewal-banner-${item.id}`}>
-                  <Text style={styles.renewalBannerText}>
-                    Nhắc gia hạn (FR-13): Tin sắp hết hạn trong vòng 7 ngày tới. Gia hạn để tiếp tục hiển thị thêm 30 ngày.
-                  </Text>
-                  <Action
-                    title="Gia hạn +30 ngày"
-                    testID={`renew-banner-btn-${item.id}`}
-                    disabled={isBusy}
-                    busy={isBusy}
-                    onPress={() => void handleRenew(item)}
+                  <StatusIndicator
+                    testID={`my-listing-status-${item.id}`}
+                    label={statusMeta.label}
+                    tone={statusMeta.tone}
+                    variant={statusMeta.tier}
                   />
                 </View>
+              </Pressable>
+
+              {item.hasUnavailableItems ? (
+                <InlineBanner
+                  tone="warning"
+                  testID={`unavailable-items-${item.id}`}
+                  message="Một đồ vật trong tin hiện đang được giữ hoặc đã chuyển giao ở tin khác."
+                />
               ) : null}
 
-              {/* Blocked/Locked Badge on GIU_CHO */}
+              {item.renewalReminderDue && item.status === 'CONG_KHAI' ? (
+                <InlineBanner
+                  tone="warning"
+                  testID={`renewal-banner-${item.id}`}
+                  message="Tin sắp hết hạn trong 7 ngày tới. Gia hạn để tiếp tục hiển thị thêm 30 ngày."
+                  actionLabel={isBusy ? 'Đang gia hạn...' : 'Gia hạn +30 ngày'}
+                  actionTestID={`renew-banner-btn-${item.id}`}
+                  onActionPress={() => {
+                    if (!isBusy) {
+                      void handleRenew(item);
+                    }
+                  }}
+                />
+              ) : null}
+
               {isReserved ? (
-                <View style={styles.lockedBadge} testID={`locked-badge-${item.id}`}>
-                  <Text style={styles.lockedBadgeText}>
-                    Tin đang được giữ chỗ cho giao dịch — không thể sửa, rút tin hoặc xóa lúc này.
-                  </Text>
-                </View>
+                <InlineBanner
+                  tone="warning"
+                  icon="lock"
+                  testID={`locked-badge-${item.id}`}
+                  message="Tin đang được giữ chỗ cho giao dịch — không thể sửa, rút tin hoặc xóa lúc này."
+                />
               ) : null}
 
-              {/* Status-aware Action Buttons */}
-              <View style={styles.cardActions}>
+              {/* Compact Row Actions: max 1 primary contextual action + overflow trigger */}
+              <View style={styles.rowActions}>
+                <View style={styles.primaryActionSlot}>
+                  {canPublish ? (
+                    <Pressable
+                      testID={`my-listing-publish-${item.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Công khai ${item.title}`}
+                      accessibilityState={{ disabled: publishDisabled }}
+                      disabled={publishDisabled}
+                      onPress={() => void handlePublish(item)}
+                      style={({ pressed }) => [
+                        styles.inlinePrimaryBtn,
+                        publishDisabled && styles.disabledState,
+                        pressed && !publishDisabled && styles.pressedState,
+                      ]}
+                    >
+                      <Text style={styles.inlinePrimaryText}>Công khai</Text>
+                    </Pressable>
+                  ) : canRenewExpired ? (
+                    <Pressable
+                      testID={`my-listing-renew-${item.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Gia hạn ${item.title}`}
+                      accessibilityState={{ disabled: isBusy }}
+                      disabled={isBusy}
+                      onPress={() => void handleRenew(item)}
+                      style={({ pressed }) => [
+                        styles.inlinePrimaryBtn,
+                        isBusy && styles.disabledState,
+                        pressed && !isBusy && styles.pressedState,
+                      ]}
+                    >
+                      <Text style={styles.inlinePrimaryText}>Gia hạn</Text>
+                    </Pressable>
+                  ) : canEdit ? (
+                    <Pressable
+                      testID={`my-listing-edit-${item.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Sửa ${item.title}`}
+                      accessibilityState={{ disabled: isBusy }}
+                      disabled={isBusy}
+                      onPress={() => navigation.navigate('EditListing', { id: item.id })}
+                      style={({ pressed }) => [
+                        styles.inlineSecondaryBtn,
+                        isBusy && styles.disabledState,
+                        pressed && !isBusy && styles.pressedState,
+                      ]}
+                    >
+                      <Icon name="edit-2" size={14} color={semantic.color.textPrimary} />
+                      <Text style={styles.inlineSecondaryText}>Sửa</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+
                 <Pressable
-                  testID={`my-listing-view-${item.id}`}
+                  testID={`my-listing-more-${item.id}`}
+                  hitSlop={6}
                   accessibilityRole="button"
-                  accessibilityLabel={`Xem ${item.title}`}
-                  onPress={() => navigation.navigate('Listing', { id: item.id, listing: item })}
-                  style={styles.actionChip}
+                  accessibilityLabel={`Tùy chọn ${item.title}`}
+                  accessibilityState={{ disabled: isBusy }}
+                  disabled={isBusy}
+                  onPress={() => setActionSheetItem(item)}
+                  style={({ pressed }) => [
+                    styles.moreBtn,
+                    isBusy && styles.disabledState,
+                    pressed && !isBusy && styles.pressedState,
+                  ]}
                 >
-                  <Text style={styles.actionChipText}>Xem</Text>
+                  <Icon name="more-horizontal" size={16} color={semantic.color.textSecondary} />
+                  <Text style={styles.moreBtnText}>Tùy chọn</Text>
                 </Pressable>
-
-                {canEdit ? (
-                  <Pressable
-                    testID={`my-listing-edit-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Sửa ${item.title}`}
-                    disabled={isBusy}
-                    onPress={() => navigation.navigate('EditListing', { id: item.id })}
-                    style={[styles.actionChip, isBusy && styles.chipDisabled]}
-                  >
-                    <Text style={styles.actionChipText}>Sửa</Text>
-                  </Pressable>
-                ) : null}
-
-                {canPublish ? (
-                  <Pressable
-                    testID={`my-listing-publish-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Công khai ${item.title}`}
-                    accessibilityState={{ disabled: isBusy || Boolean(quota && !quota.canPublish) }}
-                    disabled={isBusy || Boolean(quota && !quota.canPublish)}
-                    onPress={() => void handlePublish(item)}
-                    style={[
-                      styles.actionChipPrimary,
-                      (isBusy || Boolean(quota && !quota.canPublish)) && styles.chipDisabled,
-                    ]}
-                  >
-                    <Text style={styles.actionChipPrimaryText}>Công khai</Text>
-                  </Pressable>
-                ) : null}
-
-                {canRenew ? (
-                  <Pressable
-                    testID={`my-listing-renew-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Gia hạn ${item.title}`}
-                    accessibilityState={{ disabled: isBusy }}
-                    disabled={isBusy}
-                    onPress={() => void handleRenew(item)}
-                    style={[styles.actionChipPrimary, isBusy && styles.chipDisabled]}
-                  >
-                    <Text style={styles.actionChipPrimaryText}>Gia hạn</Text>
-                  </Pressable>
-                ) : null}
-
-                {canWithdraw ? (
-                  <Pressable
-                    testID={`my-listing-withdraw-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Rút tin ${item.title}`}
-                    accessibilityState={{ disabled: isBusy }}
-                    disabled={isBusy}
-                    onPress={() => confirmWithdraw(item)}
-                    style={[styles.actionChipWarn, isBusy && styles.chipDisabled]}
-                  >
-                    <Text style={styles.actionChipWarnText}>Rút tin</Text>
-                  </Pressable>
-                ) : null}
-
-                {canDelete ? (
-                  <Pressable
-                    testID={`my-listing-delete-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Xóa ${item.title}`}
-                    accessibilityState={{ disabled: isBusy }}
-                    disabled={isBusy}
-                    onPress={() => confirmDelete(item)}
-                    style={[styles.actionChipDanger, isBusy && styles.chipDisabled]}
-                  >
-                    <Text style={styles.actionChipDangerText}>Xóa</Text>
-                  </Pressable>
-                ) : null}
               </View>
             </View>
           );
         }}
       />
-    </SafeAreaView>
+
+      <ActionSheet
+        visible={Boolean(actionSheetItem)}
+        onClose={() => setActionSheetItem(null)}
+        title={actionSheetItem?.title}
+        subtitle={actionSheetItem ? LISTING_STATUS_META[actionSheetItem.status].label : undefined}
+        options={actionSheetOptions}
+        cancelLabel="Hủy"
+        testID="my-listing-action-sheet"
+      />
+
+      <BottomNavBar activeTab="MyListings" />
+    </View>
   );
 }
 
+const THUMB_SIZE = 80;
+
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    backgroundColor: '#f5f4ef',
+    backgroundColor: semantic.color.bgSurface,
   },
-  gatedWrap: {
-    padding: space.xl,
-    gap: space.md,
-  },
-  header: {
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
-    paddingBottom: space.sm,
-    gap: space.md,
-  },
-  headerTopRow: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: space.md,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingBottom: primitive.space[3],
+    backgroundColor: semantic.color.bgSurface,
+    gap: primitive.space[3],
   },
-  quotaCard: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: space.xs,
+  screenTitle: {
+    ...semantic.type.screenTitle,
   },
-  quotaHeaderRow: {
+  createBtn: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: space.xs,
-  },
-  quotaTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  reputationPill: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: 12,
-    backgroundColor: '#e6f4ea',
-  },
-  reputationPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#137333',
-  },
-  progressTrack: {
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#e3e4df',
-    overflow: 'hidden',
-    marginVertical: 2,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  quotaCaption: {
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 17,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: space.xs,
-    paddingVertical: 2,
-  },
-  filterPill: {
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-  },
-  filterPillActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  filterPillText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  filterPillTextActive: {
-    color: colors.surface,
-  },
-  bannerMargin: {
-    marginHorizontal: space.lg,
-    marginBottom: space.sm,
-  },
-  listContent: {
-    padding: space.lg,
-    paddingTop: space.sm,
-    gap: space.md,
-    flexGrow: 1,
-  },
-  emptyBox: {
-    padding: space.xl,
-    borderRadius: radius.md,
-    backgroundColor: '#f2ede4',
-    alignItems: 'center',
-    gap: space.sm,
-    marginTop: space.lg,
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.ink,
-    textAlign: 'center',
-  },
-  emptyCtaWrap: {
-    marginTop: space.sm,
-    width: '100%',
-    maxWidth: 240,
-  },
-  loadMoreWrap: {
-    paddingVertical: space.md,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    padding: space.lg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: space.md,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    gap: space.md,
-  },
-  thumb: {
-    width: 84,
-    height: 84,
-    borderRadius: radius.md,
-    backgroundColor: '#ecebe4',
-  },
-  thumbPlaceholder: {
-    width: 84,
-    height: 84,
-    borderRadius: radius.md,
-    backgroundColor: '#ecebe4',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: space.xs,
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeightSm,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: component.button.primaryBg,
   },
-  thumbPlaceholderText: {
-    fontSize: 11,
-    color: colors.muted,
-    textAlign: 'center',
+  createBtnPressed: {
+    backgroundColor: component.button.primaryPressedBg,
   },
-  cardInfo: {
-    flex: 1,
-    gap: 4,
+  createBtnText: {
+    ...semantic.type.label,
+    color: component.button.primaryFg,
   },
-  titleRow: {
+  quotaStrip: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingBottom: primitive.space[3],
+    backgroundColor: semantic.color.bgSurface,
+    gap: primitive.space[1.5],
+  },
+  quotaMeterFlush: {
+    paddingVertical: 0,
+  },
+  quotaSubRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: space.xs,
+    alignItems: 'center',
+    gap: primitive.space[2],
   },
-  cardTitle: {
+  quotaCountText: {
+    ...semantic.type.micro,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textSecondary,
+  },
+  quotaRepText: {
+    ...semantic.type.micro,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  alertsStack: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+    gap: primitive.space[2],
+    backgroundColor: semantic.color.bgSurface,
+  },
+  gatedBody: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.ink,
-    lineHeight: 20,
+    backgroundColor: semantic.color.bgPage,
+    justifyContent: 'center',
   },
-  statusBadge: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 3,
-    borderRadius: 12,
+  lockedBody: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[6],
+    gap: primitive.space[4],
   },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
+  listContent: {
+    flexGrow: 1,
+    paddingBottom: primitive.space[4],
+    backgroundColor: semantic.color.bgSurface,
   },
-  metaBadgesRow: {
+  loadMoreWrap: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[4],
+  },
+  rowContainer: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
+    backgroundColor: semantic.color.bgSurface,
+    gap: primitive.space[2.5],
+  },
+  rowMain: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: primitive.space[3],
+  },
+  rowPressed: {
+    opacity: primitive.opacity.pressed,
+  },
+  thumb: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.bgTrack,
+  },
+  thumbPlaceholder: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.bgTrack,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowInfo: {
+    flex: 1,
+    gap: primitive.space[1],
+  },
+  rowTitle: {
+    ...semantic.type.cardTitle,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 4,
-  },
-  comboPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: '#f2ede4',
-  },
-  comboPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  freePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: '#e6f4ea',
-  },
-  freePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#137333',
-  },
-  coursePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: '#e8f0fe',
-  },
-  coursePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1967d2',
+    gap: primitive.space[2],
   },
   priceText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.brand,
+    ...semantic.type.price,
   },
-  metaCaption: {
-    fontSize: 12,
-    color: colors.muted,
+  priceFreeText: {
+    color: semantic.color.success,
   },
-  expiryCaption: {
-    fontSize: 12,
-    color: colors.muted,
-    fontWeight: '500',
+  metaLine: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
-  warningStrip: {
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#f0d796',
-  },
-  warningStripText: {
-    fontSize: 12,
-    color: '#8a4f00',
-    lineHeight: 17,
-  },
-  renewalBanner: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#e9c874',
-    gap: space.sm,
-  },
-  renewalBannerText: {
-    fontSize: 13,
-    color: '#7a4500',
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  lockedBadge: {
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#f0d796',
-  },
-  lockedBadgeText: {
-    fontSize: 12,
-    color: '#8a4f00',
-    fontWeight: '600',
-    lineHeight: 18,
-  },
-  cardActions: {
+  rowActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: space.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: space.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
+    paddingTop: primitive.space[1],
   },
-  actionChip: {
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
+  primaryActionSlot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
   },
-  actionChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.ink,
+  inlinePrimaryBtn: {
+    minHeight: 34,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  actionChipPrimary: {
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.brand,
+  inlinePrimaryText: {
+    ...semantic.type.label,
+    color: semantic.color.accent,
   },
-  actionChipPrimaryText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.surface,
+  inlineSecondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1.5],
+    minHeight: 34,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
   },
-  actionChipWarn: {
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e9c874',
-    backgroundColor: '#fef7e0',
+  inlineSecondaryText: {
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
   },
-  actionChipWarnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#8a4f00',
+  moreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1],
+    minHeight: 34,
+    paddingHorizontal: primitive.space[2.5],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
   },
-  actionChipDanger: {
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5b8af',
-    backgroundColor: '#fff0ec',
+  moreBtnText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
-  actionChipDangerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.danger,
+  secondaryBtn: {
+    minHeight: component.button.minHeight,
+    paddingHorizontal: component.button.paddingX,
+    borderRadius: component.button.radius,
+    backgroundColor: semantic.color.bgTrack,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  chipDisabled: {
-    opacity: 0.45,
+  secondaryBtnText: {
+    fontSize: primitive.fontSize.base,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  disabledState: {
+    opacity: primitive.opacity.disabled,
+  },
+  pressedState: {
+    opacity: primitive.opacity.pressed,
   },
 });

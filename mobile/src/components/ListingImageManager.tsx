@@ -18,8 +18,8 @@ import {
 } from '../media/imagePicker';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { useSession } from '../auth/session';
-import { Action, Notice, ui } from './AuthUI';
-import { colors, radius, space } from '../theme';
+import { ActionSheet, Icon, InlineBanner, type ActionSheetOption } from './ui';
+import { component, primitive, semantic } from '../theme';
 
 export interface ListingImageManagerProps {
   images: string[];
@@ -40,8 +40,9 @@ export default function ListingImageManager({
 }: ListingImageManagerProps) {
   const [uploading, setUploading] = useState(false);
   const [localError, setLocalError] = useState('');
-  const [showUrlInput, setShowUrlInput] = useState(false);
-  const [urlDraft, setUrlDraft] = useState('');
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkDraft, setLinkDraft] = useState('');
+  const [sourceSheetVisible, setSourceSheetVisible] = useState(false);
 
   useEffect(() => {
     if (error) {
@@ -51,6 +52,7 @@ export default function ListingImageManager({
 
   const remainingSlots = Math.max(0, maxImages - images.length);
   const busyOrDisabled = disabled || uploading;
+  const canAddMore = !busyOrDisabled && remainingSlots > 0;
 
   const setUploadFlag = (value: boolean) => {
     setUploading(value);
@@ -132,24 +134,24 @@ export default function ListingImageManager({
     }
   };
 
-  const handleAddUrl = () => {
+  const handleAddLink = () => {
     setLocalError('');
     if (remainingSlots <= 0) {
       setLocalError(`Bạn chỉ có thể đính kèm tối đa ${maxImages} ảnh thực tế cho mỗi tin đăng.`);
       return;
     }
-    const validation = validateImageUrl(urlDraft);
+    const validation = validateImageUrl(linkDraft);
     if (!validation.valid) {
       setLocalError(validation.error ?? 'Đường dẫn ảnh không hợp lệ.');
       return;
     }
-    const cleaned = urlDraft.trim();
+    const cleaned = linkDraft.trim();
     if (images.includes(cleaned)) {
       setLocalError('Ảnh này đã có trong danh sách.');
       return;
     }
     onChange([...images, cleaned]);
-    setUrlDraft('');
+    setLinkDraft('');
   };
 
   const handleMove = (index: number, direction: -1 | 1) => {
@@ -167,327 +169,509 @@ export default function ListingImageManager({
     onChange(images.filter((_, idx) => idx !== index));
   };
 
+  const sourceSheetOptions: ActionSheetOption[] = [
+    {
+      key: 'gallery',
+      label: 'Chọn từ thư viện',
+      description: `Chọn tối đa ${remainingSlots} ảnh từ máy`,
+      icon: 'image',
+      disabled: !canAddMore,
+      testID: 'pick-gallery-btn',
+      onPress: () => void handlePickFromLibrary(),
+    },
+    {
+      key: 'camera',
+      label: 'Chụp ảnh mới',
+      description: 'Chụp trực tiếp tình trạng đồ vật',
+      icon: 'camera',
+      disabled: !canAddMore,
+      testID: 'take-photo-btn',
+      onPress: () => void handleTakePhoto(),
+    },
+    {
+      key: 'link',
+      label: 'Dán liên kết ảnh',
+      description: 'Nhập đường dẫn ảnh có sẵn',
+      icon: 'link',
+      disabled,
+      testID: 'toggle-url-input-btn',
+      onPress: () => {
+        setLocalError('');
+        setShowLinkInput(true);
+      },
+    },
+  ];
+
   const visibleError = localError || error || '';
 
   return (
     <View style={styles.container} testID="listing-image-manager">
       <View style={styles.headerRow}>
-        <Text style={ui.label}>Ảnh thực tế *</Text>
-        <View style={styles.countBadge} testID="listing-image-count">
-          <Text style={styles.countBadgeText}>
-            {images.length}/{maxImages} ảnh thực tế
+        <View style={styles.titleWrap}>
+          <Text style={styles.sectionTitle} accessibilityRole="header">
+            Ảnh thực tế
           </Text>
+          <Text style={styles.requiredMark}>*</Text>
         </View>
+        <Text
+          style={[styles.counterText, images.length > 0 && styles.counterTextActive]}
+          testID="listing-image-count"
+        >
+          {images.length}/{maxImages} ảnh thực tế
+        </Text>
       </View>
 
-      <Text style={ui.caption}>
+      <Text style={styles.caption}>
         Cần 1–{maxImages} ảnh thực tế khi công khai (JPEG, PNG, WebP, tối đa 5MB/ảnh). Ảnh đầu tiên là ảnh bìa.
       </Text>
 
       {uploading ? (
-        <View style={styles.uploadingBanner} testID="listing-image-uploading">
-          <ActivityIndicator color={colors.brand} size="small" />
-          <Text style={styles.uploadingText}>Đang tải ảnh lên máy chủ…</Text>
+        <View style={styles.uploadingRow} testID="listing-image-uploading">
+          <ActivityIndicator color={semantic.color.accent} size="small" />
+          <Text style={styles.uploadingText}>Đang tải ảnh lên máy chủ...</Text>
         </View>
       ) : null}
 
-      {images.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.thumbRow}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.railContent}
+      >
+        <Pressable
+          testID="add-photo-tile"
+          accessibilityRole="button"
+          accessibilityLabel="Thêm ảnh thực tế"
+          accessibilityState={{ disabled: !canAddMore }}
+          disabled={!canAddMore}
+          onPress={() => {
+            setLocalError('');
+            setSourceSheetVisible(true);
+          }}
+          style={({ pressed }) => [
+            styles.addTile,
+            !canAddMore && styles.disabledState,
+            pressed && canAddMore && styles.pressedState,
+          ]}
         >
-          {images.map((uri, index) => (
-            <View key={`${uri}-${index}`} style={styles.thumbCard} testID={`listing-image-card-${index}`}>
-              <View style={styles.thumbImageWrap}>
+          <Icon
+            name="camera"
+            size={20}
+            color={canAddMore ? semantic.color.accent : semantic.color.textSecondary}
+          />
+          <Text style={styles.addTileLabel}>Thêm ảnh</Text>
+          <Text style={styles.addTileCount}>
+            {images.length}/{maxImages}
+          </Text>
+        </Pressable>
+
+        {images.map((uri, index) => {
+          const canMoveLeft = !busyOrDisabled && index > 0;
+          const canMoveRight = !busyOrDisabled && index < images.length - 1;
+
+          return (
+            <View
+              key={`${uri}-${index}`}
+              style={styles.photoColumn}
+              testID={`listing-image-card-${index}`}
+            >
+              <View style={styles.photoTile}>
                 <Image
                   source={{ uri }}
-                  style={styles.thumbImage}
+                  style={styles.photoImage}
                   resizeMode="cover"
                   accessibilityLabel={`Ảnh tin đăng ${index + 1}`}
                 />
+
                 {index === 0 ? (
-                  <View style={styles.coverBadge} testID="listing-image-cover-badge">
-                    <Text style={styles.coverBadgeText}>Ảnh bìa</Text>
+                  <View style={styles.coverPill} testID="listing-image-cover-badge">
+                    <Text style={styles.coverPillText}>Ảnh bìa</Text>
                   </View>
                 ) : null}
-              </View>
 
-              <View style={styles.thumbControls}>
                 <Pressable
-                  testID={`listing-image-move-left-${index}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Di chuyển ảnh ${index + 1} sang trái`}
-                  accessibilityState={{ disabled: busyOrDisabled || index === 0 }}
-                  disabled={busyOrDisabled || index === 0}
-                  onPress={() => handleMove(index, -1)}
-                  style={[
-                    styles.miniBtn,
-                    (busyOrDisabled || index === 0) && styles.miniBtnDisabled,
-                  ]}
-                >
-                  <Text style={styles.miniBtnText}>←</Text>
-                </Pressable>
-                <Pressable
-                  testID={`listing-image-move-right-${index}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Di chuyển ảnh ${index + 1} sang phải`}
-                  accessibilityState={{ disabled: busyOrDisabled || index === images.length - 1 }}
-                  disabled={busyOrDisabled || index === images.length - 1}
-                  onPress={() => handleMove(index, 1)}
-                  style={[
-                    styles.miniBtn,
-                    (busyOrDisabled || index === images.length - 1) && styles.miniBtnDisabled,
-                  ]}
-                >
-                  <Text style={styles.miniBtnText}>→</Text>
-                </Pressable>
-                <Pressable
-                  testID={`listing-image-remove-${index}`}
+                  testID={`remove-image-${index}`}
+                  hitSlop={6}
                   accessibilityRole="button"
                   accessibilityLabel={`Xóa ảnh ${index + 1}`}
                   accessibilityState={{ disabled: busyOrDisabled }}
                   disabled={busyOrDisabled}
                   onPress={() => handleRemove(index)}
-                  style={[styles.removeMiniBtn, busyOrDisabled && styles.miniBtnDisabled]}
+                  style={({ pressed }) => [
+                    styles.removeBadge,
+                    busyOrDisabled && styles.disabledState,
+                    pressed && !busyOrDisabled && styles.pressedState,
+                  ]}
                 >
-                  <Text style={styles.removeMiniBtnText}>Xóa</Text>
+                  <Icon name="x" size={12} color={semantic.color.textInverse} />
                 </Pressable>
               </View>
-            </View>
-          ))}
-        </ScrollView>
-      ) : (
-        <View style={styles.emptyBox} testID="listing-image-empty">
-          <Text style={styles.emptyText}>
-            Chưa có ảnh nào. Hãy chọn từ thư viện, chụp ảnh trực tiếp hoặc nhập URL ảnh.
-          </Text>
-        </View>
-      )}
 
-      <View style={styles.actionButtonsRow}>
-        <View style={styles.flexBtn}>
-          <Action
-            secondary
-            title="Chọn từ thư viện"
-            testID="listing-pick-library-btn"
-            disabled={busyOrDisabled || remainingSlots <= 0}
-            busy={uploading}
-            onPress={() => void handlePickFromLibrary()}
+              {images.length > 1 ? (
+                <View style={styles.reorderRow}>
+                  <Pressable
+                    testID={`listing-image-move-left-${index}`}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Di chuyển ảnh ${index + 1} sang trái`}
+                    accessibilityState={{ disabled: !canMoveLeft }}
+                    disabled={!canMoveLeft}
+                    onPress={() => handleMove(index, -1)}
+                    style={({ pressed }) => [
+                      styles.reorderBtn,
+                      !canMoveLeft && styles.disabledState,
+                      pressed && canMoveLeft && styles.pressedState,
+                    ]}
+                  >
+                    <Icon name="chevron-left" size={14} color={semantic.color.textPrimary} />
+                  </Pressable>
+                  <Pressable
+                    testID={`listing-image-move-right-${index}`}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Di chuyển ảnh ${index + 1} sang phải`}
+                    accessibilityState={{ disabled: !canMoveRight }}
+                    disabled={!canMoveRight}
+                    onPress={() => handleMove(index, 1)}
+                    style={({ pressed }) => [
+                      styles.reorderBtn,
+                      !canMoveRight && styles.disabledState,
+                      pressed && canMoveRight && styles.pressedState,
+                    ]}
+                  >
+                    <Icon name="chevron-right" size={14} color={semantic.color.textPrimary} />
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      {images.length === 0 ? (
+        <Text style={styles.emptyHint} testID="listing-image-empty">
+          Chưa có ảnh nào. Hãy chọn từ thư viện, chụp ảnh mới hoặc dán liên kết ảnh.
+        </Text>
+      ) : null}
+
+      <View style={styles.quickActionBar}>
+        <Pressable
+          testID="listing-pick-library-btn"
+          accessibilityRole="button"
+          accessibilityLabel="Thư viện"
+          accessibilityState={{ disabled: !canAddMore, busy: uploading }}
+          disabled={!canAddMore}
+          onPress={() => void handlePickFromLibrary()}
+          style={({ pressed }) => [
+            styles.quickActionBtn,
+            !canAddMore && styles.disabledState,
+            pressed && canAddMore && styles.pressedState,
+          ]}
+        >
+          <Icon name="image" size={15} color={semantic.color.textPrimary} />
+          <Text style={styles.quickActionText}>Thư viện</Text>
+        </Pressable>
+
+        <Pressable
+          testID="listing-take-photo-btn"
+          accessibilityRole="button"
+          accessibilityLabel="Chụp ảnh"
+          accessibilityState={{ disabled: !canAddMore }}
+          disabled={!canAddMore}
+          onPress={() => void handleTakePhoto()}
+          style={({ pressed }) => [
+            styles.quickActionBtn,
+            !canAddMore && styles.disabledState,
+            pressed && canAddMore && styles.pressedState,
+          ]}
+        >
+          <Icon name="camera" size={15} color={semantic.color.textPrimary} />
+          <Text style={styles.quickActionText}>Chụp ảnh</Text>
+        </Pressable>
+
+        <Pressable
+          testID="listing-toggle-url-input"
+          accessibilityRole="button"
+          accessibilityLabel="Liên kết"
+          accessibilityState={{ expanded: showLinkInput, disabled }}
+          disabled={disabled}
+          onPress={() => {
+            setLocalError('');
+            setShowLinkInput((prev) => !prev);
+          }}
+          style={({ pressed }) => [
+            styles.quickActionBtn,
+            showLinkInput && styles.quickActionBtnActive,
+            disabled && styles.disabledState,
+            pressed && !disabled && styles.pressedState,
+          ]}
+        >
+          <Icon
+            name="link"
+            size={15}
+            color={showLinkInput ? semantic.color.accent : semantic.color.textPrimary}
           />
-        </View>
-        <View style={styles.flexBtn}>
-          <Action
-            secondary
-            title="Chụp ảnh"
-            testID="listing-take-photo-btn"
-            disabled={busyOrDisabled || remainingSlots <= 0}
-            onPress={() => void handleTakePhoto()}
-          />
-        </View>
+          <Text
+            style={[styles.quickActionText, showLinkInput && styles.quickActionTextActive]}
+          >
+            Liên kết
+          </Text>
+        </Pressable>
       </View>
 
-      <Pressable
-        testID="listing-toggle-url-input"
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showUrlInput, disabled }}
-        disabled={disabled}
-        onPress={() => {
-          setLocalError('');
-          setShowUrlInput((prev) => !prev);
-        }}
-        style={styles.urlToggle}
-      >
-        <Text style={styles.urlToggleText}>
-          {showUrlInput ? 'Ẩn nhập URL ảnh ▲' : 'Hoặc nhập URL ảnh ▼'}
-        </Text>
-      </Pressable>
-
-      {showUrlInput ? (
-        <View style={styles.urlInputBox}>
+      {showLinkInput ? (
+        <View style={styles.linkInputRow}>
           <TextInput
             testID="listing-image-url-input"
-            accessibilityLabel="Đường dẫn URL ảnh"
-            placeholder="https://example.com/anh-thuc-te.jpg"
-            placeholderTextColor={colors.muted}
+            accessibilityLabel="Đường dẫn ảnh"
+            placeholder="Dán liên kết ảnh (https://...)"
+            placeholderTextColor={semantic.color.textSecondary}
             autoCapitalize="none"
             autoCorrect={false}
-            editable={!busyOrDisabled && remainingSlots > 0}
-            value={urlDraft}
+            editable={canAddMore}
+            value={linkDraft}
             onChangeText={(value) => {
               setLocalError('');
-              setUrlDraft(value);
+              setLinkDraft(value);
             }}
-            style={[ui.field, styles.urlInputField]}
+            style={[styles.linkInput, !canAddMore && styles.linkInputDisabled]}
           />
-          <Action
-            secondary
-            title="Thêm ảnh"
+          <Pressable
             testID="listing-add-url-btn"
-            disabled={busyOrDisabled || remainingSlots <= 0 || !urlDraft.trim()}
-            onPress={handleAddUrl}
-          />
+            accessibilityRole="button"
+            accessibilityLabel="Thêm ảnh"
+            accessibilityState={{ disabled: !canAddMore || !linkDraft.trim() }}
+            disabled={!canAddMore || !linkDraft.trim()}
+            onPress={handleAddLink}
+            style={({ pressed }) => [
+              styles.addLinkBtn,
+              (!canAddMore || !linkDraft.trim()) && styles.disabledState,
+              pressed && canAddMore && Boolean(linkDraft.trim()) && styles.pressedState,
+            ]}
+          >
+            <Text style={styles.addLinkBtnText}>Thêm</Text>
+          </Pressable>
         </View>
       ) : null}
 
-      {visibleError ? <Notice message={visibleError} error /> : null}
+      {visibleError ? <InlineBanner tone="danger" message={visibleError} /> : null}
+
+      <ActionSheet
+        visible={sourceSheetVisible}
+        onClose={() => setSourceSheetVisible(false)}
+        title="Thêm ảnh thực tế"
+        subtitle={`Còn ${remainingSlots}/${maxImages} ảnh có thể thêm`}
+        options={sourceSheetOptions}
+        cancelLabel="Hủy"
+        testID="photo-source-sheet"
+      />
     </View>
   );
 }
 
+const TILE_SIZE = 84;
+const TILE_RADIUS = 12;
+
 const styles = StyleSheet.create({
   container: {
-    gap: space.sm,
+    gap: primitive.space[2.5],
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: space.sm,
+    alignItems: 'baseline',
+    gap: primitive.space[2],
   },
-  countBadge: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: 16,
-    backgroundColor: '#f2ede4',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  countBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  uploadingBanner: {
+  titleWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#f2ede4',
+    gap: primitive.space[1],
+  },
+  sectionTitle: {
+    ...semantic.type.sectionTitle,
+  },
+  requiredMark: {
+    ...semantic.type.sectionTitle,
+    color: semantic.color.accent,
+  },
+  counterText: {
+    ...semantic.type.micro,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textSecondary,
+  },
+  counterTextActive: {
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  caption: {
+    ...semantic.type.caption,
+  },
+  uploadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.bgSubtle,
   },
   uploadingText: {
-    color: colors.ink,
-    fontWeight: '600',
-    fontSize: 13,
+    ...semantic.type.caption,
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.medium,
   },
-  thumbRow: {
+  railContent: {
     flexDirection: 'row',
-    gap: space.md,
-    paddingVertical: space.xs,
+    alignItems: 'flex-start',
+    gap: primitive.space[2.5],
+    paddingVertical: primitive.space[1],
   },
-  thumbCard: {
-    width: 132,
-    borderRadius: radius.md,
+  addTile: {
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    borderRadius: TILE_RADIUS,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
+    borderStyle: 'dashed',
+    borderColor: semantic.color.borderStrong,
+    backgroundColor: semantic.color.bgSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    padding: primitive.space[1.5],
+  },
+  addTileLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  addTileCount: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.medium,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textSecondary,
+  },
+  photoColumn: {
+    width: TILE_SIZE,
+    gap: primitive.space[1.5],
+  },
+  photoTile: {
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    borderRadius: TILE_RADIUS,
     overflow: 'hidden',
-  },
-  thumbImageWrap: {
+    backgroundColor: semantic.color.bgTrack,
     position: 'relative',
-    width: '100%',
-    height: 98,
-    backgroundColor: '#ecebe4',
   },
-  thumbImage: {
+  photoImage: {
     width: '100%',
     height: '100%',
   },
-  coverBadge: {
+  coverPill: {
     position: 'absolute',
-    top: 6,
-    left: 6,
-    paddingHorizontal: 8,
+    left: primitive.space[1],
+    right: primitive.space[1],
+    bottom: primitive.space[1],
+    paddingHorizontal: primitive.space[1.5],
     paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: colors.brand,
-  },
-  coverBadgeText: {
-    color: colors.surface,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  thumbControls: {
-    flexDirection: 'row',
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.overlayDark,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: space.xs,
-    gap: 4,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
   },
-  miniBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+  coverPillText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textInverse,
+  },
+  removeBadge: {
+    position: 'absolute',
+    top: primitive.space[1],
+    right: primitive.space[1],
+    width: 22,
+    height: 22,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.overlayDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  miniBtnDisabled: {
-    opacity: 0.4,
+  reorderRow: {
+    flexDirection: 'row',
+    gap: primitive.space[1],
   },
-  miniBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  removeMiniBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#fff0ec',
-    borderWidth: 1,
-    borderColor: '#e5b8af',
+  reorderBtn: {
+    flex: 1,
+    height: 28,
+    borderRadius: primitive.radius.sm,
+    backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  removeMiniBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.danger,
+  emptyHint: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
-  emptyBox: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: '#f2ede4',
+  quickActionBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: primitive.space[2],
+  },
+  quickActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeightSm,
+    paddingHorizontal: primitive.space[3],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  quickActionBtnActive: {
+    backgroundColor: semantic.color.accentSoft,
+  },
+  quickActionText: {
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
+  },
+  quickActionTextActive: {
+    color: semantic.color.accent,
+  },
+  linkInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+  },
+  linkInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: component.input.radius,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: component.input.border,
+    backgroundColor: component.input.bg,
+    paddingHorizontal: primitive.space[3],
+    fontSize: primitive.fontSize.base,
+    color: semantic.color.textPrimary,
+  },
+  linkInputDisabled: {
+    backgroundColor: component.input.disabledBg,
+    color: semantic.color.textSecondary,
+  },
+  addLinkBtn: {
+    minHeight: 46,
+    paddingHorizontal: primitive.space[4],
+    borderRadius: component.button.radius,
+    backgroundColor: component.button.primaryBg,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyText: {
-    color: colors.muted,
-    textAlign: 'center',
-    lineHeight: 20,
-    fontSize: 13,
+  addLinkBtnText: {
+    ...semantic.type.label,
+    color: component.button.primaryFg,
   },
-  actionButtonsRow: {
-    flexDirection: 'row',
-    gap: space.sm,
+  disabledState: {
+    opacity: primitive.opacity.disabled,
   },
-  flexBtn: {
-    flex: 1,
-  },
-  urlToggle: {
-    alignSelf: 'flex-start',
-    paddingVertical: space.xs,
-  },
-  urlToggleText: {
-    color: colors.brand,
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  urlInputBox: {
-    flexDirection: 'row',
-    gap: space.sm,
-    alignItems: 'center',
-  },
-  urlInputField: {
-    flex: 1,
-    minHeight: 44,
-    paddingVertical: space.xs,
+  pressedState: {
+    opacity: primitive.opacity.pressed,
   },
 });

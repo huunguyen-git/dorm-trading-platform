@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -16,8 +16,16 @@ import { fetchInventoryItems } from '../inventory/api';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { useSession } from '../auth/session';
-import { Action, Notice, ui } from './AuthUI';
-import { colors, radius, space } from '../theme';
+import {
+  EmptyState,
+  HairlineDivider,
+  Icon,
+  InlineBanner,
+  SegmentedControl,
+  StatusIndicator,
+  type StatusTone,
+} from './ui';
+import { component, primitive, semantic } from '../theme';
 
 export type InventoryPickerMode = 'single' | 'combo';
 
@@ -32,28 +40,34 @@ export interface InventoryPickerSectionProps {
   onNavigateToInventoryCreate: () => void;
 }
 
-const ITEM_STATUS_STYLE: Record<
+const ITEM_STATUS_META: Record<
   InventoryItemStatus,
-  { label: string; bg: string; fg: string; lockReason?: string }
+  { label: string; tone: StatusTone; lockReason?: string }
 > = {
   KHA_DUNG: {
     label: 'Khả dụng',
-    bg: '#e6f4ea',
-    fg: '#137333',
+    tone: 'success',
   },
   DANG_GIU: {
     label: 'Đang giữ',
-    bg: '#fef7e0',
-    fg: '#b06000',
+    tone: 'warning',
     lockReason: 'Đang được giữ chỗ trong một giao dịch khác, không thể chọn.',
   },
   DA_CHUYEN_GIAO: {
     label: 'Đã chuyển giao',
-    bg: '#f1f3f4',
-    fg: '#5f6368',
+    tone: 'neutral',
     lockReason: 'Đồ vật đã chuyển giao xong, không thể đăng lại.',
   },
 };
+
+const MODE_OPTIONS: Array<{
+  value: InventoryPickerMode;
+  label: string;
+  testID: string;
+}> = [
+  { value: 'single', label: 'Tin đơn', testID: 'listing-mode-single' },
+  { value: 'combo', label: 'Combo (≥2 món)', testID: 'listing-mode-combo' },
+];
 
 function useOptionalNavigation(): NavigationProp<ParamListBase> | null {
   try {
@@ -116,14 +130,12 @@ export default function InventoryPickerSection({
     });
   }, [navigation, loadInventory]);
 
-  // Automatically sync mode to combo whenever >= 2 items are selected
   useEffect(() => {
     if (selectedItemIds.length >= 2 && mode !== 'combo') {
       onChangeMode('combo');
     }
   }, [selectedItemIds.length, mode, onChangeMode]);
 
-  // Preselect item from route param once inventory is loaded
   useEffect(() => {
     if (!preselectedItemId || loading) return;
     if (appliedPreselectRef.current === preselectedItemId) return;
@@ -173,432 +185,325 @@ export default function InventoryPickerSection({
   };
 
   const availableCount = items.filter((item) => item.trangThai === 'KHA_DUNG').length;
+  const selectionSummary =
+    selectedItemIds.length === 0
+      ? 'Chưa chọn đồ vật'
+      : selectedItemIds.length >= 2 || mode === 'combo'
+        ? `Đã chọn ${selectedItemIds.length} món · Combo`
+        : 'Đã chọn 1 món · Tin đơn';
 
   return (
     <View style={styles.container} testID="inventory-picker-section">
       <View style={styles.headerRow}>
-        <Text style={ui.label}>Đồ vật từ Kho đồ cá nhân *</Text>
-        <View style={styles.summaryPill} testID="inventory-selection-summary">
-          <Text style={styles.summaryPillText}>
-            {selectedItemIds.length === 0
-              ? 'Chưa chọn đồ vật'
-              : selectedItemIds.length >= 2 || mode === 'combo'
-                ? `Đã chọn ${selectedItemIds.length} món · Combo`
-                : 'Đã chọn 1 món · Tin đơn'}
+        <View style={styles.titleWrap}>
+          <Text style={styles.sectionTitle} accessibilityRole="header">
+            Đồ vật từ Kho đồ
           </Text>
+          <Text style={styles.requiredMark}>*</Text>
         </View>
+        <Text
+          style={[styles.summaryCaption, selectedItemIds.length > 0 && styles.summaryCaptionActive]}
+          testID="inventory-selection-summary"
+        >
+          {selectionSummary}
+        </Text>
       </View>
 
-      <Text style={ui.caption}>
-        Mỗi tin đăng gắn trực tiếp với 1 đồ vật (Tin đơn) hoặc từ 2 đồ vật trở lên (Tin combo bán trọn bộ).
+      <Text style={styles.caption}>
+        Chọn 1 đồ vật cho Tin đơn, hoặc từ 2 đồ vật trở lên cho Combo.
       </Text>
 
-      <View style={styles.modeRow}>
-        <Pressable
-          testID="listing-mode-single"
-          accessibilityRole="button"
-          accessibilityState={{ selected: mode === 'single', disabled }}
-          disabled={disabled}
-          onPress={() => handleSwitchMode('single')}
-          style={[
-            styles.modeBtn,
-            mode === 'single' && styles.modeBtnActive,
-            disabled && styles.modeBtnDisabled,
-          ]}
-        >
-          <Text style={[styles.modeBtnText, mode === 'single' && styles.modeBtnTextActive]}>
-            Tin đơn (1 đồ vật)
-          </Text>
-        </Pressable>
-
-        <Pressable
-          testID="listing-mode-combo"
-          accessibilityRole="button"
-          accessibilityState={{ selected: mode === 'combo', disabled }}
-          disabled={disabled}
-          onPress={() => handleSwitchMode('combo')}
-          style={[
-            styles.modeBtn,
-            mode === 'combo' && styles.modeBtnActive,
-            disabled && styles.modeBtnDisabled,
-          ]}
-        >
-          <Text style={[styles.modeBtnText, mode === 'combo' && styles.modeBtnTextActive]}>
-            Tin combo (từ 2 đồ vật)
-          </Text>
-        </Pressable>
-      </View>
+      <SegmentedControl
+        options={MODE_OPTIONS}
+        value={mode}
+        onChange={handleSwitchMode}
+        disabled={disabled}
+        accessibilityLabel="Hình thức tin đăng"
+        testID="inventory-mode-segmented"
+      />
 
       {mode === 'combo' && selectedItemIds.length < 2 ? (
-        <View style={styles.comboHintBox} testID="combo-mode-hint">
-          <Text style={styles.comboHintText}>
-            Chế độ Tin combo yêu cầu chọn ít nhất 2 đồ vật khả dụng (hiện đã chọn {selectedItemIds.length}).
-          </Text>
-        </View>
+        <InlineBanner
+          tone="warning"
+          testID="combo-mode-hint"
+          message={`Chế độ Combo yêu cầu chọn ít nhất 2 đồ vật khả dụng (hiện đã chọn ${selectedItemIds.length}).`}
+        />
       ) : null}
 
       {loading ? (
-        <View style={styles.loadingBox} testID="inventory-picker-loading">
-          <ActivityIndicator color={colors.brand} size="small" />
-          <Text style={ui.caption}>Đang tải Kho đồ cá nhân…</Text>
+        <View style={styles.loadingRow} testID="inventory-picker-loading">
+          <ActivityIndicator color={semantic.color.accent} size="small" />
+          <Text style={styles.caption}>Đang tải Kho đồ cá nhân...</Text>
         </View>
       ) : loadError ? (
-        <View style={{ gap: space.sm }}>
-          <Notice message={loadError} error />
-          <Action
-            secondary
-            title="Tải lại kho đồ"
-            testID="inventory-picker-retry"
-            onPress={() => void loadInventory()}
-          />
-        </View>
+        <InlineBanner
+          tone="danger"
+          message={loadError}
+          actionLabel="Tải lại kho đồ"
+          actionTestID="inventory-picker-retry"
+          onActionPress={() => void loadInventory()}
+        />
       ) : items.length === 0 ? (
-        <View style={styles.emptyBox} testID="inventory-picker-empty">
-          <Text style={styles.emptyTitle}>Kho đồ cá nhân đang trống</Text>
-          <Text style={styles.emptyCaption}>
-            Hãy thêm ít nhất 1 đồ vật thực tế vào Kho đồ cá nhân trước khi đăng tin bán hoặc cho tặng.
-          </Text>
-          <View style={styles.emptyCtaWrap}>
-            <Action
-              secondary
-              title="Đi tới Kho đồ cá nhân"
-              testID="go-to-inventory-cta"
-              onPress={onNavigateToInventoryCreate}
-            />
-            <Action
-              secondary
-              title="Tải lại kho đồ"
-              testID="inventory-picker-refresh-empty"
-              onPress={() => void loadInventory()}
-            />
-          </View>
-        </View>
+        <EmptyState
+          testID="inventory-picker-empty"
+          icon="package"
+          title="Kho đồ cá nhân đang trống"
+          subtitle="Thêm ít nhất 1 đồ vật thực tế vào Kho đồ cá nhân trước khi đăng tin bán hoặc cho tặng."
+          primaryActionLabel="Tạo đồ vật trong Kho"
+          onPrimaryAction={onNavigateToInventoryCreate}
+          primaryActionTestID="go-to-inventory-cta"
+          secondaryActionLabel="Tải lại kho đồ"
+          onSecondaryAction={() => void loadInventory()}
+          secondaryActionTestID="inventory-picker-refresh-empty"
+          style={styles.emptyStateFlush}
+        />
       ) : (
-        <View style={styles.itemList}>
+        <View style={styles.listWrap}>
           {availableCount === 0 ? (
-            <View style={styles.emptyBox} testID="inventory-picker-no-available">
-              <Text style={styles.emptyTitle}>Chưa có đồ vật khả dụng</Text>
-              <Text style={styles.emptyCaption}>
-                Tất cả đồ vật hiện tại đang được giữ chỗ hoặc đã chuyển giao. Bạn có thể thêm đồ vật mới vào kho.
-              </Text>
-              <View style={styles.emptyCtaWrap}>
-                <Action
-                  secondary
-                  title="Đi tới Kho đồ cá nhân"
-                  testID="go-to-inventory-cta"
-                  onPress={onNavigateToInventoryCreate}
-                />
-                <Action
-                  secondary
-                  title="Tải lại kho đồ"
-                  testID="inventory-picker-refresh-no-available"
-                  onPress={() => void loadInventory()}
-                />
-              </View>
-            </View>
+            <EmptyState
+              testID="inventory-picker-no-available"
+              icon="package"
+              title="Chưa có đồ vật khả dụng"
+              subtitle="Tất cả đồ vật hiện đang được giữ chỗ hoặc đã chuyển giao. Bạn có thể thêm đồ vật mới vào kho."
+              primaryActionLabel="Tạo đồ vật trong Kho"
+              onPrimaryAction={onNavigateToInventoryCreate}
+              primaryActionTestID="go-to-inventory-cta"
+              secondaryActionLabel="Tải lại kho đồ"
+              onSecondaryAction={() => void loadInventory()}
+              secondaryActionTestID="inventory-picker-refresh-no-available"
+              style={styles.emptyStateFlush}
+            />
           ) : null}
 
-          {items.map((item) => {
-            const statusMeta = ITEM_STATUS_STYLE[item.trangThai] ?? ITEM_STATUS_STYLE.KHA_DUNG;
+          {items.map((item, index) => {
+            const statusMeta = ITEM_STATUS_META[item.trangThai] ?? ITEM_STATUS_META.KHA_DUNG;
             const isSelected = selectedItemIds.includes(item.id);
             const isUnavailable = item.trangThai !== 'KHA_DUNG';
             const canToggle = !disabled && (!isUnavailable || isSelected);
             const thumb = item.hinhAnh[0];
 
             return (
-              <Pressable
-                key={item.id}
-                testID={`inventory-picker-item-${item.id}`}
-                accessibilityRole="checkbox"
-                accessibilityLabel={item.ten}
-                accessibilityState={{ checked: isSelected, disabled: !canToggle }}
-                disabled={!canToggle}
-                onPress={() => handleToggleItem(item)}
-                style={[
-                  styles.itemCard,
-                  isSelected && styles.itemCardSelected,
-                  isSelected && isUnavailable && styles.itemCardSelectedWarning,
-                  !canToggle && styles.itemCardDisabled,
-                ]}
-              >
-                <View style={styles.checkbox}>
+              <Fragment key={item.id}>
+                {index > 0 ? <HairlineDivider insetLeft={36} /> : null}
+                <Pressable
+                  testID={`inventory-picker-item-${item.id}`}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={item.ten}
+                  accessibilityState={{ checked: isSelected, disabled: !canToggle }}
+                  disabled={!canToggle}
+                  onPress={() => handleToggleItem(item)}
+                  style={({ pressed }) => [
+                    styles.itemRow,
+                    isSelected && !isUnavailable && styles.itemRowSelected,
+                    isSelected && isUnavailable && styles.itemRowConflict,
+                    !canToggle && styles.itemRowDisabled,
+                    pressed && canToggle && styles.itemRowPressed,
+                  ]}
+                >
                   <View
                     style={[
-                      styles.checkboxInner,
-                      isSelected && styles.checkboxInnerSelected,
-                      !canToggle && styles.checkboxInnerDisabled,
+                      styles.checkboxBox,
+                      isSelected && !isUnavailable && styles.checkboxChecked,
+                      isSelected && isUnavailable && styles.checkboxConflict,
+                      !canToggle && styles.checkboxDisabled,
                     ]}
                   >
-                    {isSelected ? <Text style={styles.checkmark}>✓</Text> : null}
+                    {isSelected ? (
+                      <Icon name="check" size={14} color={semantic.color.textInverse} />
+                    ) : null}
                   </View>
-                </View>
 
-                {thumb ? (
-                  <Image source={{ uri: thumb }} style={styles.thumb} accessibilityLabel={item.ten} />
-                ) : (
-                  <View style={styles.thumbPlaceholder}>
-                    <Text style={styles.thumbPlaceholderText}>Chưa có ảnh</Text>
-                  </View>
-                )}
-
-                <View style={styles.itemBody}>
-                  <View style={styles.itemTopRow}>
-                    <Text style={styles.itemName} numberOfLines={1}>
-                      {item.ten}
-                    </Text>
-                    <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
-                      <Text style={[styles.statusPillText, { color: statusMeta.fg }]}>
-                        {statusMeta.label}
-                      </Text>
+                  {thumb ? (
+                    <Image
+                      source={{ uri: thumb }}
+                      style={styles.thumb}
+                      resizeMode="cover"
+                      accessibilityLabel={item.ten}
+                    />
+                  ) : (
+                    <View style={styles.thumbPlaceholder}>
+                      <Icon name="package" size={18} color={semantic.color.textSecondary} />
                     </View>
+                  )}
+
+                  <View style={styles.itemBody}>
+                    <View style={styles.itemTopRow}>
+                      <Text style={styles.itemName} numberOfLines={1}>
+                        {item.ten}
+                      </Text>
+                      <StatusIndicator
+                        label={statusMeta.label}
+                        tone={statusMeta.tone}
+                        variant="dot"
+                      />
+                    </View>
+
+                    <Text style={styles.itemCondition} numberOfLines={2}>
+                      {item.tinhTrang}
+                    </Text>
+
+                    {isUnavailable && isSelected ? (
+                      <Text
+                        style={styles.conflictHint}
+                        testID={`inventory-picker-unselect-hint-${item.id}`}
+                      >
+                        Đồ vật không còn khả dụng — chạm để bỏ chọn
+                      </Text>
+                    ) : statusMeta.lockReason ? (
+                      <Text style={styles.lockReason}>{statusMeta.lockReason}</Text>
+                    ) : item.linkedListingCount > 0 ? (
+                      <Text style={styles.sharedInfo}>
+                        Đang gắn {item.linkedListingCount} tin khác
+                      </Text>
+                    ) : null}
                   </View>
-
-                  <Text style={styles.itemCondition} numberOfLines={2}>
-                    {item.tinhTrang}
-                  </Text>
-
-                  {isUnavailable && isSelected ? (
-                    <Text
-                      style={styles.lockReason}
-                      testID={`inventory-picker-unselect-hint-${item.id}`}
-                    >
-                      Đồ vật không còn khả dụng — chạm để bỏ chọn
-                    </Text>
-                  ) : statusMeta.lockReason ? (
-                    <Text style={styles.lockReason}>{statusMeta.lockReason}</Text>
-                  ) : item.linkedListingCount > 0 ? (
-                    <Text style={styles.sharedInfo}>
-                      Đang gắn {item.linkedListingCount} tin khác (có thể dùng chung cho đến khi giữ chỗ)
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
+                </Pressable>
+              </Fragment>
             );
           })}
         </View>
       )}
 
-      {error ? <Notice message={error} error /> : null}
+      {error ? <InlineBanner tone="danger" message={error} /> : null}
     </View>
   );
 }
 
+const THUMB_SIZE = 48;
+
 const styles = StyleSheet.create({
   container: {
-    gap: space.sm,
+    gap: primitive.space[3],
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'baseline',
     flexWrap: 'wrap',
-    gap: space.sm,
+    gap: primitive.space[2],
   },
-  summaryPill: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: 16,
-    backgroundColor: '#f2ede4',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  summaryPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  modeRow: {
+  titleWrap: {
     flexDirection: 'row',
-    gap: space.sm,
+    alignItems: 'center',
+    gap: primitive.space[1],
   },
-  modeBtn: {
-    flex: 1,
-    minHeight: 42,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
+  sectionTitle: {
+    ...semantic.type.sectionTitle,
+  },
+  requiredMark: {
+    ...semantic.type.sectionTitle,
+    color: semantic.color.accent,
+  },
+  summaryCaption: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+  },
+  summaryCaptionActive: {
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  caption: {
+    ...semantic.type.caption,
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+    paddingVertical: primitive.space[3],
+  },
+  emptyStateFlush: {
+    paddingVertical: primitive.space[5],
+    paddingHorizontal: primitive.space[2],
+  },
+  listWrap: {
+    backgroundColor: semantic.color.bgSurface,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 68,
+    paddingVertical: primitive.space[3],
+    paddingHorizontal: primitive.space[1.5],
+    gap: primitive.space[3],
+    borderRadius: primitive.radius.md,
+    backgroundColor: semantic.color.bgSurface,
+  },
+  itemRowSelected: {
+    backgroundColor: semantic.color.accentSoft,
+  },
+  itemRowConflict: {
+    backgroundColor: semantic.color.dangerSoft,
+  },
+  itemRowDisabled: {
+    opacity: 0.55,
+  },
+  itemRowPressed: {
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  checkboxBox: {
+    width: component.toggle.checkboxSize,
+    height: component.toggle.checkboxSize,
+    borderRadius: component.toggle.checkboxRadius,
+    borderWidth: 1.5,
+    borderColor: semantic.color.borderStrong,
+    backgroundColor: semantic.color.bgSurface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modeBtnActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
+  checkboxChecked: {
+    backgroundColor: component.toggle.onBg,
+    borderColor: component.toggle.onBg,
   },
-  modeBtnDisabled: {
-    opacity: 0.5,
+  checkboxConflict: {
+    backgroundColor: semantic.color.danger,
+    borderColor: semantic.color.danger,
   },
-  modeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.ink,
-    textAlign: 'center',
-  },
-  modeBtnTextActive: {
-    color: colors.surface,
-  },
-  comboHintBox: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#f0d796',
-  },
-  comboHintText: {
-    fontSize: 13,
-    color: '#8a4f00',
-    lineHeight: 19,
-  },
-  loadingBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#f9f8f5',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  emptyBox: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: '#f2ede4',
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    gap: space.sm,
-  },
-  emptyTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.ink,
-    textAlign: 'center',
-  },
-  emptyCaption: {
-    fontSize: 13,
-    color: colors.muted,
-    textAlign: 'center',
-    lineHeight: 19,
-  },
-  emptyCtaWrap: {
-    marginTop: space.xs,
-    width: '100%',
-    maxWidth: 300,
-    gap: space.sm,
-  },
-  itemList: {
-    gap: space.sm,
-  },
-  itemCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.sm,
-    padding: space.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-  },
-  itemCardSelected: {
-    borderColor: colors.brand,
-    borderWidth: 1.5,
-    backgroundColor: '#fdf8f6',
-  },
-  itemCardSelectedWarning: {
-    borderColor: colors.danger,
-    backgroundColor: '#fff5f3',
-  },
-  itemCardDisabled: {
-    backgroundColor: '#f5f4ef',
-    opacity: 0.72,
-  },
-  checkbox: {
-    paddingTop: 2,
-  },
-  checkboxInner: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: colors.muted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  checkboxInnerSelected: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  checkboxInnerDisabled: {
-    borderColor: colors.line,
-    backgroundColor: '#ecebe4',
-  },
-  checkmark: {
-    color: colors.surface,
-    fontSize: 13,
-    fontWeight: '700',
+  checkboxDisabled: {
+    borderColor: semantic.color.borderHairline,
+    backgroundColor: semantic.color.bgTrack,
   },
   thumb: {
-    width: 56,
-    height: 56,
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
     borderRadius: 8,
-    backgroundColor: '#ecebe4',
+    backgroundColor: semantic.color.bgTrack,
   },
   thumbPlaceholder: {
-    width: 56,
-    height: 56,
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
     borderRadius: 8,
-    backgroundColor: '#ecebe4',
+    backgroundColor: semantic.color.bgTrack,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 4,
-  },
-  thumbPlaceholderText: {
-    fontSize: 10,
-    color: colors.muted,
-    textAlign: 'center',
   },
   itemBody: {
     flex: 1,
-    gap: 4,
+    gap: 3,
   },
   itemTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: space.xs,
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
   },
   itemName: {
+    ...semantic.type.cardTitle,
     flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  statusPill: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '700',
   },
   itemCondition: {
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 17,
+    ...semantic.type.caption,
+  },
+  conflictHint: {
+    ...semantic.type.micro,
+    color: semantic.color.danger,
+    fontWeight: primitive.fontWeight.semibold,
   },
   lockReason: {
-    fontSize: 12,
-    color: '#a12d24',
-    fontWeight: '500',
-    lineHeight: 17,
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
   sharedInfo: {
-    fontSize: 11,
-    color: colors.brand,
-    fontWeight: '500',
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
 });

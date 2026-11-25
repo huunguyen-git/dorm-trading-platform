@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { resolveUserRestriction, useSession } from '../auth/session';
@@ -10,8 +10,8 @@ import ListingFormContent, {
   type ListingFormConflictState,
 } from '../components/ListingFormContent';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
-import { Action, AuthScreen, Notice } from '../components/AuthUI';
-import { space } from '../theme';
+import { EmptyState } from '../components/ui';
+import { component, primitive, semantic } from '../theme';
 
 type CreateListingRoute = RouteProp<RootStack, 'CreateListing'>;
 
@@ -95,65 +95,53 @@ export default function CreateListingScreen() {
 
   if (!token) {
     return (
-      <AuthScreen
-        title="Đăng tin mới"
-        subtitle="Đăng nhập bằng tài khoản sinh viên đã kích hoạt để đăng bán hoặc cho tặng đồ dùng."
-      >
-        <Notice message="Vui lòng đăng nhập để sử dụng chức năng đăng tin." />
-        <Action
-          title="Đăng nhập"
-          testID="create-listing-login-btn"
-          onPress={() => navigation.navigate('Login')}
+      <View style={styles.gatedScreen}>
+        <EmptyState
+          icon="log-in"
+          title="Đăng nhập để đăng tin"
+          subtitle="Đăng nhập bằng tài khoản sinh viên đã kích hoạt để đăng bán hoặc cho tặng đồ dùng."
+          primaryActionLabel="Đăng nhập"
+          primaryActionTestID="create-listing-login-btn"
+          onPrimaryAction={() => navigation.navigate('Login')}
         />
-      </AuthScreen>
+      </View>
     );
   }
 
   if (isLocked) {
     return (
-      <AuthScreen
-        title="Đăng tin mới"
-        subtitle="Tài khoản hiện không thể thực hiện thao tác tạo tin đăng."
-      >
+      <View style={styles.lockedScreen}>
         <RestrictedAccountNotice />
-        <Action
-          secondary
-          title="Quay lại"
+        <Pressable
           testID="create-listing-back-btn"
+          accessibilityRole="button"
+          accessibilityLabel="Quay lại"
           onPress={() => navigation.goBack()}
-        />
-      </AuthScreen>
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedState]}
+        >
+          <Text style={styles.backBtnText}>Quay lại</Text>
+        </Pressable>
+      </View>
     );
   }
 
   if (!isActiveMember) {
     return (
-      <AuthScreen
-        title="Đăng tin mới"
-        subtitle="Cần hoàn tất xác minh tài khoản trước khi đăng bán đồ dùng."
-      >
-        <Notice message="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ. Bạn chưa thể đăng tin." />
-        <Action
-          secondary
-          title="Quay lại"
-          testID="create-listing-back-btn"
-          onPress={() => navigation.goBack()}
+      <View style={styles.gatedScreen}>
+        <EmptyState
+          icon="shield"
+          title="Cần hoàn tất xác minh tài khoản"
+          subtitle="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ. Bạn chưa thể đăng tin."
+          primaryActionLabel="Quay lại"
+          primaryActionTestID="create-listing-back-btn"
+          onPrimaryAction={() => navigation.goBack()}
         />
-      </AuthScreen>
+      </View>
     );
   }
 
   return (
-    <AuthScreen
-      title="Đăng tin mới"
-      subtitle="Chọn đồ vật từ Kho đồ cá nhân, tải 1–5 ảnh thực tế và công khai hoặc lưu nháp."
-    >
-      {visibleRestriction ? (
-        <View style={styles.restrictionWrap}>
-          <RestrictedAccountNotice />
-        </View>
-      ) : null}
-
+    <View style={styles.screen}>
       <ListingFormContent
         mode="create"
         preselectedItemId={preselectedItemId}
@@ -165,19 +153,51 @@ export default function CreateListingScreen() {
         submitting={submitting}
         submitError={submitError}
         conflictState={conflictState}
-        onNavigateToInventoryCreate={() => navigation.navigate('InventoryForm', { mode: 'create' })}
+        headerSlot={visibleRestriction ? <RestrictedAccountNotice /> : undefined}
+        onNavigateToInventoryCreate={() =>
+          navigation.navigate('InventoryForm', { mode: 'create' })
+        }
         onCancel={() => {
           clearError();
           navigation.goBack();
         }}
         onSubmitCreate={handleSubmitCreate}
       />
-    </AuthScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  restrictionWrap: {
-    marginBottom: space.sm,
+  screen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
+  },
+  gatedScreen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+    justifyContent: 'center',
+  },
+  lockedScreen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[6],
+    gap: primitive.space[4],
+  },
+  backBtn: {
+    minHeight: component.button.minHeight,
+    borderRadius: component.button.radius,
+    backgroundColor: semantic.color.bgTrack,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: component.button.paddingX,
+  },
+  backBtnText: {
+    fontSize: primitive.fontSize.base,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  pressedState: {
+    opacity: primitive.opacity.pressed,
   },
 });

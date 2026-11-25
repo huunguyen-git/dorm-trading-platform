@@ -171,7 +171,7 @@ export async function pickImagesFromLibrary(remainingSlots: number): Promise<Pic
   }
 
   if (typeof ImagePicker.launchImageLibraryAsync !== 'function') {
-    throw new Error('Thiết bị hiện tại chưa hỗ trợ chọn ảnh từ thư viện. Bạn có thể nhập URL ảnh.');
+    throw new Error('Thiết bị hiện tại chưa hỗ trợ chọn ảnh từ thư viện. Bạn có thể dán liên kết ảnh.');
   }
 
   if (Platform.OS !== 'web' && typeof ImagePicker.requestMediaLibraryPermissionsAsync === 'function') {
@@ -208,7 +208,7 @@ export async function pickImagesFromLibrary(remainingSlots: number): Promise<Pic
 
 export async function takePhotoWithCamera(): Promise<PickableImageAsset | null> {
   if (typeof ImagePicker.launchCameraAsync !== 'function') {
-    throw new Error('Thiết bị hiện tại chưa hỗ trợ chụp ảnh. Bạn có thể chọn ảnh từ thư viện hoặc nhập URL ảnh.');
+    throw new Error('Thiết bị hiện tại chưa hỗ trợ chụp ảnh. Bạn có thể chọn ảnh từ thư viện hoặc dán liên kết ảnh.');
   }
 
   if (Platform.OS !== 'web' && typeof ImagePicker.requestCameraPermissionsAsync === 'function') {
@@ -226,7 +226,7 @@ export async function takePhotoWithCamera(): Promise<PickableImageAsset | null> 
     });
   } catch (err) {
     if (Platform.OS === 'web') {
-      throw new Error('Trình duyệt hiện chưa hỗ trợ chụp ảnh trực tiếp. Hãy chọn ảnh từ thư viện hoặc nhập URL ảnh.');
+      throw new Error('Trình duyệt hiện chưa hỗ trợ chụp ảnh trực tiếp. Hãy chọn ảnh từ thư viện hoặc dán liên kết ảnh.');
     }
     throw err;
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { resolveUserRestriction, useSession } from '../auth/session';
@@ -20,8 +20,8 @@ import ListingFormContent, {
   type ListingFormInitialValues,
 } from '../components/ListingFormContent';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
-import { Action, AuthScreen, Notice, ui } from '../components/AuthUI';
-import { colors, space } from '../theme';
+import { EmptyState, StatusIndicator } from '../components/ui';
+import { component, primitive, semantic } from '../theme';
 
 type EditListingRoute = RouteProp<RootStack, 'EditListing'>;
 
@@ -190,82 +190,78 @@ export default function EditListingScreen() {
 
   if (!token) {
     return (
-      <AuthScreen
-        title="Sửa tin đăng"
-        subtitle="Vui lòng đăng nhập bằng tài khoản chủ sở hữu để chỉnh sửa tin."
-      >
-        <Notice message="Vui lòng đăng nhập để tiếp tục." />
-        <Action title="Đăng nhập" onPress={() => navigation.navigate('Login')} />
-      </AuthScreen>
+      <View style={styles.gatedScreen}>
+        <EmptyState
+          icon="log-in"
+          title="Đăng nhập để chỉnh sửa tin"
+          subtitle="Vui lòng đăng nhập bằng tài khoản chủ sở hữu để cập nhật nội dung tin đăng."
+          primaryActionLabel="Đăng nhập"
+          onPrimaryAction={() => navigation.navigate('Login')}
+        />
+      </View>
     );
   }
 
   if (isLocked) {
     return (
-      <AuthScreen
-        title="Sửa tin đăng"
-        subtitle="Tài khoản hiện đang bị hạn chế nên không thể chỉnh sửa tin đăng."
-      >
+      <View style={styles.lockedScreen}>
         <RestrictedAccountNotice />
-        <Action secondary title="Quay lại" onPress={() => navigation.goBack()} />
-      </AuthScreen>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Quay lại"
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedState]}
+        >
+          <Text style={styles.backBtnText}>Quay lại</Text>
+        </Pressable>
+      </View>
     );
   }
 
   if (!isActiveMember) {
     return (
-      <AuthScreen
-        title="Sửa tin đăng"
-        subtitle="Tài khoản chưa đủ điều kiện chỉnh sửa tin đăng."
-      >
-        <Notice message="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ." />
-        <Action secondary title="Quay lại" onPress={() => navigation.goBack()} />
-      </AuthScreen>
+      <View style={styles.gatedScreen}>
+        <EmptyState
+          icon="shield"
+          title="Tài khoản chưa đủ điều kiện"
+          subtitle="Tài khoản đang chờ hoàn tất xác minh email hoặc duyệt hồ sơ."
+          primaryActionLabel="Quay lại"
+          onPrimaryAction={() => navigation.goBack()}
+        />
+      </View>
     );
   }
 
   if (loadingDetail) {
     return (
-      <AuthScreen title="Sửa tin đăng" subtitle="Đang tải dữ liệu tin đăng…">
-        <View style={styles.loadingWrap} testID="edit-listing-loading">
-          <ActivityIndicator color={colors.brand} />
-          <Text style={ui.caption}>Đang tải thông tin tin đăng…</Text>
-        </View>
-      </AuthScreen>
+      <View style={styles.loadingScreen} testID="edit-listing-loading">
+        <ActivityIndicator color={semantic.color.accent} />
+        <Text style={styles.loadingText}>Đang tải thông tin tin đăng...</Text>
+      </View>
     );
   }
 
   if (loadError || !detail) {
     return (
-      <AuthScreen
-        title="Sửa tin đăng"
-        subtitle="Không thể mở biểu mẫu chỉnh sửa cho tin đăng này."
-      >
-        <Notice message={loadError || 'Không tìm thấy tin đăng.'} error />
-        <Action
-          secondary
-          title="Thử tải lại"
-          testID="edit-listing-retry-btn"
-          onPress={() => void loadDetail({ incrementKey: true })}
+      <View style={styles.gatedScreen}>
+        <EmptyState
+          icon="alert-circle"
+          title="Không thể mở biểu mẫu chỉnh sửa"
+          subtitle={loadError || 'Không tìm thấy tin đăng.'}
+          primaryActionLabel="Thử tải lại"
+          primaryActionTestID="edit-listing-retry-btn"
+          onPrimaryAction={() => void loadDetail({ incrementKey: true })}
+          secondaryActionLabel="Quay lại"
+          onSecondaryAction={() => navigation.goBack()}
         />
-        <Action secondary title="Quay lại" onPress={() => navigation.goBack()} />
-      </AuthScreen>
+      </View>
     );
   }
 
   const statusMeta = LISTING_STATUS_META[detail.status];
 
   return (
-    <AuthScreen
-      title="Sửa tin đăng"
-      subtitle={`Trạng thái hiện tại: ${statusMeta.label} · Phiên bản #${detail.version}`}
-    >
-      {visibleRestriction ? (
-        <View style={styles.restrictionWrap}>
-          <RestrictedAccountNotice />
-        </View>
-      ) : null}
-
+    <View style={styles.screen}>
       <ListingFormContent
         key={`${detail.id}-${formReloadKey}`}
         mode="edit"
@@ -283,27 +279,87 @@ export default function EditListingScreen() {
         readOnlyMessage={isStatusReadOnly ? getReadOnlyReason(detail) : undefined}
         submitError={submitError}
         conflictState={conflictState}
+        headerSlot={
+          <View style={styles.statusHeader}>
+            <View style={styles.statusStrip} testID="edit-listing-status-strip">
+              <Text style={styles.statusLabel}>Trạng thái:</Text>
+              <StatusIndicator
+                label={statusMeta.label}
+                tone={statusMeta.tone}
+                variant={statusMeta.tier}
+              />
+            </View>
+            {visibleRestriction ? <RestrictedAccountNotice /> : null}
+          </View>
+        }
         onReloadConflict={() => void loadDetail({ incrementKey: true })}
-        onNavigateToInventoryCreate={() => navigation.navigate('InventoryForm', { mode: 'create' })}
+        onNavigateToInventoryCreate={() =>
+          navigation.navigate('InventoryForm', { mode: 'create' })
+        }
         onCancel={() => {
           clearError();
           navigation.goBack();
         }}
         onSubmitEdit={handleSubmitEdit}
       />
-    </AuthScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  loadingWrap: {
-    flexDirection: 'row',
+  screen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
+  },
+  gatedScreen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+    justifyContent: 'center',
+  },
+  lockedScreen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgPage,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[6],
+    gap: primitive.space[4],
+  },
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: space.sm,
-    paddingVertical: space.xl,
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
   },
-  restrictionWrap: {
-    marginBottom: space.sm,
+  loadingText: {
+    ...semantic.type.caption,
+  },
+  statusHeader: {
+    gap: primitive.space[3],
+  },
+  statusStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2],
+    paddingVertical: primitive.space[1],
+  },
+  statusLabel: {
+    ...semantic.type.caption,
+  },
+  backBtn: {
+    minHeight: component.button.minHeight,
+    borderRadius: component.button.radius,
+    backgroundColor: semantic.color.bgTrack,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: component.button.paddingX,
+  },
+  backBtnText: {
+    fontSize: primitive.fontSize.base,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  pressedState: {
+    opacity: primitive.opacity.pressed,
   },
 });

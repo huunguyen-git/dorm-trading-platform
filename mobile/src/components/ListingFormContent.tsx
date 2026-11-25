@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import {
+  formatReputationSummary,
   formatVnd,
   type CategoryTreeNode,
   type CreateListingPayload,
@@ -20,8 +24,17 @@ import {
 } from '../listings/types';
 import InventoryPickerSection, { type InventoryPickerMode } from './InventoryPickerSection';
 import ListingImageManager from './ListingImageManager';
-import { Action, Field, Notice, ui } from './AuthUI';
-import { colors, radius, space } from '../theme';
+import {
+  FormField,
+  HairlineDivider,
+  Icon,
+  InlineBanner,
+  QuotaMeter,
+  SectionHeading,
+  StatusIndicator,
+  SwitchRow,
+} from './ui';
+import { component, primitive, semantic } from '../theme';
 
 export interface ListingFormInitialValues {
   title?: string;
@@ -62,6 +75,7 @@ export interface ListingFormContentProps {
   readOnlyMessage?: string;
   submitError?: string;
   conflictState?: ListingFormConflictState | null;
+  headerSlot?: ReactNode;
   onReloadConflict?: () => void;
   onNavigateToInventoryCreate: () => void;
   onCancel: () => void;
@@ -137,12 +151,14 @@ export default function ListingFormContent({
   readOnlyMessage,
   submitError,
   conflictState,
+  headerSlot,
   onReloadConflict,
   onNavigateToInventoryCreate,
   onCancel,
   onSubmitCreate,
   onSubmitEdit,
 }: ListingFormContentProps) {
+  const insets = useContext(SafeAreaInsetsContext);
   const initialItemIds = initialValues?.itemIds ?? [];
   const initialPrice = initialValues?.priceVnd;
   const initialIsFree =
@@ -228,6 +244,7 @@ export default function ListingFormContent({
   const inactiveEditQuotaExhausted =
     quotaExhausted && mode === 'edit' && (listingStatus === 'DA_RUT' || listingStatus === 'HET_HAN');
   const formDisabled = readOnly || submitting;
+  const bottomPad = Math.max(insets?.bottom ?? 0, primitive.space[3]);
 
   const clearFieldError = (key: keyof FieldErrors) => {
     setFieldErrors((prev) => {
@@ -239,18 +256,15 @@ export default function ListingFormContent({
     setFormBannerError('');
   };
 
-  const handleToggleFree = () => {
+  const handleToggleFree = (nextValue: boolean) => {
     if (formDisabled) return;
     clearFieldError('priceVnd');
-    setIsFree((prev) => {
-      const next = !prev;
-      if (next) {
-        setPriceInput('0');
-      } else if (priceInput === '0') {
-        setPriceInput('');
-      }
-      return next;
-    });
+    setIsFree(nextValue);
+    if (nextValue) {
+      setPriceInput('0');
+    } else if (priceInput === '0') {
+      setPriceInput('');
+    }
   };
 
   const handleSelectZone = (zone: LocationZone) => {
@@ -288,7 +302,7 @@ export default function ListingFormContent({
       resolvedPrice = 0;
     } else if (priceInput.trim() === '') {
       if (strict) {
-        errors.priceVnd = 'Vui lòng nhập giá bán (VNĐ) hoặc bật Cho tặng miễn phí (0đ).';
+        errors.priceVnd = 'Vui lòng nhập giá bán (VNĐ) hoặc bật Tặng miễn phí (0đ).';
       } else {
         resolvedPrice = 0;
       }
@@ -346,7 +360,7 @@ export default function ListingFormContent({
     }
 
     setFormBannerError('');
-    const basePayload = {
+    return {
       title: trimmedTitle,
       description: trimmedDescription,
       condition: trimmedCondition || null,
@@ -362,8 +376,6 @@ export default function ListingFormContent({
       images: [...images],
       itemIds: [...selectedItemIds],
     };
-
-    return basePayload;
   };
 
   const handleSubmit = async (targetAction: 'PUBLISH' | 'DRAFT' | 'KEEP') => {
@@ -385,907 +397,927 @@ export default function ListingFormContent({
     }
   };
 
-  const quotaProgressRatio =
-    quota && quota.limit > 0 ? Math.min(1, Math.max(0, quota.activeCount / quota.limit)) : 0;
+  const reputationSummary = quota ? formatReputationSummary(quota.reputationScore) : null;
+
+  const quotaWarningMessage = quota
+    ? publishDisabledByQuota
+      ? `Bạn đã dùng hết hạn mức ${quota.activeCount}/${quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể chọn Lưu nháp (không tính vào hạn mức) hoặc rút bớt tin cũ để công khai tin mới.`
+      : inactiveEditQuotaExhausted
+        ? `Bạn đã dùng hết hạn mức ${quota.activeCount}/${quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể lưu thay đổi cho tin này, nhưng cần rút bớt tin cũ trước khi công khai lại hoặc gia hạn.`
+        : quotaExhausted
+          ? `Bạn đã đạt hạn mức ${quota.activeCount}/${quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể lưu thay đổi cho tin này.`
+          : undefined
+    : undefined;
+
+  const quotaWarningTestID = publishDisabledByQuota
+    ? 'quota-exhausted-banner'
+    : inactiveEditQuotaExhausted
+      ? 'quota-exhausted-note'
+      : undefined;
+
+  const hasAlertBanners = Boolean(
+    (readOnly && readOnlyMessage) ||
+      (mode === 'edit' && pendingRequestCount > 0 && !readOnly) ||
+      conflictState ||
+      submitError ||
+      formBannerError,
+  );
+
+  const canPublishNow = !formDisabled && !imageUploading && !publishDisabledByQuota;
+  const canSaveDraftOrKeep = !formDisabled && !imageUploading;
 
   return (
-    <View style={styles.container}>
-      {/* FR-05 Quota Meter Card */}
-      {quota ? (
-        <View style={styles.quotaCard} testID="listing-quota-card">
-          <View style={styles.quotaTopRow}>
-            <Text style={styles.quotaTitle}>Hạn mức đăng tin (FR-05)</Text>
-            <View style={styles.reputationBadge} testID="quota-reputation-badge">
-              <Text style={styles.reputationBadgeText}>
-                Uy tín: {quota.reputationScore} điểm
+    <KeyboardAvoidingView
+      style={styles.shell}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {headerSlot ? <View style={styles.headerSlotWrap}>{headerSlot}</View> : null}
+
+        {hasAlertBanners ? (
+          <View style={styles.alertsStack}>
+            {readOnly && readOnlyMessage ? (
+              <InlineBanner
+                tone="warning"
+                icon="lock"
+                testID="listing-readonly-banner"
+                title="Chế độ chỉ xem"
+                message={readOnlyMessage}
+              />
+            ) : null}
+
+            {mode === 'edit' && pendingRequestCount > 0 && !readOnly ? (
+              <InlineBanner
+                tone="neutral"
+                testID="pending-requests-notice"
+                title={`Đang có ${pendingRequestCount} yêu cầu mua chờ xử lý`}
+                message={`Tin đang có ${pendingRequestCount} yêu cầu mua chờ xử lý. Nội dung cập nhật sẽ được hiển thị cho người mua.`}
+              />
+            ) : null}
+
+            {conflictState?.type === 'VERSION_CONFLICT' ? (
+              <InlineBanner
+                tone="danger"
+                testID="version-conflict-banner"
+                title="Dữ liệu tin đã thay đổi"
+                message={conflictState.message}
+                actionLabel={onReloadConflict ? 'Tải lại tin mới nhất' : undefined}
+                actionTestID="reload-conflict-button"
+                onActionPress={onReloadConflict}
+              />
+            ) : null}
+
+            {conflictState?.type === 'QUOTA_EXCEEDED' ? (
+              <InlineBanner
+                tone="warning"
+                testID="quota-conflict-banner"
+                title="Đã vượt hạn mức đăng tin"
+                message={conflictState.message}
+                actionLabel={mode === 'create' ? 'Lưu nháp thay thế' : 'Giữ ở bản nháp'}
+                actionTestID="fallback-save-draft-button"
+                onActionPress={() => {
+                  if (!submitting) {
+                    void handleSubmit(mode === 'create' ? 'DRAFT' : 'KEEP');
+                  }
+                }}
+              />
+            ) : null}
+
+            {submitError ? <InlineBanner tone="danger" message={submitError} /> : null}
+            {formBannerError ? <InlineBanner tone="danger" message={formBannerError} /> : null}
+          </View>
+        ) : null}
+
+        {/* Section 1: Quota Strip (Lucian #299 QuotaMeter) */}
+        {quota ? (
+          <>
+            <View style={styles.quotaSection} testID="listing-quota-card">
+              <QuotaMeter
+                activeCount={quota.activeCount}
+                limit={quota.limit}
+                reputationScore={quota.reputationScore}
+                highTierThreshold={quota.highTierThreshold}
+                standardLimit={quota.standardLimit}
+                highTierLimit={quota.highTierLimit}
+                label="Hạn mức tin đang mở"
+                warningMessage={quotaWarningMessage}
+                warningTestID={quotaWarningTestID}
+                showUnlockCue={false}
+                style={styles.quotaMeterFlush}
+              />
+              <View style={styles.quotaMetaRow}>
+                <Text style={styles.quotaActiveCount} testID="quota-active-count">
+                  Đang mở/giữ chỗ: {quota.activeCount} / {quota.limit} tin
+                </Text>
+                {reputationSummary ? (
+                  <Text style={styles.quotaReputationText} testID="quota-reputation-badge">
+                    {reputationSummary.scoreText} · {reputationSummary.tierLabel}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={styles.quotaRuleCaption}>
+                Dưới {quota.highTierThreshold} điểm: tối đa {quota.standardLimit} tin · Từ{' '}
+                {quota.highTierThreshold} điểm: tối đa {quota.highTierLimit} tin đang mở.
               </Text>
             </View>
-          </View>
+            <HairlineDivider />
+          </>
+        ) : null}
 
-          <View style={styles.quotaCountRow}>
-            <Text style={styles.quotaCountText} testID="quota-active-count">
-              Đang mở/giữ chỗ: {quota.activeCount} / {quota.limit} tin
-            </Text>
-            <Text
-              style={[
-                styles.quotaRemainingText,
-                quota.remaining === 0 && { color: colors.danger },
-              ]}
-            >
-              Còn lại: {quota.remaining}
-            </Text>
-          </View>
-
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  width: `${Math.round(quotaProgressRatio * 100)}%`,
-                  backgroundColor: quota.remaining === 0 ? colors.danger : colors.brand,
-                },
-              ]}
-            />
-          </View>
-
-          <Text style={styles.quotaRuleCaption}>
-            &lt; {quota.highTierThreshold} điểm: tối đa {quota.standardLimit} tin · ≥{' '}
-            {quota.highTierThreshold} điểm: tối đa {quota.highTierLimit} tin đang hoạt động.
-          </Text>
-
-          {publishDisabledByQuota ? (
-            <View style={styles.quotaWarningBox} testID="quota-exhausted-banner">
-              <Text style={styles.quotaWarningText}>
-                Bạn đã dùng hết hạn mức {quota.activeCount}/{quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể chọn{' '}
-                <Text style={{ fontWeight: '700' }}>Lưu nháp</Text> (không tính vào hạn mức) hoặc rút bớt tin cũ để công khai tin mới.
-              </Text>
-            </View>
-          ) : inactiveEditQuotaExhausted ? (
-            <View style={styles.quotaWarningBox} testID="quota-exhausted-note">
-              <Text style={styles.quotaWarningText}>
-                Bạn đã dùng hết hạn mức {quota.activeCount}/{quota.limit} tin đang mở/giữ chỗ. Bạn vẫn có thể lưu thay đổi cho tin này, nhưng cần rút bớt tin cũ trước khi công khai lại hoặc gia hạn.
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-
-      {/* Read-only lock banner (UC-17 exception) */}
-      {readOnly && readOnlyMessage ? (
-        <View style={styles.lockBanner} testID="listing-readonly-banner">
-          <Text style={styles.lockBannerTitle}>Chế độ chỉ xem</Text>
-          <Text style={styles.lockBannerText}>{readOnlyMessage}</Text>
-        </View>
-      ) : null}
-
-      {/* Pending requests info notice (UC-17 alt flow) */}
-      {mode === 'edit' && pendingRequestCount > 0 && !readOnly ? (
-        <View style={styles.infoBanner} testID="pending-requests-notice">
-          <Text style={styles.infoBannerTitle}>
-            Đang có {pendingRequestCount} yêu cầu mua chờ xử lý
-          </Text>
-          <Text style={styles.infoBannerText}>
-            Tin đang có {pendingRequestCount} yêu cầu chờ xử lý; hệ thống ghi nhận sự kiện cập nhật để đồng bộ thông báo ở giai đoạn P2-04.
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Optimistic Lock / Quota 409 conflict banners */}
-      {conflictState?.type === 'VERSION_CONFLICT' ? (
-        <View style={styles.conflictBox} testID="version-conflict-banner">
-          <Text style={styles.conflictTitle}>Xung đột phiên bản (409)</Text>
-          <Text style={styles.conflictText}>{conflictState.message}</Text>
-          {onReloadConflict ? (
-            <Action
-              secondary
-              title="Tải lại tin mới nhất"
-              testID="reload-conflict-button"
-              onPress={onReloadConflict}
-            />
-          ) : null}
-        </View>
-      ) : null}
-
-      {conflictState?.type === 'QUOTA_EXCEEDED' ? (
-        <View style={styles.quotaWarningBox} testID="quota-conflict-banner">
-          <Text style={styles.conflictTitle}>Đã vượt hạn mức đăng tin</Text>
-          <Text style={styles.quotaWarningText}>{conflictState.message}</Text>
-          <Action
-            secondary
-            title={mode === 'create' ? 'Lưu nháp thay thế' : 'Giữ ở bản nháp'}
-            testID="fallback-save-draft-button"
-            disabled={submitting}
-            onPress={() => void handleSubmit(mode === 'create' ? 'DRAFT' : 'KEEP')}
+        {/* Section 2: Photo-First Rail */}
+        <View style={styles.section}>
+          <ListingImageManager
+            images={images}
+            onChange={(nextImages) => {
+              clearFieldError('images');
+              setImages(nextImages);
+            }}
+            disabled={formDisabled}
+            error={fieldErrors.images}
+            onUploadingChange={setImageUploading}
           />
         </View>
-      ) : null}
 
-      {/* Top error notices */}
-      {submitError ? <Notice message={submitError} error /> : null}
-      {formBannerError ? <Notice message={formBannerError} error /> : null}
+        <HairlineDivider />
 
-      {/* 1. Inventory Picker (FR-04) */}
-      <InventoryPickerSection
-        selectedItemIds={selectedItemIds}
-        onChangeSelectedItemIds={(ids) => {
-          clearFieldError('itemIds');
-          setSelectedItemIds(ids);
-        }}
-        mode={pickerMode}
-        onChangeMode={(nextMode) => {
-          clearFieldError('itemIds');
-          setPickerMode(nextMode);
-        }}
-        disabled={formDisabled}
-        error={fieldErrors.itemIds}
-        preselectedItemId={preselectedItemId}
-        onNavigateToInventoryCreate={onNavigateToInventoryCreate}
-      />
-
-      <View style={styles.sectionDivider} />
-
-      {/* 2. Title */}
-      <View style={styles.fieldGroup}>
-        <Field
-          label="Tiêu đề *"
-          testID="listing-title-input"
-          placeholder="VD: Giáo trình Nhập môn CNPM SE100 hoặc Combo bàn + đèn học"
-          value={title}
-          onChangeText={(value) => {
-            clearFieldError('title');
-            setTitle(value);
-          }}
-          maxLength={255}
-          editable={!formDisabled}
-          hint="Tiêu đề ngắn gọn, nêu rõ tên món đồ hoặc combo (tối đa 255 ký tự)."
-        />
-        {fieldErrors.title ? <Text style={styles.inlineError}>{fieldErrors.title}</Text> : null}
-      </View>
-
-      {/* 3. Hierarchical Category Picker */}
-      <View style={styles.fieldGroup} testID="listing-category-picker">
-        <View style={styles.labelRow}>
-          <Text style={ui.label}>Danh mục *</Text>
-          {selectedCategoryPath ? (
-            <Text style={styles.selectedPathText} testID="selected-category-path">
-              {selectedCategoryPath}
-            </Text>
-          ) : null}
+        {/* Section 3: Inventory Items */}
+        <View style={styles.section}>
+          <InventoryPickerSection
+            selectedItemIds={selectedItemIds}
+            onChangeSelectedItemIds={(ids) => {
+              clearFieldError('itemIds');
+              setSelectedItemIds(ids);
+            }}
+            mode={pickerMode}
+            onChangeMode={(nextMode) => {
+              clearFieldError('itemIds');
+              setPickerMode(nextMode);
+            }}
+            disabled={formDisabled}
+            error={fieldErrors.itemIds}
+            preselectedItemId={preselectedItemId}
+            onNavigateToInventoryCreate={onNavigateToInventoryCreate}
+          />
         </View>
 
-        {loadingReferences && effectiveTree.length === 0 ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color={colors.brand} size="small" />
-            <Text style={ui.caption}>Đang tải danh mục…</Text>
-          </View>
-        ) : (
-          <View style={styles.categoryTreeWrap}>
-            {effectiveTree.map((parent) => {
-              const parentSelected = categoryId === parent.id;
-              return (
-                <View key={parent.id} style={styles.categoryGroup}>
-                  <Pressable
-                    testID={`category-chip-${parent.id}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: parentSelected, disabled: formDisabled }}
-                    disabled={formDisabled}
-                    onPress={() => {
-                      clearFieldError('categoryId');
-                      setCategoryId(parent.id);
-                    }}
-                    style={[
-                      styles.categoryChip,
-                      parentSelected && styles.categoryChipSelected,
-                      formDisabled && styles.chipDisabled,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.categoryChipText,
-                        parentSelected && styles.categoryChipTextSelected,
-                      ]}
-                    >
-                      {parent.name}
-                    </Text>
-                  </Pressable>
+        <HairlineDivider />
 
-                  {parent.children.length > 0 ? (
-                    <View style={styles.childCategoryRow}>
-                      {parent.children.map((child) => {
-                        const childSelected = categoryId === child.id;
-                        return (
-                          <Pressable
-                            key={child.id}
-                            testID={`category-chip-${child.id}`}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected: childSelected, disabled: formDisabled }}
-                            disabled={formDisabled}
-                            onPress={() => {
-                              clearFieldError('categoryId');
-                              setCategoryId(child.id);
-                            }}
-                            style={[
-                              styles.childCategoryChip,
-                              childSelected && styles.categoryChipSelected,
-                              formDisabled && styles.chipDisabled,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.childCategoryChipText,
-                                childSelected && styles.categoryChipTextSelected,
-                              ]}
-                            >
-                              ↳ {child.name}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })}
-          </View>
-        )}
-        {fieldErrors.categoryId ? (
-          <Text style={styles.inlineError}>{fieldErrors.categoryId}</Text>
-        ) : null}
-      </View>
+        {/* Section 4: Core Details */}
+        <View style={styles.section}>
+          <SectionHeading title="Thông tin chi tiết" />
 
-      {/* 4. Textbook Metadata (auto-highlighted for GIAO_TRINH or children) */}
-      <View
-        style={[
-          styles.textbookBox,
-          isTextbookSelected && styles.textbookBoxHighlighted,
-        ]}
-        testID="textbook-fields-section"
-      >
-        <Pressable
-          testID="toggle-textbook-section"
-          accessibilityRole="button"
-          accessibilityState={{ expanded: textbookExpanded }}
-          onPress={() => setTextbookExpanded((prev) => !prev)}
-          style={styles.textbookHeader}
-        >
-          <View style={styles.textbookHeaderLeft}>
-            <Text style={styles.textbookTitle}>Thông tin giáo trình</Text>
-            {isTextbookSelected ? (
-              <View style={styles.recommendPill} testID="textbook-recommended-badge">
-                <Text style={styles.recommendPillText}>Khuyên nhập</Text>
-              </View>
+          <FormField
+            label="Tiêu đề"
+            required
+            testID="listing-title-input"
+            placeholder="VD: Giáo trình Nhập môn CNPM SE100 hoặc Combo bàn + đèn học"
+            value={title}
+            onChangeText={(value) => {
+              clearFieldError('title');
+              setTitle(value);
+            }}
+            maxLength={255}
+            editable={!formDisabled}
+            helperText="Tiêu đề ngắn gọn, nêu rõ tên món đồ hoặc combo (tối đa 255 ký tự)."
+            error={fieldErrors.title}
+          />
+
+          <FormField
+            label="Tình trạng"
+            required
+            testID="listing-condition-input"
+            placeholder="VD: Mới 95%, không ghi chú, còn đủ phụ kiện"
+            value={condition}
+            onChangeText={(value) => {
+              clearFieldError('condition');
+              setCondition(value);
+            }}
+            editable={!formDisabled}
+            error={fieldErrors.condition}
+          />
+
+          {/* Price & Free Giveaway */}
+          <View style={styles.subGroup}>
+            <SwitchRow
+              testID="listing-free-toggle"
+              label="Tặng miễn phí (0đ)"
+              description="Chia sẻ miễn phí cho sinh viên trong khu vực"
+              value={isFree}
+              onValueChange={handleToggleFree}
+              disabled={formDisabled}
+            />
+
+            <FormField
+              label="Giá bán"
+              required={!isFree}
+              suffix="đ"
+              testID="listing-price-input"
+              accessibilityLabel="Giá bán"
+              placeholder={isFree ? '0' : 'VD: 120000'}
+              keyboardType="numeric"
+              value={isFree ? '0' : priceInput}
+              onChangeText={(value) => {
+                clearFieldError('priceVnd');
+                setPriceInput(value);
+                if (value.trim() === '0') {
+                  setIsFree(true);
+                }
+              }}
+              editable={!formDisabled && !isFree}
+              helperText={
+                !isFree && Number.isFinite(parsedPricePreview) && parsedPricePreview > 0
+                  ? `Hiển thị: ${formatVnd(parsedPricePreview)}`
+                  : undefined
+              }
+              error={fieldErrors.priceVnd}
+            />
+
+            {isFree ? (
+              <InlineBanner
+                tone="success"
+                icon="gift"
+                testID="free-price-banner"
+                message={
+                  selectedItemIds.length >= 2 || pickerMode === 'combo'
+                    ? 'Combo cho tặng miễn phí (0đ) · Người nhận không cần đề nghị giá.'
+                    : 'Cho tặng miễn phí (0đ) · Người nhận không cần đề nghị giá.'
+                }
+              />
             ) : null}
           </View>
-          <Text style={styles.toggleArrow}>{textbookExpanded ? 'Thu gọn ▲' : 'Mở rộng ▼'}</Text>
-        </Pressable>
 
-        {textbookExpanded ? (
-          <View style={styles.textbookFields}>
-            <Text style={ui.caption}>
-              Giúp sinh viên cùng trường tìm nhanh giáo trình theo mã môn học (FR-04 / FR-06).
-            </Text>
-            <Field
-              label="Mã môn học"
-              testID="listing-course-code-input"
-              placeholder="VD: SE100, IT001, MA006"
-              autoCapitalize="characters"
-              value={courseCode}
-              onChangeText={setCourseCode}
-              editable={!formDisabled}
-            />
-            <Field
-              label="Tên môn học"
-              testID="listing-course-name-input"
-              placeholder="VD: Phương pháp phát triển phần mềm hướng đối tượng"
-              value={courseName}
-              onChangeText={setCourseName}
-              editable={!formDisabled}
-            />
-            <Field
-              label="Tác giả"
-              testID="listing-author-input"
-              placeholder="VD: Nguyễn Văn A, Ian Sommerville"
-              value={author}
-              onChangeText={setAuthor}
-              editable={!formDisabled}
-            />
-          </View>
-        ) : null}
-      </View>
+          {/* Category Selector */}
+          <View style={styles.subGroup} testID="listing-category-picker">
+            <View style={styles.fieldHeaderRow}>
+              <View style={styles.fieldLabelWrap}>
+                <Text style={styles.fieldLabel}>Danh mục</Text>
+                <Text style={styles.requiredMark}>*</Text>
+              </View>
+              {selectedCategoryPath ? (
+                <Text style={styles.selectedPathText} testID="selected-category-path">
+                  {selectedCategoryPath}
+                </Text>
+              ) : null}
+            </View>
 
-      {/* 5. Condition */}
-      <View style={styles.fieldGroup}>
-        <Field
-          label="Tình trạng *"
-          testID="listing-condition-input"
-          placeholder="VD: Mới 95%, không ghi chú, còn đủ phụ kiện"
-          value={condition}
-          onChangeText={(value) => {
-            clearFieldError('condition');
-            setCondition(value);
-          }}
-          editable={!formDisabled}
-        />
-        {fieldErrors.condition ? (
-          <Text style={styles.inlineError}>{fieldErrors.condition}</Text>
-        ) : null}
-      </View>
-
-      {/* 6. Price & Free Giveaway Toggle */}
-      <View style={styles.fieldGroup}>
-        <View style={styles.priceHeaderRow}>
-          <Text style={ui.label}>Giá bán (VNĐ) *</Text>
-          <Pressable
-            testID="listing-free-toggle"
-            accessibilityRole="switch"
-            accessibilityLabel="Cho tặng miễn phí (0đ)"
-            accessibilityState={{ checked: isFree, disabled: formDisabled }}
-            disabled={formDisabled}
-            onPress={handleToggleFree}
-            style={[
-              styles.freeTogglePill,
-              isFree && styles.freeTogglePillActive,
-              formDisabled && styles.chipDisabled,
-            ]}
-          >
-            <Text style={[styles.freeToggleText, isFree && styles.freeToggleTextActive]}>
-              {isFree ? '✓ Cho tặng miễn phí (0đ)' : 'Cho tặng miễn phí (0đ)'}
-            </Text>
-          </Pressable>
-        </View>
-
-        <TextInput
-          testID="listing-price-input"
-          accessibilityLabel="Giá bán (VNĐ)"
-          placeholder={isFree ? '0' : 'VD: 120000'}
-          placeholderTextColor={colors.muted}
-          keyboardType="numeric"
-          value={isFree ? '0' : priceInput}
-          onChangeText={(value) => {
-            clearFieldError('priceVnd');
-            setPriceInput(value);
-            if (value.trim() === '0') {
-              setIsFree(true);
-            }
-          }}
-          editable={!formDisabled && !isFree}
-          style={[
-            ui.field,
-            (formDisabled || isFree) && { backgroundColor: '#f5f4ef' },
-          ]}
-        />
-
-        {isFree ? (
-          <View style={styles.freePreviewBanner} testID="free-price-banner">
-            <Text style={styles.freePreviewText}>
-              {selectedItemIds.length >= 2 || pickerMode === 'combo'
-                ? 'Combo cho tặng miễn phí (0đ) · Nút đề nghị giá sẽ được ẩn với người nhận.'
-                : 'Tin cho tặng miễn phí (0đ) · Nút đề nghị giá sẽ được ẩn với người nhận.'}
-            </Text>
-          </View>
-        ) : Number.isFinite(parsedPricePreview) && parsedPricePreview > 0 ? (
-          <Text style={ui.caption}>Hiển thị: {formatVnd(parsedPricePreview)}</Text>
-        ) : null}
-
-        {fieldErrors.priceVnd ? (
-          <Text style={styles.inlineError}>{fieldErrors.priceVnd}</Text>
-        ) : null}
-      </View>
-
-      {/* 7. Location Zone Picker & Meeting Point */}
-      <View style={styles.fieldGroup} testID="listing-location-picker">
-        <Text style={ui.label}>Khu vực ĐHQG-HCM *</Text>
-        <Text style={ui.caption}>
-          Chọn khu vực KTX / trường gần bạn nhất để tự động gắn tọa độ giao nhận.
-        </Text>
-
-        {loadingReferences && groupedLocations.length === 0 ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color={colors.brand} size="small" />
-            <Text style={ui.caption}>Đang tải khu vực…</Text>
-          </View>
-        ) : (
-          <View style={styles.zoneGroupsWrap}>
-            {groupedLocations.map((group) => (
-              <View key={group.group} style={styles.zoneGroup}>
-                <Text style={styles.zoneGroupTitle}>{group.label}</Text>
-                <View style={styles.zoneChipsRow}>
-                  {group.items.map((zone) => {
-                    const selected = locationCode === zone.code;
-                    return (
+            {loadingReferences && effectiveTree.length === 0 ? (
+              <View style={styles.inlineLoading}>
+                <ActivityIndicator color={semantic.color.accent} size="small" />
+                <Text style={styles.caption}>Đang tải danh mục...</Text>
+              </View>
+            ) : (
+              <View style={styles.categoryTreeWrap}>
+                {effectiveTree.map((parent) => {
+                  const parentSelected = categoryId === parent.id;
+                  return (
+                    <View key={parent.id} style={styles.categoryGroup}>
                       <Pressable
-                        key={zone.code}
-                        testID={`location-chip-${zone.code}`}
+                        testID={`category-chip-${parent.id}`}
                         accessibilityRole="button"
-                        accessibilityState={{ selected, disabled: formDisabled }}
+                        accessibilityState={{ selected: parentSelected, disabled: formDisabled }}
                         disabled={formDisabled}
-                        onPress={() => handleSelectZone(zone)}
-                        style={[
-                          styles.zoneChip,
-                          selected && styles.categoryChipSelected,
-                          formDisabled && styles.chipDisabled,
+                        onPress={() => {
+                          clearFieldError('categoryId');
+                          setCategoryId(parent.id);
+                        }}
+                        style={({ pressed }) => [
+                          styles.chip,
+                          parentSelected && styles.chipSelected,
+                          formDisabled && styles.disabledState,
+                          pressed && !formDisabled && styles.pressedState,
                         ]}
                       >
                         <Text
                           style={[
-                            styles.zoneChipText,
-                            selected && styles.categoryChipTextSelected,
+                            styles.chipText,
+                            parentSelected && styles.chipTextSelected,
                           ]}
                         >
-                          {zone.name}
+                          {parent.name}
                         </Text>
                       </Pressable>
-                    );
-                  })}
-                </View>
+
+                      {parent.children.length > 0 ? (
+                        <View style={styles.childCategoryRow}>
+                          {parent.children.map((child) => {
+                            const childSelected = categoryId === child.id;
+                            return (
+                              <Pressable
+                                key={child.id}
+                                testID={`category-chip-${child.id}`}
+                                accessibilityRole="button"
+                                accessibilityState={{
+                                  selected: childSelected,
+                                  disabled: formDisabled,
+                                }}
+                                disabled={formDisabled}
+                                onPress={() => {
+                                  clearFieldError('categoryId');
+                                  setCategoryId(child.id);
+                                }}
+                                style={({ pressed }) => [
+                                  styles.childChip,
+                                  childSelected && styles.chipSelected,
+                                  formDisabled && styles.disabledState,
+                                  pressed && !formDisabled && styles.pressedState,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.childChipText,
+                                    childSelected && styles.chipTextSelected,
+                                  ]}
+                                >
+                                  {child.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
-            ))}
+            )}
+
+            {fieldErrors.categoryId ? (
+              <Text style={styles.inlineError}>{fieldErrors.categoryId}</Text>
+            ) : null}
           </View>
-        )}
 
-        {selectedZone ? (
-          <Text style={styles.zoneCoordCaption} testID="selected-zone-summary">
-            Đã chọn: {selectedZone.name} ({selectedZone.latitude.toFixed(4)},{' '}
-            {selectedZone.longitude.toFixed(4)})
-          </Text>
-        ) : null}
+          {/* Textbook Metadata (auto-expanded when textbook category selected) */}
+          <View
+            style={[
+              styles.textbookPanel,
+              isTextbookSelected && styles.textbookPanelAccent,
+            ]}
+            testID="textbook-fields-section"
+          >
+            <Pressable
+              testID="toggle-textbook-section"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: textbookExpanded }}
+              onPress={() => setTextbookExpanded((prev) => !prev)}
+              style={styles.textbookHeader}
+            >
+              <View style={styles.textbookHeaderLeft}>
+                <Icon
+                  name="book-open"
+                  size={16}
+                  color={isTextbookSelected ? semantic.color.accent : semantic.color.textSecondary}
+                />
+                <Text style={styles.textbookTitle}>Thông tin giáo trình</Text>
+                {isTextbookSelected ? (
+                  <StatusIndicator
+                    testID="textbook-recommended-badge"
+                    label="Khuyên nhập"
+                    tone="accent"
+                    variant="soft"
+                  />
+                ) : null}
+              </View>
 
-        <Field
-          label="Điểm hẹn chi tiết"
-          testID="listing-location-text-input"
-          placeholder="VD: Sảnh tòa A1 KTX Khu A, Cổng chính UIT..."
-          value={locationText}
-          onChangeText={(value) => {
-            clearFieldError('location');
-            setLocationText(value);
-          }}
-          editable={!formDisabled}
-        />
+              <View style={styles.textbookToggleRight}>
+                <Text style={styles.toggleLabel}>
+                  {textbookExpanded ? 'Thu gọn' : 'Mở rộng'}
+                </Text>
+                <Icon
+                  name={textbookExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={semantic.color.textSecondary}
+                />
+              </View>
+            </Pressable>
 
-        {fieldErrors.location ? (
-          <Text style={styles.inlineError}>{fieldErrors.location}</Text>
-        ) : null}
-      </View>
+            {textbookExpanded ? (
+              <View style={styles.textbookFields}>
+                <Text style={styles.caption}>
+                  Giúp sinh viên cùng trường tìm nhanh giáo trình theo mã môn học.
+                </Text>
+                <FormField
+                  label="Mã môn học"
+                  testID="listing-course-code-input"
+                  placeholder="VD: SE100, IT001, MA006"
+                  autoCapitalize="characters"
+                  value={courseCode}
+                  onChangeText={setCourseCode}
+                  editable={!formDisabled}
+                />
+                <FormField
+                  label="Tên môn học"
+                  testID="listing-course-name-input"
+                  placeholder="VD: Phương pháp phát triển phần mềm hướng đối tượng"
+                  value={courseName}
+                  onChangeText={setCourseName}
+                  editable={!formDisabled}
+                />
+                <FormField
+                  label="Tác giả"
+                  testID="listing-author-input"
+                  placeholder="VD: Nguyễn Văn A, Ian Sommerville"
+                  value={author}
+                  onChangeText={setAuthor}
+                  editable={!formDisabled}
+                />
+              </View>
+            ) : null}
+          </View>
 
-      {/* 8. Description */}
-      <View style={styles.fieldGroup}>
-        <Text style={ui.label}>Mô tả chi tiết *</Text>
-        <TextInput
-          testID="listing-description-input"
-          accessibilityLabel="Mô tả chi tiết"
-          placeholder="Mô tả rõ tình trạng, phụ kiện kèm theo, thời gian thuận tiện bàn giao..."
-          placeholderTextColor={colors.muted}
-          multiline
-          numberOfLines={4}
-          value={description}
-          onChangeText={(value) => {
-            clearFieldError('description');
-            setDescription(value);
-          }}
-          editable={!formDisabled}
-          style={[
-            ui.field,
-            styles.textArea,
-            formDisabled && { backgroundColor: '#f5f4ef' },
-          ]}
-        />
-        {fieldErrors.description ? (
-          <Text style={styles.inlineError}>{fieldErrors.description}</Text>
-        ) : null}
-      </View>
+          {/* Description */}
+          <FormField
+            label="Mô tả chi tiết"
+            required
+            multiline
+            numberOfLines={4}
+            testID="listing-description-input"
+            accessibilityLabel="Mô tả chi tiết"
+            placeholder="Mô tả rõ tình trạng, phụ kiện kèm theo, thời gian thuận tiện bàn giao..."
+            value={description}
+            onChangeText={(value) => {
+              clearFieldError('description');
+              setDescription(value);
+            }}
+            editable={!formDisabled}
+            error={fieldErrors.description}
+          />
+        </View>
 
-      <View style={styles.sectionDivider} />
+        <HairlineDivider />
 
-      {/* 9. Photos (1-5) */}
-      <ListingImageManager
-        images={images}
-        onChange={(nextImages) => {
-          clearFieldError('images');
-          setImages(nextImages);
-        }}
-        disabled={formDisabled}
-        error={fieldErrors.images}
-        onUploadingChange={setImageUploading}
-      />
+        {/* Section 5: Meeting Location */}
+        <View style={styles.section} testID="listing-location-picker">
+          <SectionHeading
+            title="Khu vực giao nhận"
+            subtitle="Chọn khu vực gần bạn để sinh viên dễ tìm và hẹn giao nhận."
+          />
 
-      <View style={styles.sectionDivider} />
+          {loadingReferences && groupedLocations.length === 0 ? (
+            <View style={styles.inlineLoading}>
+              <ActivityIndicator color={semantic.color.accent} size="small" />
+              <Text style={styles.caption}>Đang tải khu vực...</Text>
+            </View>
+          ) : (
+            <View style={styles.zoneGroupsWrap}>
+              {groupedLocations.map((group) => (
+                <View key={group.group} style={styles.zoneGroup}>
+                  <Text style={styles.zoneGroupTitle}>{group.label}</Text>
+                  <View style={styles.zoneChipsRow}>
+                    {group.items.map((zone) => {
+                      const selected = locationCode === zone.code;
+                      return (
+                        <Pressable
+                          key={zone.code}
+                          testID={`location-chip-${zone.code}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected, disabled: formDisabled }}
+                          disabled={formDisabled}
+                          onPress={() => handleSelectZone(zone)}
+                          style={({ pressed }) => [
+                            styles.chip,
+                            selected && styles.chipSelected,
+                            formDisabled && styles.disabledState,
+                            pressed && !formDisabled && styles.pressedState,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              selected && styles.chipTextSelected,
+                            ]}
+                          >
+                            {zone.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
 
-      {/* 10. Action Buttons */}
-      <View style={styles.submitGroup}>
+          {selectedZone ? (
+            <View style={styles.selectedZoneRow}>
+              <Icon name="map-pin" size={14} color={semantic.color.accent} />
+              <Text style={styles.selectedZoneText} testID="selected-zone-summary">
+                Khu vực đã chọn: {selectedZone.name}
+              </Text>
+            </View>
+          ) : null}
+
+          <FormField
+            label="Điểm hẹn chi tiết"
+            testID="listing-location-text-input"
+            placeholder="VD: Sảnh tòa A1 KTX Khu A, Cổng chính UIT..."
+            value={locationText}
+            onChangeText={(value) => {
+              clearFieldError('location');
+              setLocationText(value);
+            }}
+            editable={!formDisabled}
+            error={fieldErrors.location}
+          />
+        </View>
+      </ScrollView>
+
+      {/* Sticky Bottom Action Bar */}
+      <View style={[styles.stickyBar, { paddingBottom: bottomPad }]}>
         {mode === 'create' ? (
           <>
-            <Action
-              title="Công khai tin"
-              testID="submit-publish-listing"
-              disabled={formDisabled || imageUploading || publishDisabledByQuota}
-              busy={submitting}
-              onPress={() => void handleSubmit('PUBLISH')}
-            />
-            <Action
-              secondary
-              title="Lưu nháp"
+            <Pressable
               testID="submit-draft-listing"
-              disabled={formDisabled || imageUploading}
-              busy={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Lưu nháp"
+              accessibilityState={{ disabled: !canSaveDraftOrKeep, busy: submitting }}
+              disabled={!canSaveDraftOrKeep}
               onPress={() => void handleSubmit('DRAFT')}
-            />
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                styles.stickySecondary,
+                !canSaveDraftOrKeep && styles.disabledState,
+                pressed && canSaveDraftOrKeep && styles.pressedState,
+              ]}
+            >
+              <Text style={styles.secondaryBtnText}>Lưu nháp</Text>
+            </Pressable>
+
+            <Pressable
+              testID="submit-publish-listing"
+              accessibilityRole="button"
+              accessibilityLabel="Công khai tin"
+              accessibilityState={{ disabled: !canPublishNow, busy: submitting }}
+              disabled={!canPublishNow}
+              onPress={() => void handleSubmit('PUBLISH')}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                styles.stickyPrimary,
+                !canPublishNow && styles.disabledState,
+                pressed && canPublishNow && styles.primaryBtnPressed,
+              ]}
+            >
+              {submitting ? (
+                <ActivityIndicator color={component.button.primaryFg} size="small" />
+              ) : null}
+              <Text style={styles.primaryBtnText}>Công khai tin</Text>
+            </Pressable>
+          </>
+        ) : listingStatus === 'NHAP' ? (
+          <>
+            <Pressable
+              testID="submit-save-listing"
+              accessibilityRole="button"
+              accessibilityLabel="Lưu thay đổi"
+              accessibilityState={{ disabled: !canSaveDraftOrKeep, busy: submitting }}
+              disabled={!canSaveDraftOrKeep}
+              onPress={() => void handleSubmit('KEEP')}
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                styles.stickySecondary,
+                !canSaveDraftOrKeep && styles.disabledState,
+                pressed && canSaveDraftOrKeep && styles.pressedState,
+              ]}
+            >
+              <Text style={styles.secondaryBtnText}>Lưu thay đổi</Text>
+            </Pressable>
+
+            <Pressable
+              testID="submit-publish-draft-listing"
+              accessibilityRole="button"
+              accessibilityLabel="Công khai tin ngay"
+              accessibilityState={{ disabled: !canPublishNow, busy: submitting }}
+              disabled={!canPublishNow}
+              onPress={() => void handleSubmit('PUBLISH')}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                styles.stickyPrimary,
+                !canPublishNow && styles.disabledState,
+                pressed && canPublishNow && styles.primaryBtnPressed,
+              ]}
+            >
+              {submitting ? (
+                <ActivityIndicator color={component.button.primaryFg} size="small" />
+              ) : null}
+              <Text style={styles.primaryBtnText}>Công khai tin ngay</Text>
+            </Pressable>
           </>
         ) : (
           <>
-            <Action
-              title="Lưu thay đổi"
+            <Pressable
+              testID="cancel-listing-form"
+              accessibilityRole="button"
+              accessibilityLabel="Hủy"
+              accessibilityState={{ disabled: submitting }}
+              disabled={submitting}
+              onPress={onCancel}
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                styles.stickyCancel,
+                submitting && styles.disabledState,
+                pressed && !submitting && styles.pressedState,
+              ]}
+            >
+              <Text style={styles.secondaryBtnText}>Hủy</Text>
+            </Pressable>
+
+            <Pressable
               testID="submit-save-listing"
-              disabled={formDisabled || imageUploading}
-              busy={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Lưu thay đổi"
+              accessibilityState={{ disabled: !canSaveDraftOrKeep, busy: submitting }}
+              disabled={!canSaveDraftOrKeep}
               onPress={() => void handleSubmit('KEEP')}
-            />
-            {listingStatus === 'NHAP' ? (
-              <Action
-                secondary
-                title="Công khai tin ngay"
-                testID="submit-publish-draft-listing"
-                disabled={formDisabled || imageUploading || publishDisabledByQuota}
-                busy={submitting}
-                onPress={() => void handleSubmit('PUBLISH')}
-              />
-            ) : null}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                styles.stickyPrimary,
+                !canSaveDraftOrKeep && styles.disabledState,
+                pressed && canSaveDraftOrKeep && styles.primaryBtnPressed,
+              ]}
+            >
+              {submitting ? (
+                <ActivityIndicator color={component.button.primaryFg} size="small" />
+              ) : null}
+              <Text style={styles.primaryBtnText}>Lưu thay đổi</Text>
+            </Pressable>
           </>
         )}
-
-        <Action
-          secondary
-          title="Hủy"
-          testID="cancel-listing-form"
-          disabled={submitting}
-          onPress={onCancel}
-        />
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    gap: space.lg,
+  shell: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
   },
-  quotaCard: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: '#f9f8f5',
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: space.sm,
+  scroll: {
+    flex: 1,
+    backgroundColor: semantic.color.bgSurface,
   },
-  quotaTopRow: {
+  scrollContent: {
+    paddingBottom: primitive.space[8],
+  },
+  headerSlotWrap: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+  },
+  alertsStack: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+    gap: primitive.space[2.5],
+  },
+  quotaSection: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[4],
+    gap: primitive.space[1.5],
+  },
+  quotaMeterFlush: {
+    paddingVertical: 0,
+  },
+  quotaMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: space.sm,
+    gap: primitive.space[2],
+    marginTop: primitive.space[1],
   },
-  quotaTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.ink,
+  quotaActiveCount: {
+    ...semantic.type.micro,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textPrimary,
+    fontWeight: primitive.fontWeight.semibold,
   },
-  reputationBadge: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: 16,
-    backgroundColor: '#e6f4ea',
-  },
-  reputationBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#137333',
-  },
-  quotaCountRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: space.sm,
-  },
-  quotaCountText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  quotaRemainingText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#137333',
-  },
-  progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#e3e4df',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
+  quotaReputationText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
   quotaRuleCaption: {
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 17,
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
-  quotaWarningBox: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#f0d796',
-    gap: space.sm,
+  section: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[5],
+    gap: primitive.space[4],
   },
-  quotaWarningText: {
-    fontSize: 13,
-    color: '#7a4500',
-    lineHeight: 19,
+  subGroup: {
+    gap: primitive.space[2.5],
   },
-  lockBanner: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: '#fef7e0',
-    borderWidth: 1,
-    borderColor: '#e9c874',
-    gap: space.xs,
-  },
-  lockBannerTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#8a4f00',
-  },
-  lockBannerText: {
-    fontSize: 13,
-    color: colors.ink,
-    lineHeight: 20,
-  },
-  infoBanner: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#e8f0fe',
-    borderWidth: 1,
-    borderColor: '#c2d7fa',
-    gap: space.xs,
-  },
-  infoBannerTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1967d2',
-  },
-  infoBannerText: {
-    fontSize: 13,
-    color: colors.ink,
-    lineHeight: 19,
-  },
-  conflictBox: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: '#fff0ec',
-    borderWidth: 1,
-    borderColor: '#e5b8af',
-    gap: space.sm,
-  },
-  conflictTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.danger,
-  },
-  conflictText: {
-    fontSize: 13,
-    color: colors.ink,
-    lineHeight: 19,
-  },
-  sectionDivider: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  fieldGroup: {
-    gap: space.sm,
-  },
-  labelRow: {
+  fieldHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: space.xs,
+    gap: primitive.space[2],
+  },
+  fieldLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1],
+  },
+  fieldLabel: {
+    ...semantic.type.label,
+    color: semantic.color.textSecondary,
+  },
+  requiredMark: {
+    ...semantic.type.label,
+    color: semantic.color.accent,
   },
   selectedPathText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.brand,
+    ...semantic.type.micro,
+    color: semantic.color.accent,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  caption: {
+    ...semantic.type.caption,
   },
   inlineLoading: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
-    paddingVertical: space.sm,
+    gap: primitive.space[2],
+    paddingVertical: primitive.space[2],
   },
   categoryTreeWrap: {
-    gap: space.sm,
+    gap: primitive.space[2.5],
   },
   categoryGroup: {
-    gap: space.xs,
-  },
-  categoryChip: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
+    gap: primitive.space[2],
   },
   childCategoryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: space.xs,
-    paddingLeft: space.md,
+    gap: primitive.space[2],
+    paddingLeft: primitive.space[3],
   },
-  childCategoryChip: {
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-    borderRadius: 16,
+  chip: {
+    alignSelf: 'flex-start',
+    minHeight: component.chip.height,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[1.5],
+    borderRadius: component.chip.radius,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+    borderColor: component.chip.border,
+    backgroundColor: semantic.color.bgSubtle,
+    justifyContent: 'center',
   },
-  categoryChipSelected: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  chipDisabled: {
-    opacity: 0.5,
-  },
-  categoryChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  childCategoryChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.ink,
-  },
-  categoryChipTextSelected: {
-    color: colors.surface,
-    fontWeight: '700',
-  },
-  textbookBox: {
-    padding: space.md,
-    borderRadius: radius.md,
+  childChip: {
+    minHeight: component.chip.height,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[1.5],
+    borderRadius: component.chip.radius,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
-    gap: space.md,
+    borderColor: component.chip.border,
+    backgroundColor: semantic.color.bgSurface,
+    justifyContent: 'center',
   },
-  textbookBoxHighlighted: {
-    borderColor: colors.brand,
-    backgroundColor: '#fdf8f6',
+  chipSelected: {
+    backgroundColor: component.chip.activeBg,
+    borderColor: component.chip.activeBorder,
+  },
+  chipText: {
+    ...semantic.type.label,
+    fontWeight: primitive.fontWeight.medium,
+    color: semantic.color.textPrimary,
+  },
+  childChipText: {
+    ...semantic.type.micro,
+    color: semantic.color.textPrimary,
+  },
+  chipTextSelected: {
+    color: component.chip.activeFg,
+    fontWeight: primitive.fontWeight.semibold,
+  },
+  textbookPanel: {
+    borderRadius: primitive.radius.lg,
+    backgroundColor: semantic.color.bgSubtle,
+    padding: primitive.space[4],
+    gap: primitive.space[3],
+  },
+  textbookPanelAccent: {
+    backgroundColor: semantic.color.accentSoft,
   },
   textbookHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: space.sm,
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
   },
   textbookHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
     flexWrap: 'wrap',
+    gap: primitive.space[2],
+    flex: 1,
   },
   textbookTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.ink,
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
   },
-  recommendPill: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: 12,
-    backgroundColor: colors.brand,
+  textbookToggleRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1],
   },
-  recommendPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.surface,
-  },
-  toggleArrow: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.brand,
+  toggleLabel: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
   textbookFields: {
-    gap: space.md,
-  },
-  priceHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: space.sm,
-  },
-  freeTogglePill: {
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: '#f9f8f5',
-  },
-  freeTogglePillActive: {
-    backgroundColor: '#e6f4ea',
-    borderColor: '#137333',
-  },
-  freeToggleText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  freeToggleTextActive: {
-    color: '#137333',
-    fontWeight: '700',
-  },
-  freePreviewBanner: {
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#e6f4ea',
-  },
-  freePreviewText: {
-    fontSize: 12,
-    color: '#137333',
-    fontWeight: '600',
-    lineHeight: 18,
+    gap: primitive.space[3],
   },
   zoneGroupsWrap: {
-    gap: space.md,
+    gap: primitive.space[3],
   },
   zoneGroup: {
-    gap: space.xs,
+    gap: primitive.space[2],
   },
   zoneGroupTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.muted,
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   zoneChipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: space.xs,
+    gap: primitive.space[2],
   },
-  zoneChip: {
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+  selectedZoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1.5],
   },
-  zoneChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.ink,
-  },
-  zoneCoordCaption: {
-    fontSize: 12,
-    color: colors.brand,
-    fontWeight: '600',
-  },
-  textArea: {
-    minHeight: 104,
-    textAlignVertical: 'top',
+  selectedZoneText: {
+    ...semantic.type.label,
+    color: semantic.color.accent,
   },
   inlineError: {
-    fontSize: 12,
-    color: colors.danger,
-    fontWeight: '600',
-    lineHeight: 17,
+    ...semantic.type.micro,
+    color: semantic.color.danger,
   },
-  submitGroup: {
-    gap: space.sm,
+  stickyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+    backgroundColor: semantic.color.bgSurface,
+    borderTopWidth: 1,
+    borderTopColor: semantic.color.borderHairline,
+  },
+  stickySecondary: {
+    flex: 1,
+  },
+  stickyCancel: {
+    minWidth: 96,
+  },
+  stickyPrimary: {
+    flex: 1.4,
+  },
+  primaryBtn: {
+    minHeight: component.button.minHeight,
+    paddingHorizontal: component.button.paddingX,
+    borderRadius: component.button.radius,
+    backgroundColor: component.button.primaryBg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[2],
+  },
+  primaryBtnPressed: {
+    backgroundColor: component.button.primaryPressedBg,
+  },
+  primaryBtnText: {
+    fontSize: primitive.fontSize.base,
+    fontWeight: primitive.fontWeight.semibold,
+    color: component.button.primaryFg,
+  },
+  secondaryBtn: {
+    minHeight: component.button.minHeight,
+    paddingHorizontal: component.button.paddingX,
+    borderRadius: component.button.radius,
+    backgroundColor: semantic.color.bgTrack,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[2],
+  },
+  secondaryBtnText: {
+    fontSize: primitive.fontSize.base,
+    fontWeight: primitive.fontWeight.semibold,
+    color: semantic.color.textPrimary,
+  },
+  disabledState: {
+    opacity: primitive.opacity.disabled,
+  },
+  pressedState: {
+    opacity: primitive.opacity.pressed,
   },
 });

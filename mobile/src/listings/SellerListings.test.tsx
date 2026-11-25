@@ -536,6 +536,10 @@ describe('UC-10: CreateListingScreen', () => {
     fireEvent.changeText(screen.getByTestId('listing-condition-input'), 'Mới 95%, không ghi chú');
     fireEvent.changeText(screen.getByTestId('listing-price-input'), '120000');
     fireEvent.press(screen.getByTestId('location-chip-KTX_KHU_A'));
+    expect(screen.getByText('Khu vực đã chọn: KTX Khu A')).toBeTruthy();
+    expect(screen.queryByText(/10\.8782/)).toBeNull();
+    expect(screen.queryByText(/FR-05/)).toBeNull();
+    expect(screen.queryByText('DORM TRADING')).toBeNull();
     fireEvent.changeText(screen.getByTestId('listing-location-text-input'), 'Sảnh tòa A1');
     fireEvent.changeText(
       screen.getByTestId('listing-description-input'),
@@ -617,8 +621,11 @@ describe('UC-10: CreateListingScreen', () => {
     fireEvent.press(screen.getByTestId('listing-take-photo-btn'));
     expect(await screen.findByText('1/5 ảnh thực tế')).toBeTruthy();
 
-    // Add second photo via collapsible URL input, then move it left to become cover
-    fireEvent.press(screen.getByTestId('listing-toggle-url-input'));
+    // Add second photo via leading + Thêm ảnh ActionSheet -> link input, then move it left to become cover
+    fireEvent.press(screen.getByTestId('add-photo-tile'));
+    expect(screen.getByTestId('pick-gallery-btn')).toBeTruthy();
+    expect(screen.getByTestId('take-photo-btn')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('toggle-url-input-btn'));
     fireEvent.changeText(
       screen.getByTestId('listing-image-url-input'),
       'https://cdn.dorm.vn/media/url-2.png',
@@ -832,9 +839,11 @@ describe('UC-17: EditListingScreen', () => {
     expect(screen.getByText('Đang có 2 yêu cầu mua chờ xử lý')).toBeTruthy();
     expect(
       screen.getByText(
-        'Tin đang có 2 yêu cầu chờ xử lý; hệ thống ghi nhận sự kiện cập nhật để đồng bộ thông báo ở giai đoạn P2-04.',
+        'Tin đang có 2 yêu cầu mua chờ xử lý. Nội dung cập nhật sẽ được hiển thị cho người mua.',
       ),
     ).toBeTruthy();
+    expect(screen.queryByText(/P2-04/)).toBeNull();
+    expect(screen.queryByText(/Phiên bản #/)).toBeNull();
     expect(await screen.findByTestId('inventory-picker-item-item-2')).toBeTruthy();
 
     // Expand to combo with item-2 and update title
@@ -1087,8 +1096,10 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
     expect(screen.queryByTestId('my-listing-withdraw-tin-reserved')).toBeNull();
     expect(screen.queryByTestId('my-listing-delete-tin-reserved')).toBeNull();
 
-    // FR-13 renewal reminder banner & renew CTA
+    // Renewal reminder banner & renew CTA (jargon-free)
     expect(screen.getByTestId('renewal-banner-tin-expiring')).toBeTruthy();
+    expect(screen.queryByText(/FR-13/)).toBeNull();
+    expect(screen.queryByText('DORM TRADING')).toBeNull();
     fireEvent.press(screen.getByTestId('renew-banner-btn-tin-expiring'));
 
     await waitFor(() => {
@@ -1143,7 +1154,8 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
       render(<MyListingsScreen />);
       expect(await screen.findByTestId('my-listing-card-tin-pub')).toBeTruthy();
 
-      // 1. Delete draft cleanly
+      // 1. Delete draft cleanly via overflow ActionSheet
+      fireEvent.press(screen.getByTestId('my-listing-more-tin-draft'));
       fireEvent.press(screen.getByTestId('my-listing-delete-tin-draft'));
       expect(alertSpy).toHaveBeenCalledWith(
         'Xác nhận xóa tin',
@@ -1155,12 +1167,14 @@ describe('UC-18 & FR-13: MyListingsScreen', () => {
       });
 
       // 2. Delete public listing with historical transactions -> 409 LISTING_HAS_TRANSACTIONS
+      fireEvent.press(screen.getByTestId('my-listing-more-tin-pub'));
       fireEvent.press(screen.getByTestId('my-listing-delete-tin-pub'));
       expect(
         await screen.findByText(/lịch sử giao dịch.*Rút tin/i),
       ).toBeTruthy();
 
-      // 3. Withdraw public listing instead -> releases item link & restores quota
+      // 3. Withdraw public listing instead via overflow ActionSheet -> releases item link & restores quota
+      fireEvent.press(screen.getByTestId('my-listing-more-tin-pub'));
       fireEvent.press(screen.getByTestId('my-listing-withdraw-tin-pub'));
       expect(alertSpy).toHaveBeenCalledWith(
         'Xác nhận rút tin',
