@@ -1,15 +1,24 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { formatShortDate, formatVnd, type ListingSummary } from '../listings/types';
-import { colors, radius, space } from '../theme';
+import {
+  formatReputationSummary,
+  formatShortDate,
+  formatVnd,
+  type ListingSummary,
+} from '../listings/types';
+import { component, primitive, semantic } from '../theme';
+import { HairlineDivider, Icon, StatusIndicator } from './ui';
 
 export interface ListingCardProps {
   listing: ListingSummary;
   onPress: (listing: ListingSummary) => void;
 }
 
+const THUMB_SIZE = 104;
+
 export function ListingCard({ listing, onPress }: ListingCardProps) {
   const thumb = listing.thumbnailUrl ?? listing.images[0] ?? null;
   const isFree = listing.isFree || listing.priceVnd === 0;
+  const priceLabel = formatVnd(listing.priceVnd);
   const postedDate = formatShortDate(listing.publishedAt ?? listing.createdAt);
   const locationLabel =
     listing.locationName ?? listing.locationText ?? listing.locationCode ?? 'ĐHQG-HCM';
@@ -17,16 +26,21 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
     typeof listing.distanceKm === 'number' && Number.isFinite(listing.distanceKm)
       ? `~${listing.distanceKm.toFixed(1)} km`
       : null;
+  const locationDistanceLabel = distanceLabel
+    ? `${locationLabel} · ${distanceLabel}`
+    : locationLabel;
+  const reputation = formatReputationSummary(listing.seller.reputationScore);
+  const isReserved = listing.status === 'GIU_CHO';
 
   return (
-    <Pressable
-      testID={`listing-card-${listing.id}`}
-      accessibilityRole="button"
-      accessibilityLabel={listing.title}
-      onPress={() => onPress(listing)}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-    >
-      <View style={styles.topRow}>
+    <View style={styles.wrapper}>
+      <Pressable
+        testID={`listing-card-${listing.id}`}
+        accessibilityRole="button"
+        accessibilityLabel={`${listing.title}, ${priceLabel}, ${locationLabel}`}
+        onPress={() => onPress(listing)}
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      >
         {thumb ? (
           <Image
             source={{ uri: thumb }}
@@ -36,229 +50,171 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
           />
         ) : (
           <View style={styles.thumbnailPlaceholder}>
-            <Text style={styles.placeholderText}>Chưa có ảnh</Text>
+            <Icon name="image" size={26} color={semantic.color.textSecondary} />
           </View>
         )}
 
-        <View style={styles.infoCol}>
-          <View style={styles.badgeRow}>
-            {listing.isCombo ? (
-              <View style={[styles.badge, styles.comboBadge]}>
-                <Text style={[styles.badgeText, styles.comboBadgeText]}>
-                  Combo · {Math.max(2, listing.itemCount)} món
-                </Text>
-              </View>
-            ) : (
-              <View style={[styles.badge, styles.singleBadge]}>
-                <Text style={[styles.badgeText, styles.singleBadgeText]}>Tin đơn</Text>
-              </View>
-            )}
-
-            {isFree ? (
-              <View style={[styles.badge, styles.freeBadge]}>
-                <Text style={[styles.badgeText, styles.freeBadgeText]}>Miễn phí 0đ</Text>
-              </View>
-            ) : null}
-
-            {listing.courseCode ? (
-              <View style={[styles.badge, styles.courseBadge]}>
-                <Text style={[styles.badgeText, styles.courseBadgeText]}>
-                  {listing.courseCode}
-                </Text>
-              </View>
-            ) : null}
-
-            {listing.status === 'GIU_CHO' ? (
-              <View style={[styles.badge, styles.reservedBadge]}>
-                <Text style={[styles.badgeText, styles.reservedBadgeText]}>Đang giữ chỗ</Text>
-              </View>
-            ) : null}
-          </View>
-
-          <Text style={styles.title} numberOfLines={2}>
-            {listing.title}
-          </Text>
-
-          <Text style={[styles.price, isFree && styles.priceFree]}>
-            {formatVnd(listing.priceVnd)}
-          </Text>
-
-          {listing.condition ? (
-            <Text style={styles.condition} numberOfLines={1}>
-              Tình trạng: {listing.condition}
+        <View style={styles.content}>
+          <View style={styles.topGroup}>
+            <Text style={styles.title} numberOfLines={2}>
+              {listing.title}
             </Text>
-          ) : null}
-        </View>
-      </View>
 
-      <View style={styles.footer}>
-        <View style={styles.locationRow}>
-          <Text style={styles.metaText} numberOfLines={1}>
-            {locationLabel}
-            {distanceLabel ? ` · ${distanceLabel}` : ''}
-          </Text>
-          {postedDate ? <Text style={styles.dateText}>{postedDate}</Text> : null}
-        </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLocation} numberOfLines={1} ellipsizeMode="tail">
+                {locationDistanceLabel}
+              </Text>
+              {postedDate ? (
+                <>
+                  <Text style={styles.metaSep}>·</Text>
+                  <Text style={styles.metaItem} numberOfLines={1}>
+                    {postedDate}
+                  </Text>
+                </>
+              ) : null}
+              {listing.courseCode ? (
+                <>
+                  <Text style={styles.metaSep}>·</Text>
+                  <Text style={styles.courseText} numberOfLines={1}>
+                    {listing.courseCode}
+                  </Text>
+                </>
+              ) : null}
+            </View>
+          </View>
 
-        <View style={styles.sellerRow}>
-          <Text style={styles.sellerName} numberOfLines={1}>
-            {listing.seller.displayName}
-          </Text>
-          <View style={styles.reputationPill}>
-            <Text style={styles.reputationText}>⭐ {listing.seller.reputationScore}đ</Text>
+          <View style={styles.bottomGroup}>
+            <View style={styles.priceRow}>
+              <Text style={[styles.price, isFree && styles.priceFree]} numberOfLines={1}>
+                {priceLabel}
+              </Text>
+
+              {isReserved ? (
+                <StatusIndicator label="Đang giữ chỗ" tone="warning" variant="urgent" />
+              ) : listing.isCombo ? (
+                <StatusIndicator
+                  label={`Combo · ${Math.max(2, listing.itemCount)} món`}
+                  tone="neutral"
+                  variant="soft"
+                />
+              ) : null}
+            </View>
+
+            <View style={styles.trustRow}>
+              <Text style={styles.sellerName} numberOfLines={1} ellipsizeMode="tail">
+                {listing.seller.displayName}
+              </Text>
+              <Text style={styles.trustSep}>·</Text>
+              <Icon name="shield" size={12} color={semantic.color.textSecondary} />
+              <Text style={styles.reputationText} numberOfLines={1}>
+                {reputation.scoreText}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+
+      <HairlineDivider insetLeft={component.listRow.paddingX} insetRight={component.listRow.paddingX} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.md,
-    gap: space.sm,
+  wrapper: {
+    backgroundColor: component.listRow.bg,
   },
-  cardPressed: {
-    opacity: 0.92,
-    borderColor: colors.brand,
-  },
-  topRow: {
+  row: {
     flexDirection: 'row',
-    gap: space.md,
+    alignItems: 'flex-start',
+    paddingHorizontal: component.listRow.paddingX,
+    paddingVertical: component.listRow.paddingY,
+    gap: primitive.space[3],
+    backgroundColor: component.listRow.bg,
+  },
+  rowPressed: {
+    backgroundColor: component.listRow.pressedBg,
   },
   thumbnail: {
-    width: 96,
-    height: 96,
-    borderRadius: radius.md,
-    backgroundColor: '#ecebe4',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: component.listRow.thumbRadius,
+    backgroundColor: semantic.color.bgSubtle,
   },
   thumbnailPlaceholder: {
-    width: 96,
-    height: 96,
-    borderRadius: radius.md,
-    backgroundColor: '#ecebe4',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: component.listRow.thumbRadius,
+    backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: space.xs,
   },
-  placeholderText: {
-    fontSize: 11,
-    color: colors.muted,
-    textAlign: 'center',
-  },
-  infoCol: {
+  content: {
     flex: 1,
-    gap: space.xs,
+    minHeight: THUMB_SIZE,
+    justifyContent: 'space-between',
+    gap: primitive.space[1.5],
   },
-  badgeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-  },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  singleBadge: {
-    backgroundColor: '#f2ede4',
-  },
-  singleBadgeText: {
-    color: colors.ink,
-  },
-  comboBadge: {
-    backgroundColor: '#f9ebe7',
-  },
-  comboBadgeText: {
-    color: colors.brand,
-  },
-  freeBadge: {
-    backgroundColor: '#e6f4ea',
-  },
-  freeBadgeText: {
-    color: '#137333',
-  },
-  courseBadge: {
-    backgroundColor: '#e8f0fe',
-  },
-  courseBadgeText: {
-    color: '#1967d2',
-  },
-  reservedBadge: {
-    backgroundColor: '#fef7e0',
-  },
-  reservedBadgeText: {
-    color: '#b06000',
+  topGroup: {
+    gap: primitive.space[1],
   },
   title: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.ink,
-    lineHeight: 20,
+    ...semantic.type.cardTitle,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[1],
+    overflow: 'hidden',
+  },
+  metaLocation: {
+    ...semantic.type.caption,
+    flexShrink: 1,
+  },
+  metaSep: {
+    ...semantic.type.caption,
+    flexShrink: 0,
+  },
+  metaItem: {
+    ...semantic.type.caption,
+    flexShrink: 0,
+  },
+  courseText: {
+    ...semantic.type.caption,
+    fontWeight: primitive.fontWeight.medium,
+    flexShrink: 0,
+  },
+  bottomGroup: {
+    gap: primitive.space[1],
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
   },
   price: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.brand,
+    ...semantic.type.price,
+    flexShrink: 1,
   },
   priceFree: {
-    color: '#137333',
+    color: semantic.color.success,
   },
-  condition: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  footer: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: space.sm,
-    gap: 4,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: space.sm,
-  },
-  metaText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.muted,
-  },
-  dateText: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  sellerRow: {
+  trustRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.sm,
+    gap: primitive.space[1],
   },
   sellerName: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.ink,
+    ...semantic.type.micro,
+    flexShrink: 1,
   },
-  reputationPill: {
-    backgroundColor: '#f2ede4',
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: 10,
+  trustSep: {
+    ...semantic.type.micro,
+    flexShrink: 0,
   },
   reputationText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.ink,
+    ...semantic.type.micro,
+    flexShrink: 0,
   },
 });
 

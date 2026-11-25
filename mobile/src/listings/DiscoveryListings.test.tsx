@@ -388,14 +388,19 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     expect(screen.getByText('120.000đ')).toBeTruthy();
     expect(screen.getByText('SE100')).toBeTruthy();
     expect(screen.getByText('KTX Khu A · ~1.2 km')).toBeTruthy();
-    expect(screen.getByText('⭐ 125đ')).toBeTruthy();
+    expect(screen.getByText('Uy tín 125')).toBeTruthy();
+    expect(screen.queryByText(/⭐/)).toBeNull();
 
     expect(screen.getByText('Tặng đèn bàn học LED chống cận')).toBeTruthy();
-    expect(screen.getByText('Tin đơn')).toBeTruthy();
-    expect(screen.getByText('Miễn phí 0đ')).toBeTruthy();
+    expect(screen.queryByText('Tin đơn')).toBeNull();
+    expect(screen.queryByText('Miễn phí 0đ')).toBeNull();
     expect(screen.getByText('Miễn phí (0đ)')).toBeTruthy();
 
-    // Active member quick navigation buttons
+    // Active member bottom navigation bar
+    expect(screen.getByTestId('bottom-nav-bar')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Khám phá' }).props.accessibilityState.selected).toBe(
+      true,
+    );
     expect(screen.getByRole('button', { name: 'Tin của tôi' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Kho đồ' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Hồ sơ' })).toBeTruthy();
@@ -440,9 +445,10 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     render(<ListingsScreen />);
     await screen.findByText('Tìm thấy 2 tin đăng');
 
-    // Open advanced panel
+    // Open advanced filter BottomSheet
     fireEvent.press(screen.getByTestId('toggle-advanced-filters'));
     expect(screen.getByTestId('advanced-filter-panel')).toBeTruthy();
+    expect(screen.getByText('Bộ lọc tìm kiếm')).toBeTruthy();
 
     fireEvent.changeText(screen.getByTestId('filter-course-code'), 'SE100');
     fireEvent.changeText(screen.getByTestId('filter-max-price'), '150.000');
@@ -471,8 +477,10 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     // Selected origin zone remains preserved in store and highlighted in UI
     expect(useDiscovery.getState().filters.locationCode).toBe('KTX_KHU_A');
 
-    // Active filter count badge visible
+    // Active filter count badge and 1-tap dismissible active chips visible
     expect(screen.getByTestId('active-filter-count-badge')).toBeTruthy();
+    expect(screen.getByTestId('active-filter-chip-courseCode')).toBeTruthy();
+    expect(screen.getByTestId('active-filter-chip-location')).toBeTruthy();
 
     // Toggle free-only & price_asc sort
     fireEvent.press(screen.getByTestId('toggle-advanced-filters'));
@@ -513,6 +521,7 @@ describe('UC-19 ListingsScreen (Discovery, Search, Filters, Pagination)', () => 
     expect(
       await screen.findByText('Không tìm thấy tin phù hợp. Thử nới lỏng bộ lọc.'),
     ).toBeTruthy();
+    expect(screen.getByTestId('loosen-filter-q')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('empty-reset-filters-button'));
 
@@ -628,7 +637,7 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
 
     expect(await screen.findByText('Combo Giáo trình Nhập môn CNPM SE100 + Sổ ghi chú')).toBeTruthy();
     expect(screen.getByText('120.000đ')).toBeTruthy();
-    expect(screen.getByText('Combo (2 đồ vật)')).toBeTruthy();
+    expect(screen.getByText('Combo · 2 món')).toBeTruthy();
     expect(screen.getByText('Danh mục: Giáo trình › GT CNTT')).toBeTruthy();
 
     // Gallery navigation (next + thumbnail)
@@ -656,7 +665,8 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     expect(screen.getByText('Sảnh tòa A1, giao tối sau 18h')).toBeTruthy();
     expect(screen.getByText('Trần Lan Anh')).toBeTruthy();
     expect(screen.getByText('Điểm uy tín: 125')).toBeTruthy();
-    expect(screen.getByText('4.8 ★ (12 đánh giá)')).toBeTruthy();
+    expect(screen.getByText('4.8 (12 đánh giá)')).toBeTruthy();
+    expect(screen.queryByText(/★/)).toBeNull();
 
     // NFR-01: Zero PII rendered anywhere
     expect(screen.queryByText(/secret-seller@uit\.edu\.vn/)).toBeNull();
@@ -785,7 +795,7 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     fireEvent.press(screen.getByTestId('reserve-button'));
     expect(alertSpy).toHaveBeenCalledWith(
       'Tính năng sắp ra mắt',
-      expect.stringContaining('P2-04'),
+      'Tính năng Giữ chỗ đang được hoàn thiện và sẽ sớm ra mắt.',
     );
     alertSpy.mockRestore();
   });

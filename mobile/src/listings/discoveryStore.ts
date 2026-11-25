@@ -79,6 +79,22 @@ function cleanFilters(next: DiscoverySearchFilters): DiscoverySearchFilters {
   return cleaned;
 }
 
+const NETWORK_ERROR_MESSAGE = 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+
+function formatDiscoveryError(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) {
+    return fallback;
+  }
+  const trimmed = err.message.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  if (trimmed.startsWith('API ')) {
+    return NETWORK_ERROR_MESSAGE;
+  }
+  return trimmed;
+}
+
 function syncRestrictedError(err: unknown): boolean {
   if (typeof RestrictedAccountError === 'function' && err instanceof RestrictedAccountError) {
     if (!useSession.getState().restriction) {
@@ -209,10 +225,10 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
         set({ error: null });
         return null;
       }
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : 'Không thể tải danh sách tin đăng. Vui lòng thử lại.';
+      const message = formatDiscoveryError(
+        err,
+        'Không thể tải danh sách tin đăng. Vui lòng thử lại.',
+      );
       set({ error: message });
       return null;
     } finally {
@@ -253,10 +269,10 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
     } catch (err: unknown) {
       if (requestId !== searchRequestSeq) return;
       if (syncRestrictedError(err)) return;
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : 'Không thể tải thêm tin đăng. Vui lòng thử lại.';
+      const message = formatDiscoveryError(
+        err,
+        'Không thể tải thêm tin đăng. Vui lòng thử lại.',
+      );
       set({ error: message });
     } finally {
       if (requestId === searchRequestSeq) {
@@ -352,10 +368,10 @@ export const useDiscovery = create<DiscoveryState>((set, get) => ({
         set({ detailLoading: false, detailError: null });
         return null;
       }
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : 'Không thể tải chi tiết tin đăng. Vui lòng thử lại.';
+      const message = formatDiscoveryError(
+        err,
+        'Không thể tải chi tiết tin đăng. Vui lòng thử lại.',
+      );
       set({
         detailLoading: false,
         detailError: message,
