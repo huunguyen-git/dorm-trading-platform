@@ -23,8 +23,12 @@ export const profileApi = {
   async cardUri(ownerId: string) {
     const file = await attachment(`/profile/student-cards/${ownerId}`);
     if (!file) return null;
+    const bytes = new Uint8Array(file.bytes);
+    // Ghép theo lô để tránh cộng chuỗi O(n²) với ảnh tới 5MB.
     let binary = '';
-    new Uint8Array(file.bytes).forEach((byte) => { binary += String.fromCharCode(byte); });
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
     return `data:${file.type};base64,${globalThis.btoa(binary)}`;
   },
 };
@@ -33,5 +37,7 @@ export const profileApi = {
 export function statusLabel(profile: Profile) {
   if (profile.profileStatus === 'BI_TU_CHOI') return { text: 'Hồ sơ bị từ chối', tone: 'danger' as const, note: profile.rejectReason ?? '' };
   if (profile.profileStatus === 'CHO_DUYET') return { text: profile.profileApproved ? 'Cập nhật chờ duyệt' : 'Hồ sơ chờ duyệt', tone: 'warn' as const, note: 'Kiểm duyệt viên sẽ xem ảnh thẻ và thông tin mới.' };
+  // UC-02: hồ sơ đã duyệt vẫn có thể có bản cập nhật bị từ chối, cần hiện lý do.
+  if (profile.rejectReason) return { text: 'Hồ sơ đã duyệt', tone: 'danger' as const, note: profile.rejectReason };
   return { text: 'Hồ sơ đã duyệt', tone: 'ok' as const, note: '' };
 }

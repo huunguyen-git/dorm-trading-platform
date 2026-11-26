@@ -61,9 +61,11 @@ test('mobile registration → real SMTP OTP → login → pending profile → lo
   await waitFor(() => expect(screen.getByRole('button', { name: 'Đăng tin' }).props.accessibilityState.disabled).toBe(true), { timeout: 10000 });
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
   expect(await screen.findByText(email)).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Họ tên'), 'Mobile Updated');
-  fireEvent.press(screen.getByRole('button', { name: 'Lưu họ tên' }));
-  expect(await screen.findByText('Đã lưu hồ sơ.')).toBeTruthy();
-  fireEvent.press(screen.getByRole('button', { name: 'Đăng xuất thiết bị này' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Cập nhật hồ sơ' }));
+  fireEvent.changeText(await screen.findByLabelText('Họ tên'), 'Mobile Updated');
+  fireEvent.press(screen.getByRole('button', { name: 'Lưu' }));
+  expect(await screen.findByText('Đã lưu. Thông tin định danh đang chờ kiểm duyệt.')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Cài đặt tài khoản' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Đăng xuất thiết bị này' }));
   expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeTruthy();
 }, 60000);

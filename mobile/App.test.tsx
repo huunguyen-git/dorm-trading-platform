@@ -23,8 +23,10 @@ const profile = {
 };
 
 function routes(handlers: Record<string, unknown>) {
-  jest.mocked(api).mockImplementation(((path: string) =>
-    Promise.resolve(path in handlers ? handlers[path] : [])) as never);
+  jest.mocked(api).mockImplementation(((path: string) => {
+    if (path === '/auth/me') return Promise.resolve(useSession.getState().user);
+    return Promise.resolve(path in handlers ? handlers[path] : []);
+  }) as never);
 }
 
 beforeEach(() => {
@@ -103,6 +105,23 @@ test('saving profile identity moves it to pending review', async () => {
   fireEvent.press(screen.getByTestId('profile-save'));
   expect(await screen.findByText('Đã lưu. Thông tin định danh đang chờ kiểm duyệt.')).toBeTruthy();
   expect(screen.getByText('Hồ sơ chờ duyệt')).toBeTruthy();
+});
+
+test('approved profile still shows the rejection reason of a rejected update (UC-02)', async () => {
+  routes({
+    '/profile/me': {
+      ...profile,
+      profileApproved: true,
+      profileStatus: 'DA_DUYET',
+      rejectReason: 'Ảnh thẻ mờ, không đọc được MSSV.',
+      accountStatus: 'HOAT_DONG',
+    },
+  });
+  useSession.setState({ token: 'token', user: { id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: ['MEMBER'], emailVerified: true, profileApproved: true, accountStatus: 'HOAT_DONG' }, loading: false });
+  render(<App />);
+  fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
+  expect(await screen.findByText('Lý do từ chối: Ảnh thẻ mờ, không đọc được MSSV.')).toBeTruthy();
+  expect(screen.getAllByText('Hồ sơ đã duyệt').length).toBeGreaterThan(0);
 });
 
 test('changes email after verifying the OTP and reports a wrong code', async () => {
@@ -227,7 +246,7 @@ test('locked BI_KHOA account can sign in with limited permissions on listings an
     screen.queryByText('Tài khoản đang chờ hoàn tất xác minh hoặc duyệt hồ sơ. Bạn vẫn có thể xem các mặt hàng công khai.'),
   ).toBeNull();
 
-  // Navigate to ProfileScreen: shows restriction notice, hides pending notice, disables edit, keeps reload/settings enabled
+  // Navigate to ProfileScreen: shows restriction notice, hides pending notice, disables edit and account settings, keeps reload enabled
   routes({ '/profile/me': { ...profile, accountStatus: 'BI_KHOA' } });
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
   expect(await screen.findByText('Hồ sơ của bạn')).toBeTruthy();
@@ -236,7 +255,7 @@ test('locked BI_KHOA account can sign in with limited permissions on listings an
     screen.queryByText('Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch.'),
   ).toBeNull();
   expect(screen.getByRole('button', { name: 'Cập nhật hồ sơ' }).props.accessibilityState.disabled).toBe(true);
-  expect(screen.getByRole('button', { name: 'Cài đặt tài khoản' }).props.accessibilityState.disabled).toBe(false);
+  expect(screen.getByRole('button', { name: 'Cài đặt tài khoản' }).props.accessibilityState.disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Tải lại hồ sơ' }).props.accessibilityState.disabled).toBe(false);
 });
 

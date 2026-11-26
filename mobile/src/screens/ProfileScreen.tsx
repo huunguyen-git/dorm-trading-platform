@@ -5,7 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import type { Nav } from '../navigation';
 import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
-import { useSession } from '../auth/session';
+import { useSession, type User } from '../auth/session';
+import { api } from '../api/client';
 import { colors, space } from '../theme';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 
@@ -34,6 +35,8 @@ export default function ProfileScreen() {
       const fresh = await profileApi.me();
       setProfile(fresh); setDraft(toDraft(fresh));
       setCardUri(fresh.hasStudentCard ? await profileApi.cardUri(fresh.id) : null);
+      // Hồ sơ đổi trạng thái thì quyền MEMBER cũng đổi: đồng bộ lại phiên để nút giao dịch bật/tắt đúng.
+      useSession.setState({ user: await api<User>('/auth/me') });
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
@@ -55,7 +58,8 @@ export default function ProfileScreen() {
     try {
       if (!draft.name.trim() || !draft.studentId.trim()) throw new Error('Nhập họ tên và MSSV.');
       if (draft.phone.trim() && !/^\+?[0-9][0-9 -]{7,19}$/.test(draft.phone.trim())) throw new Error('Số điện thoại không hợp lệ.');
-      const body = Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim() || null])) as ProfileUpdate;
+      // Gửi chuỗi rỗng cho trường tuỳ chọn để xoá được giá trị cũ (server hiểu null là "giữ nguyên").
+      const body = Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as ProfileUpdate;
       const updated = await profileApi.update(body);
       if (pick) { await profileApi.uploadCard(pick); setPick(null); }
       const fresh = pick ? await profileApi.me() : updated;
@@ -119,7 +123,7 @@ export default function ProfileScreen() {
       {cardUri ? <Image testID="profile-card-preview" source={{ uri: cardUri }} style={{ width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f2ede4' }} resizeMode="contain" accessibilityLabel="Ảnh thẻ sinh viên" /> : <Text style={ui.caption}>Chưa có ảnh thẻ sinh viên.</Text>}
       <Notice message={message} /><Notice message={error} error />
       <Action title="Cập nhật hồ sơ" testID="profile-edit" disabled={readOnly} onPress={() => { setEditing(true); setMessage(''); setError(''); }} />
-      <Action title="Cài đặt tài khoản" secondary disabled={busy} onPress={() => nav.navigate('Settings')} />
+      <Action title="Cài đặt tài khoản" secondary disabled={busy || readOnly} onPress={() => nav.navigate('Settings')} />
       <Action title="Tải lại hồ sơ" secondary disabled={busy} onPress={() => void load()} />
     </>}
   </AuthScreen>;

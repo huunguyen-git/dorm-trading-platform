@@ -12,6 +12,8 @@ type Pending = { challengeId: string; expiresAt: number; resendAt: number };
 export default function SettingsScreen() {
   const nav = useNavigation<Nav>();
   const user = useSession((state) => state.user);
+  // Bổ sung phạm vi P1-05: tài khoản bị khóa/vô hiệu hoá không đổi email hay mật khẩu được.
+  const readOnly = user?.accountStatus === 'BI_KHOA' || user?.accountStatus === 'VO_HIEU_HOA';
   const [currentPassword, setCurrent] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [challenge, setChallenge] = useState<Pending | null>(null);
@@ -51,6 +53,7 @@ export default function SettingsScreen() {
 
   return <AuthScreen title="Cài đặt tài khoản">
     <Text style={ui.caption}>Email đang dùng: {user?.email ?? '—'}</Text>
+    {readOnly && <Notice message="Tài khoản đang bị khóa nên không thể đổi email hay mật khẩu." error />}
     <View style={ui.divider}>
       <Text style={ui.label}>Đổi email</Text>
       <Text style={ui.caption}>Mã xác minh gửi tới email mới. Huỷ giữa chừng thì email cũ được giữ nguyên.</Text>
@@ -65,12 +68,12 @@ export default function SettingsScreen() {
         <PasswordField label="Mật khẩu hiện tại" testID="settings-password" autoComplete="current-password" value={currentPassword} onChangeText={setCurrent} editable={!busy} />
         <Field label="Email mới" testID="settings-email" placeholder="ban@truong.edu.vn" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={newEmail} onChangeText={setNewEmail} editable={!busy} />
         <Notice message={message} /><Notice message={error} error />
-        <Action title="Gửi mã xác minh" testID="settings-request" busy={busy} onPress={() => void request()} />
+        <Action title="Gửi mã xác minh" testID="settings-request" busy={busy} disabled={readOnly} onPress={() => void request()} />
       </>}
     </View>
     <View style={ui.divider}>
       <Text style={ui.label}>Bảo mật khác</Text>
-      <Action title="Đổi mật khẩu" secondary disabled={busy} onPress={() => nav.navigate('AuthFlow', { mode: 'change' })} />
+      <Action title="Đổi mật khẩu" secondary disabled={busy || readOnly} onPress={() => nav.navigate('AuthFlow', { mode: 'change' })} />
       <Action title="Đăng xuất thiết bị này" secondary disabled={busy} onPress={() => void run(async () => { await useSession.getState().logout(); nav.replace('Listings'); })} />
       <Action title="Về hồ sơ" secondary disabled={busy} onPress={() => nav.navigate('Profile')} />
     </View>
