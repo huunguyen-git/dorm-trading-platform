@@ -27,6 +27,7 @@ import {
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
+import { buildMediaImageSource } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import type { InventoryItemStatus } from '../inventory/types';
 import { useDiscovery } from '../listings/discoveryStore';
@@ -310,6 +311,11 @@ export default function ListingScreen() {
   const isOwner = Boolean(
     detail?.viewer.isOwner || (user?.id && display.seller.id && user.id === display.seller.id),
   );
+  const mediaAuthToken =
+    isOwner &&
+    ((display.status !== 'CONG_KHAI' && display.status !== 'GIU_CHO') || hasVisibleRestriction)
+      ? token
+      : null;
   const hasTextbookInfo = Boolean(display.courseCode || display.courseName || display.author);
   const postedDate = formatShortDate(display.publishedAt ?? display.createdAt);
   const locationZoneName = display.locationName ?? display.locationCode ?? 'ĐHQG-HCM';
@@ -692,7 +698,7 @@ export default function ListingScreen() {
                       >
                         <Image
                           testID={index === activePhotoIndex ? 'gallery-main-image' : undefined}
-                          source={{ uri }}
+                          source={buildMediaImageSource(uri, mediaAuthToken)}
                           style={{ width: stageWidth, height: PHOTO_HEIGHT }}
                           resizeMode="cover"
                           accessibilityLabel={`${display.title} - ảnh ${index + 1}`}
@@ -709,7 +715,7 @@ export default function ListingScreen() {
                   >
                     <Image
                       testID="gallery-main-image"
-                      source={{ uri: images[0] }}
+                      source={buildMediaImageSource(images[0], mediaAuthToken)}
                       style={styles.singlePhoto}
                       resizeMode="cover"
                       accessibilityLabel={`${display.title} - ảnh 1`}
@@ -802,7 +808,7 @@ export default function ListingScreen() {
                           active ? styles.thumbWrapActive : styles.thumbWrapInactive,
                         ]}
                       >
-                        <Image source={{ uri }} style={styles.thumbImage} resizeMode="cover" />
+                        <Image source={buildMediaImageSource(uri, mediaAuthToken)} style={styles.thumbImage} resizeMode="cover" />
                       </Pressable>
                     );
                   })}
@@ -1086,7 +1092,7 @@ export default function ListingScreen() {
                     <View style={styles.componentItemRow} testID={`component-item-${item.id}`}>
                       {item.images[0] ? (
                         <Image
-                          source={{ uri: item.images[0] }}
+                          source={buildMediaImageSource(item.images[0], mediaAuthToken)}
                           style={styles.componentThumb}
                           resizeMode="cover"
                         />
@@ -1369,7 +1375,7 @@ export default function ListingScreen() {
                 {images.map((uri, index) => (
                   <View key={`lb-${uri}-${index}`} style={[styles.lightboxSlide, { width: stageWidth }]}>
                     <Image
-                      source={{ uri }}
+                      source={buildMediaImageSource(uri, mediaAuthToken)}
                       style={{ width: stageWidth, height: stageWidth * 1.05 }}
                       resizeMode="contain"
                       accessibilityLabel={`${display.title} - ảnh phóng to ${index + 1}`}
@@ -1433,7 +1439,7 @@ export default function ListingScreen() {
                           active && styles.lightboxThumbWrapActive,
                         ]}
                       >
-                        <Image source={{ uri }} style={styles.lightboxThumbImg} resizeMode="cover" />
+                        <Image source={buildMediaImageSource(uri, mediaAuthToken)} style={styles.lightboxThumbImg} resizeMode="cover" />
                       </Pressable>
                     );
                   })}

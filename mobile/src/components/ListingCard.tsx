@@ -1,4 +1,6 @@
 import { Image, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { buildMediaImageSource } from '../api/client';
+import { useSession } from '../auth/session';
 import {
   formatReputationSummary,
   formatShortDate,
@@ -27,6 +29,9 @@ export function ListingCard({
   testID,
   style,
 }: ListingCardProps) {
+  const token = useSession((s) => s.token);
+  const mediaAuthToken =
+    listing.status === 'CONG_KHAI' || listing.status === 'GIU_CHO' ? null : token;
   const thumb = listing.thumbnailUrl ?? listing.images[0] ?? null;
   const photoCount = listing.images.length;
   const isFree = listing.isFree || listing.priceVnd === 0;
@@ -63,7 +68,7 @@ export function ListingCard({
         <View style={styles.gridPhotoStage}>
           {thumb ? (
             <Image
-              source={{ uri: thumb }}
+              source={buildMediaImageSource(thumb, mediaAuthToken)}
               style={styles.gridPhoto}
               resizeMode="cover"
               accessibilityLabel={`Ảnh đại diện ${listing.title}`}
@@ -192,7 +197,7 @@ export function ListingCard({
         <View style={styles.listThumbStage}>
           {thumb ? (
             <Image
-              source={{ uri: thumb }}
+              source={buildMediaImageSource(thumb, mediaAuthToken)}
               style={styles.thumbnail}
               resizeMode="cover"
               accessibilityLabel={`Ảnh đại diện ${listing.title}`}

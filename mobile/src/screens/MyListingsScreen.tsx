@@ -12,6 +12,7 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
+import { buildMediaImageSource } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { useSellerListings } from '../listings/sellerStore';
@@ -623,7 +624,10 @@ export default function MyListingsScreen() {
                 <View style={styles.thumbWrap}>
                   {thumb ? (
                     <Image
-                      source={{ uri: thumb }}
+                      source={buildMediaImageSource(
+                        thumb,
+                        item.status === 'CONG_KHAI' || item.status === 'GIU_CHO' ? null : token,
+                      )}
                       style={styles.thumb}
                       resizeMode="cover"
                       accessibilityLabel={item.title}

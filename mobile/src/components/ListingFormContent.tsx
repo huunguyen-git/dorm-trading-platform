@@ -98,12 +98,13 @@ const ZONE_GROUP_LABELS: Record<LocationZoneGroup, string> = {
 
 const ZONE_GROUP_ORDER: LocationZoneGroup[] = ['KTX', 'TRUONG', 'LAN_CAN'];
 
-// Mirrors backend InventoryService linked_count statuses (excludes DA_RUT, HET_HAN, KET_THUC, AN)
+// Mirrors backend InventoryService linked_count statuses (includes AN to protect moderation evidence)
 const COUNTED_LINKED_LISTING_STATUSES: ReadonlySet<ListingStatus> = new Set([
   'NHAP',
   'CHO_DUYET',
   'CONG_KHAI',
   'GIU_CHO',
+  'AN',
 ]);
 
 function isTextbookCategory(categoryId: string, categories: ListingCategory[]): boolean {
@@ -491,13 +492,11 @@ export default function ListingFormContent({
     { label: '500k', value: '500000' },
   ];
 
-  const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
-
   return (
     <KeyboardAvoidingView
       style={styles.shell}
-      behavior="padding"
-      keyboardVerticalOffset={keyboardOffset}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
     >
       <ScrollView
         ref={scrollViewRef}

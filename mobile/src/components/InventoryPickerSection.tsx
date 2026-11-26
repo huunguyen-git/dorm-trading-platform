@@ -12,6 +12,7 @@ import {
   type NavigationProp,
   type ParamListBase,
 } from '@react-navigation/native';
+import { buildMediaImageSource } from '../api/client';
 import { fetchInventoryItems } from '../inventory/api';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
@@ -92,6 +93,7 @@ export default function InventoryPickerSection({
   onNavigateToInventoryCreate,
 }: InventoryPickerSectionProps) {
   const navigation = useOptionalNavigation();
+  const token = useSession((s) => s.token);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -332,7 +334,7 @@ export default function InventoryPickerSection({
 
                   {thumb ? (
                     <Image
-                      source={{ uri: thumb }}
+                      source={buildMediaImageSource(thumb, token)}
                       style={styles.thumb}
                       resizeMode="cover"
                       accessibilityLabel={item.ten}

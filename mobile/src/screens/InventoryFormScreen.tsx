@@ -15,7 +15,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
-import { RestrictedAccountError } from '../api/client';
+import { buildMediaImageSource, RestrictedAccountError, toPersistableMediaUrl } from '../api/client';
 import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
 import {
@@ -45,6 +45,7 @@ export default function InventoryFormScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProps>();
   const insets = useContext(SafeAreaInsetsContext);
+  const token = useSession((s) => s.token);
   const mode = route.params?.mode || 'create';
   const existingItem = route.params?.item;
   const itemId = route.params?.id || existingItem?.id;
@@ -91,10 +92,13 @@ export default function InventoryFormScreen() {
   const appendUniqueImages = (urls: string[]) => {
     setHinhAnh((prev) => {
       const next = [...prev];
+      const existingCanonical = new Set(next.map(toPersistableMediaUrl));
       for (const rawUrl of urls) {
         const cleaned = rawUrl.trim();
         if (!cleaned || next.length >= MAX_LISTING_IMAGES) continue;
-        if (!next.includes(cleaned)) {
+        const canonical = toPersistableMediaUrl(cleaned);
+        if (!existingCanonical.has(canonical)) {
+          existingCanonical.add(canonical);
           next.push(cleaned);
         }
       }
@@ -182,7 +186,8 @@ export default function InventoryFormScreen() {
       return;
     }
 
-    if (hinhAnh.includes(targetUrl)) {
+    const targetCanonical = toPersistableMediaUrl(targetUrl);
+    if (hinhAnh.some((existing) => toPersistableMediaUrl(existing) === targetCanonical)) {
       reportError('Ảnh này đã được thêm.');
       return;
     }
@@ -256,13 +261,11 @@ export default function InventoryFormScreen() {
   const isDisabled = busy || uploadingImage || isBlocked;
   const canAddMoreImages = !isDisabled && hinhAnh.length < MAX_LISTING_IMAGES;
 
-  const keyboardOffset = Platform.OS === 'ios' ? 88 : (insets?.top ?? 0) + 56;
-
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior="padding"
-      keyboardVerticalOffset={keyboardOffset}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
     >
       <ScrollView
         ref={scrollViewRef}
@@ -337,7 +340,7 @@ export default function InventoryFormScreen() {
             >
               {hinhAnh.map((imgUri, idx) => (
                 <View key={`${imgUri}-${idx}`} style={styles.thumbWrapper} testID={`image-thumb-${idx}`}>
-                  <Image source={{ uri: imgUri }} style={styles.thumbImage} resizeMode="cover" />
+                  <Image source={buildMediaImageSource(imgUri, token)} style={styles.thumbImage} resizeMode="cover" />
                   {!isDisabled ? (
                     <Pressable
                       testID={`remove-image-${idx}`}

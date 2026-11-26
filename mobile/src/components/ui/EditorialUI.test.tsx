@@ -1,7 +1,20 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { AccessibilityInfo, Animated, Keyboard, Platform, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Animated,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { AuthScreen } from '../AuthUI';
+import { ListingCard } from '../ListingCard';
+import ListingImageManager from '../ListingImageManager';
 import { useSession } from '../../auth/session';
 import {
   LISTING_STATUS_META,
@@ -9,6 +22,7 @@ import {
   formatReputationSummary,
   formatVnd,
   mapListingStatusLabel,
+  type ListingSummary,
 } from '../../listings/types';
 import { colors, component, primitive, radius, semantic, space, text } from '../../theme';
 import {
@@ -758,6 +772,133 @@ describe('EmptyState, QuotaMeter, ToggleControl, StatusIndicator, LayoutPrimitiv
       expect(restoredMaxHeight).toBe(initialMaxHeight);
     } finally {
       addListenerSpy.mockRestore();
+    }
+  });
+
+  test('AuthScreen disables KeyboardAvoidingView padding on Android (resize mode) and keeps padding on iOS', () => {
+    const originalOs = Platform.OS;
+    try {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+      const androidTree = render(
+        <AuthScreen title="Đăng nhập">
+          <Text>Body</Text>
+        </AuthScreen>,
+      );
+      const androidKav = androidTree.UNSAFE_getByType(KeyboardAvoidingView);
+      expect(androidKav.props.behavior).toBeUndefined();
+      expect(androidKav.props.keyboardVerticalOffset).toBe(0);
+      androidTree.unmount();
+
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+      const iosTree = render(
+        <AuthScreen title="Đăng nhập">
+          <Text>Body</Text>
+        </AuthScreen>,
+      );
+      const iosKav = iosTree.UNSAFE_getByType(KeyboardAvoidingView);
+      expect(iosKav.props.behavior).toBe('padding');
+      expect(iosKav.props.keyboardVerticalOffset).toBe(88);
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
+    }
+  });
+
+  test('ListingCard omits Authorization header for public CONG_KHAI media and attaches it only for non-public media', () => {
+    const prevApiUrl = process.env.EXPO_PUBLIC_API_URL;
+    const prevToken = useSession.getState().token;
+    const mediaId = '7f255386-74df-4ed0-8334-c0a345ea24f4';
+    const baseListing: ListingSummary = {
+      id: 'lst-1',
+      title: 'Giáo trình SE100',
+      description: 'Sách sạch đẹp',
+      condition: 'Mới 95%',
+      priceVnd: 50000,
+      listingType: 'BAN_LE',
+      isCombo: false,
+      isFree: false,
+      status: 'CONG_KHAI',
+      categoryId: 'GT_CNTT',
+      categoryName: 'Giáo trình CNTT',
+      courseCode: 'SE100',
+      courseName: null,
+      author: null,
+      locationCode: 'UIT',
+      locationName: 'UIT',
+      locationText: 'UIT',
+      latitude: null,
+      longitude: null,
+      distanceKm: null,
+      thumbnailUrl: `/api/v1/media/${mediaId}`,
+      images: [`/api/v1/media/${mediaId}`],
+      itemCount: 1,
+      seller: {
+        id: 'u-1',
+        displayName: 'Nguyễn Văn A',
+        reputationScore: 100,
+        averageRating: null,
+        reviewCount: 0,
+      },
+      hasUnavailableItems: false,
+      publishedAt: null,
+      expiresAt: null,
+      renewalReminderDue: false,
+      renewalCount: 0,
+      createdAt: null,
+      updatedAt: null,
+      version: 0,
+    };
+
+    try {
+      process.env.EXPO_PUBLIC_API_URL = 'https://api.dormtrading.vn/api/v1';
+      useSession.setState({ token: 'active-jwt' });
+
+      const publicTree = render(<ListingCard listing={baseListing} onPress={() => {}} />);
+      const publicImg = publicTree.UNSAFE_getByType(Image);
+      expect(publicImg.props.source).toEqual({
+        uri: `https://api.dormtrading.vn/api/v1/media/${mediaId}`,
+      });
+      publicTree.unmount();
+
+      const draftTree = render(
+        <ListingCard listing={{ ...baseListing, status: 'NHAP' }} onPress={() => {}} />,
+      );
+      const draftImg = draftTree.UNSAFE_getByType(Image);
+      expect(draftImg.props.source).toEqual({
+        uri: `https://api.dormtrading.vn/api/v1/media/${mediaId}`,
+        headers: { Authorization: 'Bearer active-jwt' },
+      });
+      draftTree.unmount();
+    } finally {
+      process.env.EXPO_PUBLIC_API_URL = prevApiUrl;
+      useSession.setState({ token: prevToken });
+    }
+  });
+
+  test('ListingImageManager deduplicates canonical relative and resolved app media URLs', () => {
+    const prevApiUrl = process.env.EXPO_PUBLIC_API_URL;
+    const mediaId = '7f255386-74df-4ed0-8334-c0a345ea24f4';
+    const onChange = jest.fn();
+
+    try {
+      process.env.EXPO_PUBLIC_API_URL = 'http://10.0.2.2:8082/api/v1';
+      render(
+        <ListingImageManager
+          images={[`http://10.0.2.2:8082/api/v1/media/${mediaId}`]}
+          onChange={onChange}
+        />,
+      );
+
+      fireEvent.press(screen.getByTestId('listing-toggle-url-input'));
+      fireEvent.changeText(
+        screen.getByTestId('listing-image-url-input'),
+        `/api/v1/media/${mediaId}`,
+      );
+      fireEvent.press(screen.getByTestId('listing-add-url-btn'));
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText('Ảnh này đã có trong danh sách.')).toBeTruthy();
+    } finally {
+      process.env.EXPO_PUBLIC_API_URL = prevApiUrl;
     }
   });
 });

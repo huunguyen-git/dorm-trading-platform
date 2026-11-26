@@ -14,6 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
+import { buildMediaImageSource } from '../api/client';
 import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
@@ -205,7 +206,7 @@ export default function InventoryDetailScreen() {
                 {images.map((imgUri, index) => (
                   <Image
                     key={`${imgUri}-${index}`}
-                    source={{ uri: imgUri }}
+                    source={buildMediaImageSource(imgUri, token)}
                     style={{ width: carouselWidth, height: carouselHeight }}
                     resizeMode="cover"
                     accessibilityLabel={`${item.ten} - ảnh ${index + 1}`}

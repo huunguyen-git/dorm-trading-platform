@@ -19,7 +19,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
-import { RestrictedAccountError } from '../api/client';
+import { buildMediaImageSource, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import {
   normalizeSearchTypeParam,
@@ -645,7 +645,7 @@ export default function ListingsScreen() {
                     {meta.thumb ? (
                       <View style={styles.heroPhotoFrame}>
                         <Image
-                          source={{ uri: meta.thumb }}
+                          source={buildMediaImageSource(meta.thumb, null)}
                           style={styles.heroPhoto}
                           resizeMode="cover"
                         />
@@ -710,7 +710,7 @@ export default function ListingsScreen() {
                   <View style={styles.spotlightPhotoWrap}>
                     {thumb ? (
                       <Image
-                        source={{ uri: thumb }}
+                        source={buildMediaImageSource(thumb, null)}
                         style={styles.spotlightPhoto}
                         resizeMode="cover"
                       />

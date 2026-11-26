@@ -341,10 +341,17 @@ export const useSellerListings = create<SellerListingsState>((set, get) => ({
     set({ submitting: true, error: null });
     const target = get().myListings.find((item) => item.id === id);
     try {
-      await sellerApi.deleteListing(id, version ?? target?.version);
+      const effectiveVersion = version ?? target?.version;
+      if (typeof effectiveVersion !== 'number' || !Number.isFinite(effectiveVersion)) {
+        throw new Error('Thiếu thông tin phiên bản dữ liệu. Vui lòng làm mới danh sách rồi thử lại.');
+      }
+      await sellerApi.deleteListing(id, effectiveVersion);
       const { myListings, totalElements, quota } = get();
       const nextList = myListings.filter((item) => item.id !== id);
-      const wasActiveCounted = target?.status === 'CONG_KHAI' || target?.status === 'GIU_CHO';
+      const wasActiveCounted =
+        target?.status === 'CONG_KHAI' ||
+        target?.status === 'GIU_CHO' ||
+        target?.status === 'CHO_DUYET';
       let nextQuota = quota;
       if (quota && wasActiveCounted) {
         const nextActive = Math.max(0, quota.activeCount - 1);

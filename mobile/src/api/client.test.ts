@@ -1,5 +1,11 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { api, resolveMediaUrl, RestrictedAccountError } from './client';
+import {
+  api,
+  buildMediaImageSource,
+  resolveMediaUrl,
+  RestrictedAccountError,
+  toPersistableMediaUrl,
+} from './client';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -502,4 +508,107 @@ test('resolveMediaUrl rewrites local/private /api/v1/media URLs to EXPO_PUBLIC_A
   expect(resolveMediaUrl(`https://api.dormtrading.vn/api/v1/media/${sampleId}`)).toBe(
     `https://api.dormtrading.vn/api/v1/media/${sampleId}`,
   );
+});
+
+test('toPersistableMediaUrl normalizes app media URLs to relative /api/v1/media/{id} and preserves external URLs', () => {
+  const sampleId = '7f255386-74df-4ed0-8334-c0a345ea24f4';
+  process.env.EXPO_PUBLIC_API_URL = 'https://api.dormtrading.vn/api/v1';
+
+  expect(toPersistableMediaUrl(`/api/v1/media/${sampleId}`)).toBe(`/api/v1/media/${sampleId}`);
+  expect(toPersistableMediaUrl(`http://10.0.2.2:8082/api/v1/media/${sampleId}`)).toBe(`/api/v1/media/${sampleId}`);
+  expect(toPersistableMediaUrl(`http://192.168.1.42:8082/api/v1/media/${sampleId}`)).toBe(`/api/v1/media/${sampleId}`);
+  expect(toPersistableMediaUrl(`https://api.dormtrading.vn/api/v1/media/${sampleId}`)).toBe(
+    `/api/v1/media/${sampleId}`,
+  );
+  expect(toPersistableMediaUrl('https://cdn.example.com/books/se100.jpg')).toBe(
+    'https://cdn.example.com/books/se100.jpg',
+  );
+});
+
+test('buildMediaImageSource attaches Bearer Authorization header only to same-origin canonical app media URLs and never leaks on protocol/port/path mismatch', () => {
+  const sampleId = '7f255386-74df-4ed0-8334-c0a345ea24f4';
+  process.env.EXPO_PUBLIC_API_URL = 'https://api.dormtrading.vn/api/v1';
+
+  expect(buildMediaImageSource(`/api/v1/media/${sampleId}`, 'secret-jwt')).toEqual({
+    uri: `https://api.dormtrading.vn/api/v1/media/${sampleId}`,
+    headers: { Authorization: 'Bearer secret-jwt' },
+  });
+  expect(buildMediaImageSource(`/api/v1/media/${sampleId}`, null)).toEqual({
+    uri: `https://api.dormtrading.vn/api/v1/media/${sampleId}`,
+  });
+  // External URL must NEVER receive Bearer token!
+  expect(buildMediaImageSource('https://cdn.example.com/books/se100.jpg', 'secret-jwt')).toEqual({
+    uri: 'https://cdn.example.com/books/se100.jpg',
+  });
+  // Same hostname with downgraded protocol or different port must NEVER receive Bearer token!
+  expect(
+    buildMediaImageSource(`http://api.dormtrading.vn:9999/api/v1/media/${sampleId}`, 'secret-jwt'),
+  ).toEqual({
+    uri: `http://api.dormtrading.vn:9999/api/v1/media/${sampleId}`,
+  });
+  expect(
+    buildMediaImageSource(`http://api.dormtrading.vn/api/v1/media/${sampleId}`, 'secret-jwt'),
+  ).toEqual({
+    uri: `http://api.dormtrading.vn/api/v1/media/${sampleId}`,
+  });
+  // Path traversal or non-UUID media subpath must NEVER receive Bearer token or be rewritten!
+  expect(
+    buildMediaImageSource('/api/v1/media/../../admin/secret', 'secret-jwt'),
+  ).toEqual({
+    uri: '/api/v1/media/../../admin/secret',
+  });
+  expect(
+    buildMediaImageSource('http://192.168.1.99:8080/api/v1/media/not-a-uuid', 'secret-jwt'),
+  ).toEqual({
+    uri: 'http://192.168.1.99:8080/api/v1/media/not-a-uuid',
+  });
+});
+
+test('importing client.ts before session.ts still persists refreshed tokens and updates session state without silent no-op', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let isolatedApi!: typeof api;
+  let isolatedStore!: jest.Mocked<typeof tokenStore>;
+  let isolatedSessionStore!: { getState: () => { token: string | null; user: User | null } };
+
+  jest.isolateModules(() => {
+    // Deliberately load client.ts WITHOUT importing auth/session.ts first
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const clientMod = require('./client') as typeof import('./client');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tokenMod = require('../auth/tokenStore') as { tokenStore: jest.Mocked<typeof tokenStore> };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sessionStateMod = require('../auth/sessionStore') as typeof import('../auth/sessionStore');
+    isolatedApi = clientMod.api;
+    isolatedStore = tokenMod.tokenStore;
+    isolatedSessionStore = sessionStateMod.useSessionStore;
+  });
+
+  isolatedStore.get.mockResolvedValueOnce('expired-jwt').mockResolvedValueOnce('expired-jwt')
+    .mockResolvedValueOnce('expired-jwt').mockResolvedValue('fresh-jwt');
+  isolatedStore.getRefresh.mockResolvedValueOnce('refresh-tok');
+  fetchMock
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'WWW-Authenticate': 'Bearer error="invalid_token"' }),
+      text: async () => JSON.stringify({ code: 'UNAUTHORIZED', message: 'Expired' }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ token: 'fresh-jwt', refreshToken: 'fresh-refresh', user: activeUser }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+    });
+
+  await expect(isolatedApi('/listings/quota')).resolves.toEqual({ ok: true });
+  expect(isolatedStore.saveRefresh).toHaveBeenCalledWith('fresh-refresh');
+  expect(isolatedStore.save).toHaveBeenCalledWith('fresh-jwt');
+  expect(isolatedSessionStore.getState().token).toBe('fresh-jwt');
+  expect(isolatedSessionStore.getState().user?.id).toBe('u-1');
 });

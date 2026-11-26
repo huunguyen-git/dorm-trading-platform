@@ -142,6 +142,9 @@ export function validateImageAsset(asset: PickableImageAsset | null | undefined)
   return { valid: true, mimeType };
 }
 
+const RELATIVE_MEDIA_PATH_RE =
+  /^\/api\/v1\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function validateImageUrl(url: string): ImageValidationResult {
   const trimmed = (url ?? '').trim();
   if (!trimmed) {
@@ -149,6 +152,9 @@ export function validateImageUrl(url: string): ImageValidationResult {
   }
   if (trimmed.length > MAX_IMAGE_URL_LENGTH) {
     return { valid: false, error: `Đường dẫn ảnh quá dài (tối đa ${MAX_IMAGE_URL_LENGTH} ký tự).` };
+  }
+  if (RELATIVE_MEDIA_PATH_RE.test(trimmed)) {
+    return { valid: true };
   }
   if (!/^https?:\/\//i.test(trimmed)) {
     return { valid: false, error: 'Đường dẫn ảnh phải bắt đầu bằng http:// hoặc https://.' };

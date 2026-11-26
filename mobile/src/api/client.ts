@@ -1,4 +1,5 @@
-import { getSessionStore, type AccountRestriction } from '../auth/sessionTypes';
+import { useSessionStore } from '../auth/sessionStore';
+import type { AccountRestriction } from '../auth/sessionTypes';
 import { tokenStore } from '../auth/tokenStore';
 
 export class RestrictedAccountError extends Error {
@@ -53,6 +54,32 @@ function isLocalOrPrivateHost(hostname: string): boolean {
   return false;
 }
 
+const CANONICAL_MEDIA_PATH_RE =
+  /^\/api\/v1\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function getConfiguredApiOrigin(): string {
+  return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '') ?? '';
+}
+
+function getConfiguredApiOriginUrl(): URL | null {
+  const configuredOrigin = getConfiguredApiOrigin();
+  if (!configuredOrigin) return null;
+  try {
+    const parsed = new URL(configuredOrigin);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function joinApiMediaPath(configuredOrigin: string, mediaPath: string, search = ''): string {
+  if (configuredOrigin.endsWith('/api/v1')) {
+    return `${configuredOrigin}${mediaPath.slice('/api/v1'.length)}${search}`;
+  }
+  return `${configuredOrigin}${mediaPath}${search}`;
+}
+
 /**
  * Chuẩn hóa URL ảnh từ `/api/v1/media/{id}` sang gốc `EXPO_PUBLIC_API_URL` của thiết bị hiện tại
  * để ảnh hiển thị nhất quán trên cả iOS (Simulator / Expo Go), Android Emulator (`10.0.2.2`) và máy thật qua LAN.
@@ -62,27 +89,109 @@ export function resolveMediaUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (!trimmed) return '';
 
-  const configuredOrigin = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
+  const configuredOrigin = getConfiguredApiOrigin();
   if (!configuredOrigin) return trimmed;
 
-  if (trimmed.startsWith('/api/v1/media/')) {
-    return `${configuredOrigin}${trimmed.slice('/api/v1'.length)}`;
+  if (CANONICAL_MEDIA_PATH_RE.test(trimmed)) {
+    return joinApiMediaPath(configuredOrigin, trimmed);
   }
 
   try {
     const parsed = new URL(trimmed);
     if (
       (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      parsed.pathname.startsWith('/api/v1/media/') &&
+      CANONICAL_MEDIA_PATH_RE.test(parsed.pathname) &&
       isLocalOrPrivateHost(parsed.hostname)
     ) {
-      return `${configuredOrigin}${parsed.pathname.slice('/api/v1'.length)}${parsed.search}`;
+      return joinApiMediaPath(configuredOrigin, parsed.pathname, parsed.search);
     }
   } catch {
     return trimmed;
   }
 
   return trimmed;
+}
+
+/**
+ * Kiểm tra xem URL ảnh có trỏ chính xác tới dịch vụ `/api/v1/media/{uuid}` cùng origin (scheme + host + port)
+ * của ứng dụng hay không (dùng để chỉ gửi Bearer token cho backend của chính mình, tuyệt đối không rò rỉ token
+ * sang domain, giao thức hoặc cổng khác).
+ */
+export function isAppMediaUrl(rawUrl: string): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (CANONICAL_MEDIA_PATH_RE.test(trimmed)) return true;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      !CANONICAL_MEDIA_PATH_RE.test(parsed.pathname)
+    ) {
+      return false;
+    }
+    const configuredUrl = getConfiguredApiOriginUrl();
+    if (!configuredUrl) {
+      return false;
+    }
+    return parsed.origin === configuredUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Chuẩn hóa URL ảnh về đường dẫn tương đối `/api/v1/media/{id}` trước khi gửi lên backend lưu CSDL
+ * (tránh làm bẩn DB bằng `localhost`/`10.0.2.2`/IP LAN). URL ngoài giữ nguyên.
+ */
+export function toPersistableMediaUrl(rawUrl: string): string {
+  if (typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  if (CANONICAL_MEDIA_PATH_RE.test(trimmed)) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      CANONICAL_MEDIA_PATH_RE.test(parsed.pathname)
+    ) {
+      const configuredUrl = getConfiguredApiOriginUrl();
+      if (
+        (configuredUrl && parsed.origin === configuredUrl.origin) ||
+        isLocalOrPrivateHost(parsed.hostname)
+      ) {
+        return parsed.pathname;
+      }
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Tạo đối tượng `source` cho `<Image>` với URL đã chuẩn hóa và header `Authorization`
+ * chỉ khi URL đích đã chuẩn hóa trùng khớp origin & đường dẫn `/api/v1/media/{uuid}` của backend
+ * (hỗ trợ xem ảnh nháp/kho/tin ẩn cho chủ tin mà không bao giờ rò rỉ token sang host/cổng/giao thức khác).
+ */
+export function buildMediaImageSource(
+  rawUrl: string,
+  token?: string | null,
+): { uri: string; headers?: Record<string, string> } {
+  const uri = resolveMediaUrl(rawUrl);
+  if (!uri) return { uri: '' };
+  const resolvedToken = token === undefined ? useSessionStore.getState().token : token;
+  const authToken = typeof resolvedToken === 'string' ? resolvedToken.trim() : '';
+  if (authToken && isAppMediaUrl(uri)) {
+    return {
+      uri,
+      headers: { Authorization: `Bearer ${authToken}` },
+    };
+  }
+  return { uri };
 }
 
 async function readResponseText(response: Response): Promise<string> {
@@ -144,10 +253,9 @@ async function handleRestrictedResponse(
   const restriction = parseAccountRestriction(raw);
   if (!restriction) return;
 
-  const sessionStore = getSessionStore();
   if (clearSession) {
     await tokenStore.clear();
-    sessionStore?.setState({
+    useSessionStore.setState({
       token: null,
       user: null,
       loading: false,
@@ -155,10 +263,10 @@ async function handleRestrictedResponse(
       restrictionDismissed: false,
     });
   } else {
-    const currentUser = sessionStore?.getState().user ?? null;
-    if (!currentUser && !sessionStore?.getState().token) {
+    const currentUser = useSessionStore.getState().user ?? null;
+    if (!currentUser && !useSessionStore.getState().token) {
       await tokenStore.clear();
-      sessionStore?.setState({
+      useSessionStore.setState({
         token: null,
         user: null,
         loading: false,
@@ -166,7 +274,7 @@ async function handleRestrictedResponse(
         restrictionDismissed: false,
       });
     } else {
-      sessionStore?.setState({
+      useSessionStore.setState({
         loading: false,
         restriction,
         restrictionDismissed: false,
@@ -200,7 +308,7 @@ async function refresh() {
         throw new Error('Phiên đã hết hạn.');
       }
       const session = await response.json();
-      await getSessionStore()?.getState().setSession(session.token, session.user, session.refreshToken);
+      await useSessionStore.getState().setSession(session.token, session.user, session.refreshToken);
     })().finally(() => {
       refreshFlight = null;
     });
@@ -259,7 +367,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (response.status === 401 && !publicCall && path !== '/auth/password/change') {
     await tokenStore.clear();
-    getSessionStore()?.setState({ token: null, user: null, loading: false });
+    useSessionStore.setState({ token: null, user: null, loading: false });
   }
   if (!response.ok) {
     const raw = await readResponseText(response);

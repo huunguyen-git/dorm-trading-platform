@@ -33,21 +33,6 @@ export type SessionState = {
   logout: () => Promise<void>;
 };
 
-export type SessionStoreBridge = {
-  getState: () => SessionState;
-  setState: (partial: Partial<SessionState>) => void;
-};
-
-let sessionStoreBridge: SessionStoreBridge | null = null;
-
-export function registerSessionStore(bridge: SessionStoreBridge): void {
-  sessionStoreBridge = bridge;
-}
-
-export function getSessionStore(): SessionStoreBridge | null {
-  return sessionStoreBridge;
-}
-
 export function resolveUserRestriction(user: User | null | undefined): AccountRestriction | null {
   if (!user) return null;
   if (user.restriction) {

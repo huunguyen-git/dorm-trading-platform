@@ -16,6 +16,7 @@ import {
   uploadListingImages,
   validateImageUrl,
 } from '../media/imagePicker';
+import { buildMediaImageSource, toPersistableMediaUrl } from '../api/client';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { useSession } from '../auth/session';
 import { ActionSheet, Icon, InlineBanner, type ActionSheetOption } from './ui';
@@ -38,6 +39,7 @@ export default function ListingImageManager({
   maxImages = MAX_LISTING_IMAGES,
   onUploadingChange,
 }: ListingImageManagerProps) {
+  const token = useSession((s) => s.token);
   const [uploading, setUploading] = useState(false);
   const [localError, setLocalError] = useState('');
   const [showLinkInput, setShowLinkInput] = useState(false);
@@ -76,11 +78,14 @@ export default function ListingImageManager({
 
   const appendUniqueUrls = (urls: string[]) => {
     const merged = [...latestImagesRef.current];
+    const existingCanonical = new Set(merged.map(toPersistableMediaUrl));
     for (const rawUrl of urls) {
       const cleaned = rawUrl.trim();
       if (!cleaned) continue;
       if (merged.length >= maxImages) break;
-      if (!merged.includes(cleaned)) {
+      const canonical = toPersistableMediaUrl(cleaned);
+      if (!existingCanonical.has(canonical)) {
+        existingCanonical.add(canonical);
         merged.push(cleaned);
       }
     }
@@ -157,7 +162,8 @@ export default function ListingImageManager({
       return;
     }
     const cleaned = linkDraft.trim();
-    if (images.includes(cleaned)) {
+    const cleanedCanonical = toPersistableMediaUrl(cleaned);
+    if (images.some((existing) => toPersistableMediaUrl(existing) === cleanedCanonical)) {
       setLocalError('Ảnh này đã có trong danh sách.');
       return;
     }
@@ -287,7 +293,7 @@ export default function ListingImageManager({
             >
               <View style={styles.photoTile}>
                 <Image
-                  source={{ uri }}
+                  source={buildMediaImageSource(uri, token)}
                   style={styles.photoImage}
                   resizeMode="cover"
                   accessibilityLabel={`Ảnh tin đăng ${index + 1}`}

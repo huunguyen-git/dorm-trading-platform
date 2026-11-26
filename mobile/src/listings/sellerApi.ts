@@ -1,4 +1,4 @@
-import { api, RestrictedAccountError } from '../api/client';
+import { api, RestrictedAccountError, toPersistableMediaUrl } from '../api/client';
 import {
   normalizeCategory,
   normalizeCategoryTreeNode,
@@ -64,7 +64,7 @@ export function extractApiError(error: unknown, fallbackMessage: string): Extrac
 
   const friendlyByCode: Record<string, string> = {
     QUOTA_EXCEEDED:
-      'Bạn đã đạt hạn mức tin đăng công khai/giữ chỗ. Bạn có thể lưu thành bản nháp hoặc rút bớt tin cũ.',
+      'Bạn đã đạt hạn mức tin đăng đang mở/chờ duyệt. Bạn có thể lưu thành bản nháp hoặc rút bớt tin cũ.',
     VERSION_CONFLICT:
       'Tin đăng vừa được cập nhật từ thiết bị hoặc thao tác khác. Vui lòng tải lại phiên bản mới nhất trước khi lưu.',
     ITEM_STATUS_CONFLICT:
@@ -81,6 +81,8 @@ export function extractApiError(error: unknown, fallbackMessage: string): Extrac
       'Ảnh đính kèm không hợp lệ. Chỉ chấp nhận 1–5 ảnh định dạng JPEG, PNG hoặc WebP.',
     FILE_TOO_LARGE:
       'Kích thước ảnh vượt quá giới hạn cho phép (tối đa 5MB mỗi ảnh).',
+    MEDIA_QUOTA_EXCEEDED:
+      'Bạn đã vượt giới hạn lưu trữ hình ảnh cho phép. Vui lòng thử lại sau.',
     LISTING_NOT_FOUND:
       'Không tìm thấy tin đăng yêu cầu hoặc tin đăng đã bị xóa.',
   };
@@ -195,9 +197,13 @@ export async function fetchReferenceData(options?: { force?: boolean }): Promise
 }
 
 export async function createListing(payload: CreateListingPayload): Promise<ListingMutationResponse> {
+  const normalizedPayload: CreateListingPayload = {
+    ...payload,
+    images: payload.images?.map(toPersistableMediaUrl),
+  };
   const data = await api<unknown>('/listings', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalizedPayload),
   });
   return normalizeListingMutationResponse(data);
 }
@@ -206,9 +212,13 @@ export async function updateListing(
   id: string,
   payload: UpdateListingPayload,
 ): Promise<ListingMutationResponse> {
+  const normalizedPayload: UpdateListingPayload = {
+    ...payload,
+    images: payload.images?.map(toPersistableMediaUrl),
+  };
   const data = await api<unknown>(`/listings/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalizedPayload),
   });
   return normalizeListingMutationResponse(data);
 }
@@ -237,12 +247,11 @@ export async function renewListing(id: string, version: number): Promise<Listing
   return normalizeListingMutationResponse(data);
 }
 
-export async function deleteListing(id: string, version?: number): Promise<void> {
-  const query =
-    typeof version === 'number' && Number.isFinite(version)
-      ? `?version=${encodeURIComponent(String(version))}`
-      : '';
-  await api<void>(`/listings/${encodeURIComponent(id)}${query}`, {
+export async function deleteListing(id: string, version: number): Promise<void> {
+  if (typeof version !== 'number' || !Number.isFinite(version)) {
+    throw new Error('Thiếu thông tin phiên bản dữ liệu (version) để xóa tin đăng.');
+  }
+  await api<void>(`/listings/${encodeURIComponent(id)}?version=${encodeURIComponent(String(version))}`, {
     method: 'DELETE',
   });
 }

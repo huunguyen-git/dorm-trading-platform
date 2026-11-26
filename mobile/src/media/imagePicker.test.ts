@@ -104,9 +104,12 @@ describe('constants & validators', () => {
     ).toEqual({ valid: false, error: 'Kích thước mỗi ảnh không được vượt quá 5MB.' });
   });
 
-  test('validateImageUrl accepts http/https URLs and rejects invalid schemes', () => {
+  test('validateImageUrl accepts http/https URLs and canonical /api/v1/media/{uuid} paths while rejecting invalid schemes', () => {
     expect(validateImageUrl('https://cdn.example.com/media/123.jpg')).toEqual({ valid: true });
     expect(validateImageUrl('http://localhost:8082/api/v1/media/abc')).toEqual({ valid: true });
+    expect(validateImageUrl('/api/v1/media/7f255386-74df-4ed0-8334-c0a345ea24f4')).toEqual({ valid: true });
+    expect(validateImageUrl('/api/v1/media/../secret').valid).toBe(false);
+    expect(validateImageUrl('/etc/passwd').valid).toBe(false);
     expect(validateImageUrl('   ').valid).toBe(false);
     expect(validateImageUrl('javascript:alert(1)').valid).toBe(false);
     expect(validateImageUrl('file:///etc/passwd').valid).toBe(false);

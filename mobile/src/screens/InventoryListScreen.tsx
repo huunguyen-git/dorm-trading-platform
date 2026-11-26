@@ -13,6 +13,7 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
+import { buildMediaImageSource } from '../api/client';
 import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
@@ -230,7 +231,7 @@ export default function InventoryListScreen() {
                 <View style={styles.thumbWrap}>
                   {item.hinhAnh && item.hinhAnh.length > 0 ? (
                     <Image
-                      source={{ uri: item.hinhAnh[0] }}
+                      source={buildMediaImageSource(item.hinhAnh[0], token)}
                       style={styles.thumbnail}
                       accessibilityLabel={item.ten}
                     />
