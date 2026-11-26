@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { registerLogoutReset } from '../auth/session';
+import { useSession } from '../auth/session';
 import { useDiscovery } from '../listings/discoveryStore';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import * as orderApi from './api';
@@ -392,6 +392,10 @@ export const useOrders = create<OrdersState>((set, get) => ({
   },
 }));
 
-registerLogoutReset(() => {
-  useOrders.getState().reset();
+useSession.subscribe((state, prev) => {
+  const tokenCleared = Boolean(prev.token && !state.token);
+  const userSwitched = Boolean(prev.user?.id && state.user?.id && prev.user.id !== state.user.id);
+  if (tokenCleared || userSwitched) {
+    useOrders.getState().reset();
+  }
 });

@@ -1702,4 +1702,172 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
       expect(mockedApi).toHaveBeenCalledTimes(2);
     });
   });
+
+  test('useOrders resets automatically and discards in-flight requests when useSession clears token (401/revocation)', async () => {
+    useOrders.setState({
+      orders: [makeOrderSummary({ id: 'order-before-revoke' })],
+      selectedOrder: makeOrderDetail({ id: 'order-before-revoke' }),
+      notifications: [makeNotification('notif-before-revoke')],
+      unreadCount: 3,
+      listingIdFilter: 'listing-1',
+    });
+
+    // Token refresh for the same user must NOT clear cached orders
+    act(() => {
+      useSession.setState({ token: 'jwt-token-refreshed', user: buyerUser, loading: false });
+    });
+    expect(useOrders.getState().orders).toHaveLength(1);
+    expect(useOrders.getState().unreadCount).toBe(3);
+
+    // Start in-flight list, detail, and notifications requests before token revocation
+    let resolveRevokedOrders!: (v: unknown) => void;
+    let resolveRevokedDetail!: (v: unknown) => void;
+    let resolveRevokedNotifs!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRevokedOrders = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRevokedDetail = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRevokedNotifs = resolve;
+          }),
+      );
+
+    const pList = useOrders.getState().loadOrders({ status: 'ALL' });
+    const pDetail = useOrders.getState().loadOrderDetail('order-revoked');
+    const pNotif = useOrders.getState().loadNotifications();
+
+    // Simulate 401/204 session revocation directly clearing token without calling logout()
+    act(() => {
+      useSession.setState({ token: null, user: null, loading: false });
+    });
+
+    const immediatelyCleared = useOrders.getState();
+    expect(immediatelyCleared.orders).toHaveLength(0);
+    expect(immediatelyCleared.selectedOrder).toBeNull();
+    expect(immediatelyCleared.notifications).toHaveLength(0);
+    expect(immediatelyCleared.unreadCount).toBe(0);
+    expect(immediatelyCleared.listingIdFilter).toBeNull();
+    expect(immediatelyCleared.loading).toBe(false);
+    expect(immediatelyCleared.detailLoading).toBe(false);
+
+    // Late in-flight responses from revoked session must be discarded via bumped sessionEpoch
+    resolveRevokedOrders({
+      items: [makeOrderSummary({ id: 'leaked-after-revoke' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    resolveRevokedDetail(makeOrderDetail({ id: 'order-revoked' }));
+    resolveRevokedNotifs({
+      items: [makeNotification('leaked-notif-revoke')],
+      unreadCount: 4,
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+    });
+
+    await Promise.all([pList, pDetail, pNotif]);
+
+    const finalState = useOrders.getState();
+    expect(finalState.orders).toHaveLength(0);
+    expect(finalState.selectedOrder).toBeNull();
+    expect(finalState.notifications).toHaveLength(0);
+    expect(finalState.unreadCount).toBe(0);
+    expect(finalState.loading).toBe(false);
+    expect(finalState.detailLoading).toBe(false);
+  });
+
+  test('useOrders resets automatically and discards in-flight requests when useSession switches to a different user.id', async () => {
+    useOrders.setState({
+      orders: [makeOrderSummary({ id: 'buyer-order-1' })],
+      selectedOrder: makeOrderDetail({ id: 'buyer-order-1' }),
+      notifications: [makeNotification('buyer-notif-1')],
+      unreadCount: 2,
+      roleFilter: 'BUYER',
+      listingIdFilter: 'listing-buyer',
+    });
+
+    let resolveBuyerOrders!: (v: unknown) => void;
+    let resolveBuyerDetail!: (v: unknown) => void;
+    let resolveBuyerNotifs!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBuyerOrders = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBuyerDetail = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBuyerNotifs = resolve;
+          }),
+      );
+
+    const pList = useOrders.getState().loadOrders({ role: 'BUYER' });
+    const pDetail = useOrders.getState().loadOrderDetail('buyer-order-secret');
+    const pNotif = useOrders.getState().loadNotifications();
+
+    // Switch directly to a different user.id while token remains truthy
+    act(() => {
+      useSession.setState({ token: 'seller-jwt-token', user: sellerUser, loading: false });
+    });
+
+    const afterSwitch = useOrders.getState();
+    expect(afterSwitch.orders).toHaveLength(0);
+    expect(afterSwitch.selectedOrder).toBeNull();
+    expect(afterSwitch.notifications).toHaveLength(0);
+    expect(afterSwitch.unreadCount).toBe(0);
+    expect(afterSwitch.roleFilter).toBe('ALL');
+    expect(afterSwitch.listingIdFilter).toBeNull();
+    expect(afterSwitch.loading).toBe(false);
+    expect(afterSwitch.detailLoading).toBe(false);
+
+    // Late in-flight responses from previous account must be discarded via bumped sessionEpoch
+    resolveBuyerOrders({
+      items: [makeOrderSummary({ id: 'leaked-buyer-order' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    resolveBuyerDetail(makeOrderDetail({ id: 'buyer-order-secret' }));
+    resolveBuyerNotifs({
+      items: [makeNotification('leaked-buyer-notif')],
+      unreadCount: 7,
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+    });
+
+    await Promise.all([pList, pDetail, pNotif]);
+
+    const finalState = useOrders.getState();
+    expect(finalState.orders).toHaveLength(0);
+    expect(finalState.selectedOrder).toBeNull();
+    expect(finalState.notifications).toHaveLength(0);
+    expect(finalState.unreadCount).toBe(0);
+    expect(finalState.loading).toBe(false);
+    expect(finalState.detailLoading).toBe(false);
+  });
 });
