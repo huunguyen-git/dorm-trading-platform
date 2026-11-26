@@ -117,7 +117,7 @@ public class DiscoveryService {
         return new ListingDtos.LocationsResponse(List.copyOf(items));
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public ListingDtos.ListingPageDto searchListings(SearchCriteria criteria) {
         SearchCriteria input = criteria != null
                 ? criteria
@@ -135,22 +135,49 @@ public class DiscoveryService {
         }
 
         int resolvedPage;
+        long resolvedOffset;
         if (input.page() != null) {
             resolvedPage = ListingValidation.validatePage(input.page());
+            resolvedOffset = (long) resolvedPage * resolvedSize;
+            if (resolvedOffset > MAX_LEGACY_OFFSET) {
+                throw new AuthFailure(400, "INVALID_INPUT", "Vị trí trang vượt quá giới hạn cho phép.");
+            }
         } else if (input.offset() != null) {
+            resolvedOffset = input.offset();
             resolvedPage = input.offset() / resolvedSize;
         } else {
             resolvedPage = 0;
+            resolvedOffset = 0L;
         }
 
         String resolvedType = normalizeType(input.type());
         String resolvedSort = normalizeSort(input.sort());
 
-        String trimmedQ = trimToNull(input.q());
-        String trimmedCategoryId = trimToNull(input.categoryId());
-        String trimmedCourseCode = trimToNull(input.courseCode());
-        String trimmedLocationCode = trimToNull(input.locationCode());
-        String trimmedLocation = trimToNull(input.location());
+        String trimmedQ = ListingValidation.optionalText(
+                input.q(),
+                ListingValidation.MAX_SEARCH_QUERY_LENGTH,
+                "Từ khóa tìm kiếm không được vượt quá " + ListingValidation.MAX_SEARCH_QUERY_LENGTH + " ký tự."
+        );
+        String trimmedCategoryId = ListingValidation.optionalText(
+                input.categoryId(),
+                ListingValidation.MAX_CATEGORY_ID_LENGTH,
+                "Mã danh mục không hợp lệ."
+        );
+        String trimmedCourseCode = ListingValidation.optionalText(
+                input.courseCode(),
+                ListingValidation.MAX_COURSE_CODE_LENGTH,
+                "Mã môn học không được vượt quá " + ListingValidation.MAX_COURSE_CODE_LENGTH + " ký tự."
+        );
+        String trimmedLocationCode = ListingValidation.optionalText(
+                input.locationCode(),
+                ListingValidation.MAX_LOCATION_CODE_LENGTH,
+                "Mã khu vực không hợp lệ."
+        );
+        String trimmedLocation = ListingValidation.optionalText(
+                input.location(),
+                ListingValidation.MAX_LOCATION_TEXT_LENGTH,
+                "Từ khóa khu vực không được vượt quá " + ListingValidation.MAX_LOCATION_TEXT_LENGTH + " ký tự."
+        );
 
         if (input.lat() != null || input.lng() != null) {
             ListingValidation.validateCoordinates(input.lat(), input.lng());
@@ -193,8 +220,8 @@ public class DiscoveryService {
             applyExactLocationCodeFilter = trimmedLocationCode != null;
         }
 
-        // Lazily expire overdue CONG_KHAI listings before running public discovery
-        lifecycleHelper.reconcileAllExpiredListings();
+        // Strictly read-only public discovery: filter overdue CONG_KHAI rows inline without mutating DB on GET;
+        // background ListingExpiryScheduler persists HET_HAN transitions in bounded batches.
         Instant now = lifecycleHelper.now();
         Timestamp nowTs = Timestamp.from(now);
 
@@ -277,6 +304,7 @@ public class DiscoveryService {
                     LEFT JOIN danh_mucs dm ON dm.ma_danh_muc = t.ma_danh_muc
                     LEFT JOIN khu_vucs k ON k.ma_khu_vuc = t.ma_khu_vuc
                     WHERE t.trang_thai = 'CONG_KHAI'
+                      AND u.trang_thai_tai_khoan NOT IN ('BI_KHOA', 'VO_HIEU_HOA')
                       AND (t.expires_at IS NULL OR t.expires_at > ?)
                       AND NOT EXISTS (
                           SELECT 1
@@ -292,23 +320,17 @@ public class DiscoveryService {
             String pattern = toContainsPattern(trimmedQ);
             cteSql.append("""
                       AND (
-                          t.tieu_de ILIKE ? ESCAPE '\\'
-                          OR t.mo_ta ILIKE ? ESCAPE '\\'
-                          OR t.ma_mon_hoc ILIKE ? ESCAPE '\\'
-                          OR t.ten_mon_hoc ILIKE ? ESCAPE '\\'
-                          OR t.tac_gia ILIKE ? ESCAPE '\\'
-                          OR EXISTS (
-                              SELECT 1
+                          (COALESCE(t.tieu_de, '') || E'\\n' || COALESCE(t.mo_ta, '') || E'\\n' || COALESCE(t.ma_mon_hoc, '') || E'\\n' || COALESCE(t.ten_mon_hoc, '') || E'\\n' || COALESCE(t.tac_gia, '')) ILIKE ? ESCAPE '\\'
+                          OR t.ma_tin = ANY(ARRAY(
+                              SELECT DISTINCT tdv_q.ma_tin
                               FROM tin_dang_do_vat tdv_q
                               JOIN do_vats dv_q ON dv_q.ma_vat = tdv_q.ma_vat
-                              WHERE tdv_q.ma_tin = t.ma_tin
-                                AND dv_q.ten ILIKE ? ESCAPE '\\'
-                          )
+                              WHERE dv_q.ten ILIKE ? ESCAPE '\\'
+                          ))
                       )
                     """);
-            for (int i = 0; i < 6; i++) {
-                cteParams.add(pattern);
-            }
+            cteParams.add(pattern);
+            cteParams.add(pattern);
         }
 
         if (trimmedCategoryId != null) {
@@ -415,7 +437,7 @@ public class DiscoveryService {
             dataParams.add(input.radiusKm());
         }
         dataParams.add(resolvedSize);
-        dataParams.add((long) resolvedPage * resolvedSize);
+        dataParams.add(resolvedOffset);
 
         List<ListingDtos.ListingSummaryDto> items = db.query(
                 dataSql.toString(),
@@ -427,7 +449,7 @@ public class DiscoveryService {
         return new ListingDtos.ListingPageDto(List.copyOf(items), resolvedPage, resolvedSize, totalElements, totalPages);
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public ListingDtos.ListingDetailDto getListingDetail(
             UUID listingId,
             Jwt jwt,
@@ -442,8 +464,6 @@ public class DiscoveryService {
             ListingValidation.validateCoordinates(lat, lng);
         }
 
-        // Lazily expire this specific CONG_KHAI listing if expires_at <= now (never closes GIU_CHO)
-        lifecycleHelper.reconcileExpiredListingById(listingId);
         Instant now = lifecycleHelper.now();
 
         List<DetailRow> rows = db.query(
@@ -480,6 +500,7 @@ public class DiscoveryService {
                     t.version,
                     u.ho_ten AS seller_display_name,
                     u.diem_uy_tin AS seller_reputation_score,
+                    u.trang_thai_tai_khoan AS seller_account_status,
                     seller_stats.avg_rating AS seller_avg_rating,
                     COALESCE(seller_stats.review_count, 0) AS seller_review_count
                 FROM tin_dangs t
@@ -507,11 +528,15 @@ public class DiscoveryService {
         DetailRow row = rows.getFirst();
         UUID viewerId = ListingValidation.optionalUserId(jwt);
         boolean isOwner = viewerId != null && viewerId.equals(row.sellerId());
+        boolean expiredPublic = ListingLifecycleHelper.isExpired(row.status(), row.expiresAt(), now);
+        String effectiveStatus = expiredPublic ? ListingDtos.ListingStatus.HET_HAN.name() : row.status();
 
+        boolean sellerActive = "HOAT_DONG".equals(row.sellerAccountStatus());
+        boolean sellerRestricted = "BI_KHOA".equals(row.sellerAccountStatus())
+                || "VO_HIEU_HOA".equals(row.sellerAccountStatus());
         if (!isOwner) {
-            boolean publiclyVisible = ListingDtos.ListingStatus.isPubliclyVisible(row.status());
-            boolean expiredPublic = ListingLifecycleHelper.isExpired(row.status(), row.expiresAt(), now);
-            if (!publiclyVisible || expiredPublic) {
+            boolean publiclyVisible = ListingDtos.ListingStatus.isPubliclyVisible(effectiveStatus);
+            if (sellerRestricted || !publiclyVisible) {
                 throw new AuthFailure(404, "LISTING_NOT_FOUND", "Tin đăng không tồn tại hoặc đã bị gỡ bỏ.");
             }
         }
@@ -567,7 +592,7 @@ public class DiscoveryService {
         int itemCount = linkedItems.size();
         boolean isCombo = ListingDtos.ListingType.BAN_COMBO.name().equals(row.listingType()) || itemCount >= 2;
         boolean isFree = row.priceVnd() == 0;
-        boolean renewalReminderDue = ListingLifecycleHelper.isRenewalReminderDue(row.status(), row.expiresAt(), now);
+        boolean renewalReminderDue = ListingLifecycleHelper.isRenewalReminderDue(effectiveStatus, row.expiresAt(), now);
 
         ListingDtos.ListingSummaryDto summary = new ListingDtos.ListingSummaryDto(
                 row.id(),
@@ -578,7 +603,7 @@ public class DiscoveryService {
                 row.listingType(),
                 isCombo,
                 isFree,
-                row.status(),
+                effectiveStatus,
                 row.categoryId(),
                 row.categoryName(),
                 row.courseCode(),
@@ -613,17 +638,17 @@ public class DiscoveryService {
                 )
                 : null;
 
-        boolean isPublic = ListingDtos.ListingStatus.CONG_KHAI.name().equals(row.status());
-        boolean isReserved = ListingDtos.ListingStatus.GIU_CHO.name().equals(row.status());
-        boolean isDraft = ListingDtos.ListingStatus.NHAP.name().equals(row.status());
-        boolean isPendingModeration = ListingDtos.ListingStatus.CHO_DUYET.name().equals(row.status());
-        boolean isWithdrawn = ListingDtos.ListingStatus.DA_RUT.name().equals(row.status());
-        boolean isExpired = ListingDtos.ListingStatus.HET_HAN.name().equals(row.status());
+        boolean isPublic = ListingDtos.ListingStatus.CONG_KHAI.name().equals(effectiveStatus);
+        boolean isReserved = ListingDtos.ListingStatus.GIU_CHO.name().equals(effectiveStatus);
+        boolean isDraft = ListingDtos.ListingStatus.NHAP.name().equals(effectiveStatus);
+        boolean isPendingModeration = ListingDtos.ListingStatus.CHO_DUYET.name().equals(effectiveStatus);
+        boolean isWithdrawn = ListingDtos.ListingStatus.DA_RUT.name().equals(effectiveStatus);
+        boolean isExpired = ListingDtos.ListingStatus.HET_HAN.name().equals(effectiveStatus);
         boolean isLockedStatus = isReserved
-                || ListingDtos.ListingStatus.KET_THUC.name().equals(row.status())
-                || ListingDtos.ListingStatus.AN.name().equals(row.status());
+                || ListingDtos.ListingStatus.KET_THUC.name().equals(effectiveStatus)
+                || ListingDtos.ListingStatus.AN.name().equals(effectiveStatus);
         boolean ownerCanMutate = isOwner && isActiveMember;
-        boolean buyerCanInteract = !isOwner && (jwt == null || isActiveMember);
+        boolean buyerCanInteract = !isOwner && sellerActive && (jwt == null || isActiveMember);
 
         ListingDtos.ListingViewerContextDto viewer = new ListingDtos.ListingViewerContextDto(
                 isOwner,
@@ -801,6 +826,7 @@ public class DiscoveryService {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 rs.getLong("version"),
+                rs.getString("seller_account_status"),
                 seller
         );
     }
@@ -947,6 +973,7 @@ public class DiscoveryService {
             Instant createdAt,
             Instant updatedAt,
             long version,
+            String sellerAccountStatus,
             ListingDtos.SellerPublicSummaryDto seller
     ) {
     }

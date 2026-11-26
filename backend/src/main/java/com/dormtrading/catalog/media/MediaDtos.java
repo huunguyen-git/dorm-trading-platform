@@ -2,6 +2,7 @@ package com.dormtrading.catalog.media;
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.core.io.Resource;
 
 public final class MediaDtos {
 
@@ -25,7 +26,9 @@ public final class MediaDtos {
             UUID id,
             String contentType,
             long sizeBytes,
-            byte[] bytes
+            String eTag,
+            boolean publiclyVisible,
+            Resource resource
     ) {
     }
 }

@@ -33,14 +33,17 @@ public final class ListingDtos {
         }
 
         public static boolean isActiveForQuota(String status) {
-            return CONG_KHAI.name().equals(status) || GIU_CHO.name().equals(status);
+            return CHO_DUYET.name().equals(status)
+                    || CONG_KHAI.name().equals(status)
+                    || GIU_CHO.name().equals(status);
         }
 
         public static boolean isActiveForInventoryLink(String status) {
             return NHAP.name().equals(status)
                     || CHO_DUYET.name().equals(status)
                     || CONG_KHAI.name().equals(status)
-                    || GIU_CHO.name().equals(status);
+                    || GIU_CHO.name().equals(status)
+                    || AN.name().equals(status);
         }
 
         public static boolean isPubliclyVisible(String status) {

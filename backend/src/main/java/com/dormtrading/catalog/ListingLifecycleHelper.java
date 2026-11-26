@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -26,8 +27,11 @@ public class ListingLifecycleHelper {
     public static final int HIGH_TIER_LIMIT = 10;
     public static final int LISTING_LIFETIME_DAYS = 30;
     public static final int RENEWAL_REMINDER_DAYS = 7;
+    public static final int DEFAULT_EXPIRY_RECONCILE_BATCH_SIZE = 100;
+    public static final int MAX_EXPIRY_RECONCILE_BATCH_SIZE = 1000;
 
     public static final Set<String> QUOTA_ACTIVE_STATUSES = Set.of(
+            ListingDtos.ListingStatus.CHO_DUYET.name(),
             ListingDtos.ListingStatus.CONG_KHAI.name(),
             ListingDtos.ListingStatus.GIU_CHO.name()
     );
@@ -36,21 +40,32 @@ public class ListingLifecycleHelper {
             ListingDtos.ListingStatus.NHAP.name(),
             ListingDtos.ListingStatus.CHO_DUYET.name(),
             ListingDtos.ListingStatus.CONG_KHAI.name(),
-            ListingDtos.ListingStatus.GIU_CHO.name()
+            ListingDtos.ListingStatus.GIU_CHO.name(),
+            ListingDtos.ListingStatus.AN.name()
     );
 
     private final JdbcTemplate db;
     private final Clock clock;
     private final ListingDtos.ModerationMode moderationMode;
+    private final int expiryReconcileBatchSize;
 
+    public ListingLifecycleHelper(JdbcTemplate db, Clock clock, String moderationMode) {
+        this(db, clock, moderationMode, DEFAULT_EXPIRY_RECONCILE_BATCH_SIZE);
+    }
+
+    @Autowired
     public ListingLifecycleHelper(
             JdbcTemplate db,
             Clock clock,
-            @Value("${app.catalog.moderation-mode:AUTO_PRECHECK}") String moderationMode
+            @Value("${app.catalog.moderation-mode:AUTO_PRECHECK}") String moderationMode,
+            @Value("${app.catalog.expiry-reconcile-batch-size:100}") int expiryReconcileBatchSize
     ) {
         this.db = db;
         this.clock = clock != null ? clock : Clock.systemUTC();
         this.moderationMode = ListingDtos.ModerationMode.fromConfig(moderationMode);
+        this.expiryReconcileBatchSize = expiryReconcileBatchSize > 0
+                ? Math.min(expiryReconcileBatchSize, MAX_EXPIRY_RECONCILE_BATCH_SIZE)
+                : DEFAULT_EXPIRY_RECONCILE_BATCH_SIZE;
     }
 
     public Instant now() {
@@ -248,12 +263,21 @@ public class ListingLifecycleHelper {
     }
 
     /**
-     * FR-13 expiry reconciliation across all sellers: selects overdue CONG_KHAI listings with
-     * ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED, transitions them to HET_HAN, and bumps
-     * do_vats.version for all linked items locked in ascending ma_vat order. Never closes GIU_CHO.
+     * FR-13 bounded-batch expiry reconciliation across sellers (for scheduled background job):
+     * selects up to {@code batchSize} overdue CONG_KHAI listings with ORDER BY ma_tin ASC
+     * LIMIT ? FOR UPDATE SKIP LOCKED, transitions them to HET_HAN, and bumps do_vats.version
+     * for all linked items locked in ascending ma_vat order. Never closes GIU_CHO.
      */
     @Transactional
     public int reconcileAllExpiredListings() {
+        return reconcileAllExpiredListings(expiryReconcileBatchSize);
+    }
+
+    @Transactional
+    public int reconcileAllExpiredListings(int batchSize) {
+        int safeBatchSize = batchSize > 0
+                ? Math.min(batchSize, MAX_EXPIRY_RECONCILE_BATCH_SIZE)
+                : DEFAULT_EXPIRY_RECONCILE_BATCH_SIZE;
         Instant currentInstant = now();
         Timestamp current = Timestamp.from(currentInstant);
         List<UUID> expiredIds = db.queryForList(
@@ -264,10 +288,12 @@ public class ListingLifecycleHelper {
                   AND expires_at IS NOT NULL
                   AND expires_at <= ?
                 ORDER BY ma_tin ASC
+                LIMIT ?
                 FOR UPDATE SKIP LOCKED
                 """,
                 UUID.class,
-                current
+                current,
+                safeBatchSize
         );
         if (expiredIds.isEmpty()) {
             return 0;
@@ -427,7 +453,7 @@ public class ListingLifecycleHelper {
     }
 
     /**
-     * FR-05 quota computation: reconciles expired listings first, then counts only active CONG_KHAI + GIU_CHO.
+     * FR-05 quota computation: reconciles expired listings first, then counts active CHO_DUYET + CONG_KHAI + GIU_CHO.
      */
     @Transactional
     public ListingDtos.ListingQuotaDto loadQuota(UUID sellerId) {
@@ -447,8 +473,8 @@ public class ListingLifecycleHelper {
     }
 
     /**
-     * Read-only active quota count (non-expired CONG_KHAI + GIU_CHO) when seller row is already
-     * locked and expired listings have already been reconciled inside the caller's transaction.
+     * Read-only active quota count (non-expired CONG_KHAI + GIU_CHO + CHO_DUYET) when seller row
+     * is already locked and expired listings have already been reconciled inside the caller's tx.
      */
     public ListingDtos.ListingQuotaDto loadQuotaForScore(UUID sellerId, int reputationScore) {
         Timestamp current = Timestamp.from(now());
@@ -458,7 +484,7 @@ public class ListingLifecycleHelper {
                 FROM tin_dangs
                 WHERE nguoi_dang_id = ?
                   AND (
-                      trang_thai = 'GIU_CHO'
+                      trang_thai IN ('CHO_DUYET', 'GIU_CHO')
                       OR (trang_thai = 'CONG_KHAI' AND (expires_at IS NULL OR expires_at > ?))
                   )
                 """,

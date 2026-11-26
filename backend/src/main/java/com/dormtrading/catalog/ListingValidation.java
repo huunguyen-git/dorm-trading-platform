@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 public final class ListingValidation {
@@ -17,11 +18,19 @@ public final class ListingValidation {
     public static final int MAX_COURSE_CODE_LENGTH = 50;
     public static final int MAX_COURSE_NAME_LENGTH = 200;
     public static final int MAX_AUTHOR_LENGTH = 200;
+    public static final int MAX_CATEGORY_ID_LENGTH = 50;
+    public static final int MAX_LOCATION_CODE_LENGTH = 50;
+    public static final int MAX_SEARCH_QUERY_LENGTH = 200;
     public static final int MAX_IMAGE_URL_LENGTH = 1000;
     public static final int MAX_IMAGES = 5;
     public static final int MAX_ITEMS_PER_LISTING = 20;
+    public static final int MAX_PAGE = 500;
     public static final int MAX_PAGE_SIZE = 100;
     public static final double EARTH_RADIUS_KM = 6371.0;
+
+    private static final Pattern RELATIVE_MEDIA_PATH_PATTERN = Pattern.compile(
+            "^/api/v1/media/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    );
 
     private ListingValidation() {
     }
@@ -103,6 +112,9 @@ public final class ListingValidation {
         if (trimmed.length() > MAX_IMAGE_URL_LENGTH) {
             throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được vượt quá 1000 ký tự.");
         }
+        if (RELATIVE_MEDIA_PATH_PATTERN.matcher(trimmed).matches()) {
+            return trimmed;
+        }
         try {
             URI uri = URI.create(trimmed);
             String scheme = uri.getScheme();
@@ -111,11 +123,11 @@ public final class ListingValidation {
                     || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
                     || authority == null
                     || authority.isBlank()) {
-                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
+                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http://, https:// hoặc đường dẫn /api/v1/media/{id} hợp lệ.");
             }
             return trimmed;
         } catch (IllegalArgumentException e) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
+            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http://, https:// hoặc đường dẫn /api/v1/media/{id} hợp lệ.");
         }
     }
 
@@ -200,7 +212,7 @@ public final class ListingValidation {
     }
 
     public static int validatePage(int page) {
-        if (page < 0) {
+        if (page < 0 || page > MAX_PAGE) {
             throw new AuthFailure(400, "INVALID_INPUT", "Số trang không hợp lệ.");
         }
         return page;

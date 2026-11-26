@@ -753,8 +753,16 @@ class ListingApiTest extends BaseIntegrationTest {
                 .post("/api/v1/listings/{id}/withdraw", comboId)
                 .then().statusCode(403);
         given().auth().oauth2(other.token())
-                .delete("/api/v1/listings/{id}", comboId)
+                .delete("/api/v1/listings/{id}?version=0", comboId)
                 .then().statusCode(403);
+
+        // Missing version on DELETE -> 400 INVALID_INPUT; wrong version -> 409 VERSION_CONFLICT
+        given().auth().oauth2(seller.token())
+                .delete("/api/v1/listings/{id}", comboId)
+                .then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().auth().oauth2(seller.token())
+                .delete("/api/v1/listings/{id}?version=99", comboId)
+                .then().statusCode(409).body("code", equalTo("VERSION_CONFLICT"));
 
         // Withdraw CONG_KHAI -> DA_RUT restores quota AND unlocks itemA in P1-03 without corrupting itemB!
         given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
@@ -827,7 +835,7 @@ class ListingApiTest extends BaseIntegrationTest {
                 UUID.randomUUID(), UUID.fromString(txListingId), seller.id(), other.id()
         );
         given().auth().oauth2(seller.token())
-                .delete("/api/v1/listings/{id}", txListingId)
+                .delete("/api/v1/listings/{id}?version=0", txListingId)
                 .then()
                 .statusCode(409)
                 .body("code", equalTo("LISTING_HAS_TRANSACTIONS"));
@@ -839,7 +847,7 @@ class ListingApiTest extends BaseIntegrationTest {
                 .post("/api/v1/listings/{id}/withdraw", txListingId)
                 .then().statusCode(409).body("code", equalTo("LISTING_LOCKED"));
         given().auth().oauth2(seller.token())
-                .delete("/api/v1/listings/{id}", txListingId)
+                .delete("/api/v1/listings/{id}?version=0", txListingId)
                 .then().statusCode(409).body("code", equalTo("LISTING_LOCKED"));
     }
 
@@ -1070,9 +1078,44 @@ class ListingApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(204);
 
-        // 5. Deleting item linked to moderation-hidden (AN) listing MUST be blocked (409) & preserve evidence link
+        // 5. Item linked to moderation-hidden (AN) listing MUST report canEdit=false, canDelete=false
+        // in both GET /inventory & GET /inventory/{id}, and MUST block BOTH PUT and DELETE (409) to protect evidence!
         given().auth().oauth2(tokenDay31)
-                .delete("/api/v1/inventory/{id}", itemOnHiddenListing)
+                .get("/api/v1/inventory")
+                .then()
+                .statusCode(200)
+                .body("find { it.id == '" + itemOnHiddenListing + "' }.linkedListingCount", equalTo(1))
+                .body("find { it.id == '" + itemOnHiddenListing + "' }.canEdit", equalTo(false))
+                .body("find { it.id == '" + itemOnHiddenListing + "' }.canDelete", equalTo(false));
+
+        given().auth().oauth2(tokenDay31)
+                .get("/api/v1/inventory/{id}", itemOnHiddenListing)
+                .then()
+                .statusCode(200)
+                .body("linkedListingCount", equalTo(1))
+                .body("canEdit", equalTo(false))
+                .body("canDelete", equalTo(false))
+                .body("linkedListings[0].trangThai", equalTo("AN"));
+
+        long hiddenItemVersion = db.queryForObject(
+                "SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemOnHiddenListing);
+        given().auth().oauth2(tokenDay31)
+                .contentType(ContentType.JSON)
+                .body(Map.of(
+                        "ten", "Cố tình sửa bằng chứng",
+                        "tinhTrang", "Sửa tình trạng",
+                        "hinhAnh", List.of("https://cdn.example.edu.vn/tampered.jpg"),
+                        "version", hiddenItemVersion
+                ))
+                .put("/api/v1/inventory/{id}", itemOnHiddenListing)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("ITEM_LINKED_TO_LISTING"));
+        assertThat(db.queryForObject("SELECT ten FROM do_vats WHERE ma_vat = ?", String.class, itemOnHiddenListing))
+                .isEqualTo("Vật chứng tin bị ẩn");
+
+        given().auth().oauth2(tokenDay31)
+                .delete("/api/v1/inventory/{id}?version={v}", itemOnHiddenListing, hiddenItemVersion)
                 .then()
                 .statusCode(409)
                 .body("code", equalTo("ITEM_LINKED_TO_LISTING"));
@@ -1083,6 +1126,96 @@ class ListingApiTest extends BaseIntegrationTest {
                 itemOnHiddenListing
         );
         assertThat(evidenceLinks).isEqualTo(1);
+    }
+
+    @Test
+    void fr13_directInventoryPutAndDeleteImmediatelyAfterDay30WithoutPriorGetAvoidsSelfInflictedVersionConflict() {
+        TestUser seller = createUser("Người Bán Direct PUT DELETE", true, 100);
+        UUID itemForDirectPut = createInventoryItem(seller.token(), "Quạt bàn PUT trực tiếp");
+        UUID siblingComboItem = createInventoryItem(seller.token(), "Bàn học combo đi kèm");
+        UUID itemForDirectDelete = createInventoryItem(seller.token(), "Đèn học DELETE trực tiếp");
+        UUID itemRemainingInDeletedCombo = createInventoryItem(seller.token(), "Giá sách còn lại trong combo");
+
+        Instant day0 = currentTime.get();
+
+        // Publish combo 1 (itemForDirectPut + siblingComboItem) -> both items at version = 1
+        String comboPutId = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(validPublishPayload("Combo quá hạn PUT thẳng", 150000, List.of(itemForDirectPut, siblingComboItem)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+
+        // Advance Clock +30 days + 2 minutes WITHOUT calling ANY GET endpoint first!
+        currentTime.set(day0.plus(30, ChronoUnit.DAYS).plus(2, ChronoUnit.MINUTES));
+        String tokenDay31 = relogin(seller);
+
+        // Stale version (0 instead of 1) MUST still fail with 409 VERSION_CONFLICT and roll back cleanly
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of(
+                        "tinhTrang", "Phiên bản cũ bị từ chối",
+                        "hinhAnh", List.of("https://cdn.example.edu.vn/stale.jpg"),
+                        "version", 0
+                ))
+                .put("/api/v1/inventory/{id}", itemForDirectPut)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
+        // Direct PUT with pre-expiry version=1 (NO prior GET!) MUST succeed -> version=2,
+        // overdue combo transitioned to HET_HAN, and sibling item's version bumped (1 -> 2)
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of(
+                        "tinhTrang", "Cập nhật thẳng ngay sau khi hết hạn 30 ngày",
+                        "hinhAnh", List.of("https://cdn.example.edu.vn/direct-put.jpg"),
+                        "version", 1
+                ))
+                .put("/api/v1/inventory/{id}", itemForDirectPut)
+                .then()
+                .statusCode(200)
+                .body("version", equalTo(2));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, UUID.fromString(comboPutId)))
+                .isEqualTo("HET_HAN");
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, siblingComboItem))
+                .isEqualTo(2L);
+
+        // Now test direct DELETE without prior GET on a second combo after another 30 days
+        Instant day31 = currentTime.get();
+        String comboDeleteId = given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(validPublishPayload("Combo quá hạn DELETE thẳng", 120000, List.of(itemForDirectDelete, itemRemainingInDeletedCombo)))
+                .post("/api/v1/listings")
+                .then().statusCode(201)
+                .extract().jsonPath().getString("listing.id");
+        // Both items now at version = 1
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemForDirectDelete))
+                .isEqualTo(1L);
+
+        currentTime.set(day31.plus(30, ChronoUnit.DAYS).plus(2, ChronoUnit.MINUTES));
+        String tokenDay61 = relogin(seller);
+
+        // Stale version=0 on direct DELETE -> 409 VERSION_CONFLICT
+        given().auth().oauth2(tokenDay61)
+                .delete("/api/v1/inventory/{id}?version=0", itemForDirectDelete)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
+        // Direct DELETE with pre-expiry version=1 (NO prior GET!) MUST succeed -> 204!
+        given().auth().oauth2(tokenDay61)
+                .delete("/api/v1/inventory/{id}?version=1", itemForDirectDelete)
+                .then()
+                .statusCode(204);
+
+        // Verify comboDeleteId became HET_HAN, recomputed hinh_thuc -> BAN_LE, AND bumped version (0 -> 1 expiry -> 2 detach)!
+        Map<String, Object> comboAfterDelete = db.queryForMap(
+                "SELECT trang_thai, hinh_thuc, version FROM tin_dangs WHERE ma_tin = ?",
+                UUID.fromString(comboDeleteId)
+        );
+        assertThat(comboAfterDelete.get("trang_thai")).isEqualTo("HET_HAN");
+        assertThat(comboAfterDelete.get("hinh_thuc")).isEqualTo("BAN_LE");
+        assertThat(((Number) comboAfterDelete.get("version")).longValue()).isEqualTo(2L);
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, itemRemainingInDeletedCombo))
+                .isEqualTo(2L);
     }
 
     @Test
@@ -1248,6 +1381,7 @@ class ListingApiTest extends BaseIntegrationTest {
                 .then().statusCode(204);
 
         // Immediately after Inventory deletion (even BEFORE /renew), HET_HAN combo listings must NOT report stale BAN_COMBO / isCombo=true
+        // AND tin_dangs.version must have bumped (1 -> 2) so stale concurrent mutations get 409 VERSION_CONFLICT
         given().auth().oauth2(tokenDay31)
                 .get("/api/v1/listings/{id}", paidComboId)
                 .then()
@@ -1255,7 +1389,8 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("status", equalTo("HET_HAN"))
                 .body("listingType", equalTo("BAN_LE"))
                 .body("isCombo", equalTo(false))
-                .body("itemCount", equalTo(1));
+                .body("itemCount", equalTo(1))
+                .body("version", equalTo(2));
 
         given().auth().oauth2(tokenDay31)
                 .get("/api/v1/listings/{id}", freeComboId)
@@ -1265,11 +1400,20 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("listingType", equalTo("CHO_TANG"))
                 .body("isCombo", equalTo(false))
                 .body("isFree", equalTo(true))
-                .body("itemCount", equalTo(1));
+                .body("itemCount", equalTo(1))
+                .body("version", equalTo(2));
 
-        // Renewing paidComboId (now 1 item) MUST recompute listingType -> BAN_LE & isCombo -> false
+        // Stale version=1 (before item detachment) MUST be rejected with 409 VERSION_CONFLICT
         given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
                 .body(Map.of("version", 1))
+                .post("/api/v1/listings/{id}/renew", paidComboId)
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
+        // Renewing paidComboId (now 1 item, version=2) MUST recompute listingType -> BAN_LE & isCombo -> false
+        given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
+                .body(Map.of("version", 2))
                 .post("/api/v1/listings/{id}/renew", paidComboId)
                 .then()
                 .statusCode(200)
@@ -1277,11 +1421,12 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("listing.listingType", equalTo("BAN_LE"))
                 .body("listing.isCombo", equalTo(false))
                 .body("listing.itemCount", equalTo(1))
-                .body("listing.renewalCount", equalTo(1));
+                .body("listing.renewalCount", equalTo(1))
+                .body("listing.version", equalTo(3));
 
-        // Renewing freeComboId (now 1 item, price 0) MUST recompute listingType -> CHO_TANG & isCombo -> false
+        // Renewing freeComboId (now 1 item, price 0, version=2) MUST recompute listingType -> CHO_TANG & isCombo -> false
         given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
-                .body(Map.of("version", 1))
+                .body(Map.of("version", 2))
                 .post("/api/v1/listings/{id}/renew", freeComboId)
                 .then()
                 .statusCode(200)
@@ -1290,7 +1435,8 @@ class ListingApiTest extends BaseIntegrationTest {
                 .body("listing.isCombo", equalTo(false))
                 .body("listing.isFree", equalTo(true))
                 .body("listing.itemCount", equalTo(1))
-                .body("listing.renewalCount", equalTo(1));
+                .body("listing.renewalCount", equalTo(1))
+                .body("listing.version", equalTo(3));
 
         // Overdue CONG_KHAI direct renew MUST still enforce FR-05 quota when 5/5 slots are taken
         // Publish 2 more listings on day 31 (total 5/5: overdueDirectRenewId, paidComboId, freeComboId + 2 fillers)
@@ -1326,10 +1472,10 @@ class ListingApiTest extends BaseIntegrationTest {
                 .statusCode(409)
                 .body("code", equalTo("QUOTA_EXCEEDED"));
 
-        // Free 1 quota slot (withdraw paidComboId), then set overdueDirectRenewId back to overdue CONG_KHAI v1
+        // Free 1 quota slot (withdraw paidComboId, currently at version=3), then set overdueDirectRenewId back to overdue CONG_KHAI v1
         // and reopen via PUT(action=PUBLISH) -> must bump do_vats.version (NFR-02)
         given().auth().oauth2(tokenDay31).contentType(ContentType.JSON)
-                .body(Map.of("version", 2))
+                .body(Map.of("version", 3))
                 .post("/api/v1/listings/{id}/withdraw", paidComboId)
                 .then().statusCode(200);
 

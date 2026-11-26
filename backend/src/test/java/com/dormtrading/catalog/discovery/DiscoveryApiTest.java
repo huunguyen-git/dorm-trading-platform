@@ -1,5 +1,6 @@
 package com.dormtrading.catalog.discovery;
 
+import com.dormtrading.catalog.ListingLifecycleHelper;
 import com.dormtrading.common.BaseIntegrationTest;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
@@ -47,6 +48,9 @@ class DiscoveryApiTest extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate db;
+
+    @Autowired
+    private ListingLifecycleHelper lifecycleHelper;
 
     @MockitoBean
     private JavaMailSender mail;
@@ -788,13 +792,20 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .body("page", equalTo(2))
                 .body("items.id", contains(l3.toString()));
 
-        // Legacy offset compatibility (?offset=2&size=2 -> page 1; ?offset=0 -> page 0)
+        // Legacy offset compatibility: ?offset=2&size=2 -> page 1; ?offset=1&size=2 -> exact SQL OFFSET 1 (not truncated to 0!)
         given().queryParam("q", tag).queryParam("sort", "price_asc").queryParam("offset", 2).queryParam("size", 2)
                 .get("/api/v1/listings")
                 .then()
                 .statusCode(200)
                 .body("page", equalTo(1))
                 .body("items.id", contains(l1.toString(), l5.toString()));
+
+        given().queryParam("q", tag).queryParam("sort", "price_asc").queryParam("offset", 1).queryParam("size", 2)
+                .get("/api/v1/listings")
+                .then()
+                .statusCode(200)
+                .body("page", equalTo(0))
+                .body("items.id", contains(l4.toString(), l1.toString()));
 
         given().queryParam("q", tag).queryParam("offset", 0)
                 .get("/api/v1/listings")
@@ -803,20 +814,34 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .body("page", equalTo(0))
                 .body("items", hasSize(5));
 
-        // Invalid sort / page / size
+        // Invalid sort / page / size / huge OFFSET DoS / overlong search params -> 400 INVALID_INPUT
         given().queryParam("sort", "most_popular")
                 .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
         given().queryParam("page", -1)
+                .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().queryParam("page", Integer.MAX_VALUE).queryParam("size", 50)
+                .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().queryParam("page", 201).queryParam("size", 50)
                 .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
         given().queryParam("size", 0)
                 .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
         given().queryParam("size", 51)
                 .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().queryParam("q", "a".repeat(201))
+                .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().queryParam("courseCode", "C".repeat(51))
+                .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().queryParam("location", "L".repeat(256))
+                .get("/api/v1/listings").then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
     }
 
     @Test
-    void discoveryExcludesNonPublicExpiredAndSharedUnavailableItemListings() {
+    void discoveryExcludesNonPublicExpiredLockedSellerAndSharedUnavailableItemListingsReadOnly() {
         TestUser seller = createUser("Đỗ Thị Ẩn Tin", "HOAT_DONG", 120);
+        TestUser lockedSeller = createUser("Nguyễn Văn Bị Khóa", "BI_KHOA", 40);
+        TestUser disabledSeller = createUser("Lê Văn Vô Hiệu", "HOAT_DONG", 50);
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'VO_HIEU_HOA' WHERE user_id = ?", disabledSeller.id());
+        TestUser activeBuyer = createUser("Trần Văn Mua Hàng", "HOAT_DONG", 100);
         Instant now = currentTime.get();
         Instant future = now.plus(20, ChronoUnit.DAYS);
         Instant past = now.minus(1, ChronoUnit.HOURS);
@@ -830,6 +855,14 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 "BAN_LE", "CONG_KHAI", "DO_GIA_DUNG", null, null, null, "UIT", "UIT", null, null,
                 List.of("https://img.example/v.jpg"), now, future, null, List.of(availableItem));
 
+        // CONG_KHAI listing of a BI_KHOA or VO_HIEU_HOA seller -> MUST be excluded from public search AND return 404 to non-owners
+        UUID lockedSellerListing = createListing(lockedSeller.id(), "Locked Seller " + tag, "Desc", "Mới", 100000,
+                "BAN_LE", "CONG_KHAI", "DO_GIA_DUNG", null, null, null, "UIT", "UIT", null, null,
+                List.of("https://img.example/locked.jpg"), now, future, null, List.of());
+        UUID disabledSellerListing = createListing(disabledSeller.id(), "Disabled Seller " + tag, "Desc", "Mới", 100000,
+                "BAN_LE", "CONG_KHAI", "DO_GIA_DUNG", null, null, null, "UIT", "UIT", null, null,
+                List.of("https://img.example/disabled.jpg"), now, future, null, List.of());
+
         // Non-public statuses
         for (String status : List.of("NHAP", "CHO_DUYET", "DA_RUT", "HET_HAN", "AN", "KET_THUC", "GIU_CHO")) {
             createListing(seller.id(), "Status " + status + " " + tag, "Desc", "Mới", 100000,
@@ -837,7 +870,7 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                     List.of("https://img.example/s.jpg"), now, future, null, List.of());
         }
 
-        // Expired CONG_KHAI -> must be lazily reconciled to HET_HAN & excluded
+        // Expired CONG_KHAI -> excluded by read-only SQL without mutating DB on anonymous GET
         UUID expiredPublic = createListing(seller.id(), "Expired " + tag, "Desc", "Mới", 100000,
                 "BAN_LE", "CONG_KHAI", "DO_GIA_DUNG", null, null, null, "UIT", "UIT", null, null,
                 List.of("https://img.example/exp.jpg"), now.minus(31, ChronoUnit.DAYS), past, null, List.of());
@@ -864,11 +897,35 @@ class DiscoveryApiTest extends BaseIntegrationTest {
                 .body("items[0].id", equalTo(visibleListing.toString()))
                 .body("items[0].hasUnavailableItems", equalTo(false));
 
-        // Verify FR-13 lazy reconciliation state in DB
+        // Anonymous GET /api/v1/listings MUST NOT perform write TX on DB
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, expiredPublic))
+                .isEqualTo("CONG_KHAI");
+
+        // Bounded background reconciliation transitions overdue CONG_KHAI -> HET_HAN while leaving GIU_CHO untouched
+        int reconciled = lifecycleHelper.reconcileAllExpiredListings(50);
+        assertThat(reconciled).isGreaterThanOrEqualTo(1);
         assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, expiredPublic))
                 .isEqualTo("HET_HAN");
         assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, overdueReserved))
                 .isEqualTo("GIU_CHO");
+
+        // BI_KHOA & VO_HIEU_HOA seller listings return 404 to anonymous & active buyers (never expose canReserve=true)
+        given().get("/api/v1/listings/{id}", lockedSellerListing).then()
+                .statusCode(404).body("code", equalTo("LISTING_NOT_FOUND"));
+        given().auth().oauth2(activeBuyer.token()).get("/api/v1/listings/{id}", lockedSellerListing).then()
+                .statusCode(404).body("code", equalTo("LISTING_NOT_FOUND"));
+        given().get("/api/v1/listings/{id}", disabledSellerListing).then()
+                .statusCode(404).body("code", equalTo("LISTING_NOT_FOUND"));
+        given().auth().oauth2(activeBuyer.token()).get("/api/v1/listings/{id}", disabledSellerListing).then()
+                .statusCode(404).body("code", equalTo("LISTING_NOT_FOUND"));
+        // Locked seller can still inspect own listing read-only with all mutation flags disabled
+        given().auth().oauth2(lockedSeller.token()).get("/api/v1/listings/{id}", lockedSellerListing).then()
+                .statusCode(200)
+                .body("viewer.isOwner", equalTo(true))
+                .body("viewer.canEdit", equalTo(false))
+                .body("viewer.canWithdraw", equalTo(false))
+                .body("viewer.canDelete", equalTo(false))
+                .body("viewer.canReserve", equalTo(false));
     }
 
     @Test

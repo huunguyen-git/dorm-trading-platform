@@ -117,16 +117,92 @@ class V6MigrationIntegrationTest {
                     "idx_tin_dang_do_vat_ma_vat",
                     "idx_danh_mucs_cha",
                     "idx_tin_dangs_nguoi_dang_trang_thai",
-                    "idx_tin_dangs_public_created",
+                    "idx_tin_dangs_public_published",
                     "idx_tin_dangs_public_price",
                     "idx_tin_dangs_public_category",
-                    "idx_tin_dangs_public_course",
+                    "idx_tin_dangs_public_course_trgm",
+                    "idx_tin_dangs_public_search_trgm",
+                    "idx_tin_dangs_public_location_trgm",
+                    "idx_do_vats_ten_trgm",
                     "idx_tin_dangs_public_zone",
                     "idx_tin_dangs_expires_at",
                     "idx_danh_gias_seller_approved",
                     "idx_media_files_owner"
             );
+
+            try (var rs = stmt.executeQuery(
+                    "SELECT indexdef FROM pg_indexes WHERE schemaname = '" + schema + "' AND indexname = 'idx_tin_dangs_public_published'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).contains("COALESCE(published_at, created_at)");
+            }
+            try (var rs = stmt.executeQuery(
+                    "SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'")) {
+                assertThat(rs.next()).isTrue();
+            }
+
+            // Seed 2000 realistic listings & inventory items + VACUUM ANALYZE (flushes GIN pending list)
+            // so PostgreSQL 16's real cost-based planner chooses V6 indexes naturally without planner overrides
+            stmt.execute("SET search_path TO " + schema + ", public");
+            UUID seedUser = UUID.randomUUID();
+            stmt.execute(
+                    "INSERT INTO thanh_viens(user_id, email, mat_khau_hash, ho_ten, mssv, trang_thai_tai_khoan) " +
+                            "VALUES ('" + seedUser + "', 'planner@student.edu.vn', 'hash', 'Planner User', '23529999', 'HOAT_DONG')"
+            );
+            stmt.execute(
+                    "INSERT INTO tin_dangs(ma_tin, nguoi_dang_id, tieu_de, mo_ta, ma_mon_hoc, ten_mon_hoc, tac_gia, khu_vuc, gia_vnd, trang_thai, published_at) " +
+                            "SELECT gen_random_uuid(), '" + seedUser + "', " +
+                            "  'Do dung phong tro so ' || g, " +
+                            "  'Mo ta chi tiet san pham sinh vien ' || g, " +
+                            "  CASE WHEN g = 42 THEN 'SE100' ELSE 'CS' || (1000 + g) END, " +
+                            "  CASE WHEN g = 42 THEN 'Nhap mon Cong nghe phan mem' ELSE 'Mon hoc so ' || g END, " +
+                            "  CASE WHEN g = 42 THEN 'Ian Sommerville' ELSE 'Tac gia ' || g END, " +
+                            "  'KTX Khu A toa B' || (g % 10), " +
+                            "  10000 + (g * 1000), 'CONG_KHAI', CURRENT_TIMESTAMP - (g || ' minutes')::interval " +
+                            "FROM generate_series(1, 2000) AS g"
+            );
+            stmt.execute(
+                    "INSERT INTO do_vats(ma_vat, user_id, ten, tinh_trang, hinh_anh, trang_thai) " +
+                            "SELECT gen_random_uuid(), '" + seedUser + "', " +
+                            "  CASE WHEN g = 42 THEN 'Giao trinh SE100 ban in dep' ELSE 'Vat dung sinh vien ' || g END, " +
+                            "  'Moi 95%', ARRAY['/api/v1/media/' || gen_random_uuid()], 'KHA_DUNG' " +
+                            "FROM generate_series(1, 2000) AS g"
+            );
+            stmt.execute("VACUUM ANALYZE tin_dangs");
+            stmt.execute("VACUUM ANALYZE do_vats");
+            stmt.execute("VACUUM ANALYZE tin_dang_do_vat");
+
+            String newestPlan = explainPlan(stmt,
+                    "SELECT ma_tin FROM tin_dangs WHERE trang_thai = 'CONG_KHAI' " +
+                            "ORDER BY COALESCE(published_at, created_at) DESC, ma_tin DESC LIMIT 20");
+            assertThat(newestPlan).contains("idx_tin_dangs_public_published");
+
+            String coursePlan = explainPlan(stmt,
+                    "SELECT ma_tin FROM tin_dangs WHERE trang_thai = 'CONG_KHAI' AND ma_mon_hoc ILIKE '%SE100%' ESCAPE '\\'");
+            assertThat(coursePlan).contains("idx_tin_dangs_public_course_trgm");
+
+            String combinedSearchPlan = explainPlan(stmt,
+                    "SELECT t.ma_tin FROM tin_dangs t WHERE t.trang_thai = 'CONG_KHAI' AND (" +
+                            "(COALESCE(t.tieu_de, '') || E'\\n' || COALESCE(t.mo_ta, '') || E'\\n' || COALESCE(t.ma_mon_hoc, '') || E'\\n' || COALESCE(t.ten_mon_hoc, '') || E'\\n' || COALESCE(t.tac_gia, '')) ILIKE '%Sommerville%' ESCAPE '\\' " +
+                            "OR t.ma_tin = ANY(ARRAY(SELECT DISTINCT tdv_q.ma_tin FROM tin_dang_do_vat tdv_q JOIN do_vats dv_q ON dv_q.ma_vat = tdv_q.ma_vat WHERE dv_q.ten ILIKE '%Sommerville%' ESCAPE '\\'))" +
+                            ")");
+            assertThat(combinedSearchPlan)
+                    .contains("idx_tin_dangs_public_search_trgm")
+                    .contains("BitmapOr");
+
+            String itemNamePlan = explainPlan(stmt,
+                    "SELECT ma_vat FROM do_vats WHERE ten ILIKE '%SE100%' ESCAPE '\\'");
+            assertThat(itemNamePlan).contains("idx_do_vats_ten_trgm");
         }
+    }
+
+    private static String explainPlan(Statement stmt, String sql) throws SQLException {
+        StringBuilder plan = new StringBuilder();
+        try (var rs = stmt.executeQuery("EXPLAIN " + sql)) {
+            while (rs.next()) {
+                plan.append(rs.getString(1)).append('\n');
+            }
+        }
+        return plan.toString();
     }
 
     @Test

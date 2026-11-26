@@ -82,33 +82,48 @@ CREATE TABLE IF NOT EXISTS media_files (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Chỉ mục tối ưu truy vấn hạn mức, khám phá công khai, hết hạn FR-13 & đánh giá người bán
+-- 5. Chỉ mục tối ưu truy vấn hạn mức, khám phá công khai, tìm kiếm ILIKE, hết hạn FR-13 & đánh giá người bán
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
 CREATE INDEX IF NOT EXISTS idx_tin_dang_do_vat_ma_vat ON tin_dang_do_vat(ma_vat);
 CREATE INDEX IF NOT EXISTS idx_danh_mucs_cha ON danh_mucs(danh_muc_cha_id);
 CREATE INDEX IF NOT EXISTS idx_tin_dangs_nguoi_dang_trang_thai ON tin_dangs(nguoi_dang_id, trang_thai);
 
-CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_created
-  ON tin_dangs(created_at DESC, ma_tin)
+CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_published
+  ON tin_dangs((COALESCE(published_at, created_at)) DESC, ma_tin DESC)
   WHERE trang_thai = 'CONG_KHAI';
 
 CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_price
-  ON tin_dangs(gia_vnd, created_at DESC)
+  ON tin_dangs(gia_vnd, (COALESCE(published_at, created_at)) DESC, ma_tin DESC)
   WHERE trang_thai = 'CONG_KHAI';
 
 CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_category
   ON tin_dangs(ma_danh_muc)
   WHERE trang_thai = 'CONG_KHAI';
 
-CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_course
-  ON tin_dangs(lower(ma_mon_hoc))
-  WHERE trang_thai = 'CONG_KHAI' AND ma_mon_hoc IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_course_trgm
+  ON tin_dangs USING gin (ma_mon_hoc public.gin_trgm_ops)
+  WHERE trang_thai = 'CONG_KHAI';
+
+CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_search_trgm
+  ON tin_dangs USING gin (
+    (COALESCE(tieu_de, '') || E'\n' || COALESCE(mo_ta, '') || E'\n' || COALESCE(ma_mon_hoc, '') || E'\n' || COALESCE(ten_mon_hoc, '') || E'\n' || COALESCE(tac_gia, '')) public.gin_trgm_ops
+  )
+  WHERE trang_thai = 'CONG_KHAI';
+
+CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_location_trgm
+  ON tin_dangs USING gin (khu_vuc public.gin_trgm_ops)
+  WHERE trang_thai = 'CONG_KHAI';
+
+CREATE INDEX IF NOT EXISTS idx_do_vats_ten_trgm
+  ON do_vats USING gin (ten public.gin_trgm_ops);
 
 CREATE INDEX IF NOT EXISTS idx_tin_dangs_public_zone
   ON tin_dangs(ma_khu_vuc)
   WHERE trang_thai = 'CONG_KHAI' AND ma_khu_vuc IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_tin_dangs_expires_at
-  ON tin_dangs(expires_at)
+  ON tin_dangs(expires_at, ma_tin)
   WHERE trang_thai = 'CONG_KHAI' AND expires_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_danh_gias_seller_approved

@@ -308,7 +308,7 @@ public class ListingService {
         boolean transitioningFromPendingToPublic = wantsPublish
                 && ListingDtos.ListingStatus.CHO_DUYET.name().equals(effectiveStatus)
                 && lifecycleHelper.moderationMode() == ListingDtos.ModerationMode.AUTO_PRECHECK;
-        boolean requiresQuotaCheck = transitioningFromInactiveToPublish || transitioningFromPendingToPublic;
+        boolean requiresQuotaCheck = transitioningFromInactiveToPublish;
         boolean requiresFullValidation = wantsPublish || currentlyActivePublicOrPending;
 
         ValidatedFields fields = validateListingFields(
@@ -455,15 +455,18 @@ public class ListingService {
 
         // Lock order (1): thanh_viens FOR UPDATE
         LockedSeller seller = lockAndVerifyActiveSeller(sellerId);
-        // Lock order (2a): overdue tin_dangs ORDER BY ma_tin ASC FOR UPDATE SKIP LOCKED
-        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(sellerId, now);
+        // Lock order (2a): expire seller's other overdue CONG_KHAI listings without bumping target listing's version
+        List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSellerExcluding(sellerId, listingId, now);
 
         // Lock order (2b): target tin_dangs FOR UPDATE
         LockedListing current = lockListingForUpdate(listingId);
         assertOwner(current, sellerId);
         assertNotLocked(current);
 
-        if (!PUBLISHABLE_SOURCE_STATUSES.contains(current.status())) {
+        String effectiveStatus = ListingLifecycleHelper.isExpired(current.status(), current.expiresAt(), now)
+                ? ListingDtos.ListingStatus.HET_HAN.name()
+                : current.status();
+        if (!PUBLISHABLE_SOURCE_STATUSES.contains(effectiveStatus)) {
             throw new AuthFailure(
                     409,
                     "INVALID_STATE_TRANSITION",
@@ -767,6 +770,9 @@ public class ListingService {
         if (listingId == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mã tin đăng không hợp lệ.");
         }
+        if (expectedVersion == null) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Thiếu thông tin phiên bản dữ liệu (version).");
+        }
 
         // Lock order (1): thanh_viens FOR UPDATE
         lockAndVerifyActiveSeller(sellerId);
@@ -784,7 +790,7 @@ public class ListingService {
             );
         }
 
-        if (expectedVersion != null && !expectedVersion.equals(current.version())) {
+        if (!expectedVersion.equals(current.version())) {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Tin đăng đã thay đổi bởi thao tác khác. Vui lòng làm mới.");
         }
 

@@ -202,11 +202,39 @@ class ListingLifecycleHelperTest {
     void validatesUrlsPriceRangeLocationRadiusAndHaversineDistance() {
         assertThat(ListingValidation.validateImageUrl(" https://example.com/a.jpg "))
                 .isEqualTo("https://example.com/a.jpg");
+        String mediaPath = "/api/v1/media/" + UUID.randomUUID();
+        assertThat(ListingValidation.validateImageUrl(" " + mediaPath + " "))
+                .isEqualTo(mediaPath);
 
         assertThatThrownBy(() -> ListingValidation.validateImageUrl("javascript:alert(1)"))
                 .isInstanceOf(AuthFailure.class)
                 .extracting("status", "code")
                 .containsExactly(400, "INVALID_INPUT");
+        assertThatThrownBy(() -> ListingValidation.validateImageUrl("/api/v1/media/../secret"))
+                .isInstanceOf(AuthFailure.class)
+                .extracting("status", "code")
+                .containsExactly(400, "INVALID_INPUT");
+        assertThatThrownBy(() -> ListingValidation.validateImageUrl("/etc/passwd"))
+                .isInstanceOf(AuthFailure.class)
+                .extracting("status", "code")
+                .containsExactly(400, "INVALID_INPUT");
+
+        // Page upper bound prevents giant OFFSET DoS
+        assertThat(ListingValidation.validatePage(0)).isEqualTo(0);
+        assertThat(ListingValidation.validatePage(ListingValidation.MAX_PAGE)).isEqualTo(ListingValidation.MAX_PAGE);
+        assertThatThrownBy(() -> ListingValidation.validatePage(ListingValidation.MAX_PAGE + 1))
+                .isInstanceOf(AuthFailure.class)
+                .extracting("status", "code")
+                .containsExactly(400, "INVALID_INPUT");
+        assertThatThrownBy(() -> ListingValidation.validatePage(Integer.MAX_VALUE))
+                .isInstanceOf(AuthFailure.class)
+                .extracting("status", "code")
+                .containsExactly(400, "INVALID_INPUT");
+
+        // Quota and inventory-link status sets include CHO_DUYET and AN respectively
+        assertThat(ListingLifecycleHelper.QUOTA_ACTIVE_STATUSES).containsExactlyInAnyOrder("CHO_DUYET", "CONG_KHAI", "GIU_CHO");
+        assertThat(ListingLifecycleHelper.INVENTORY_ACTIVE_STATUSES)
+                .containsExactlyInAnyOrder("NHAP", "CHO_DUYET", "CONG_KHAI", "GIU_CHO", "AN");
 
         assertThatThrownBy(() -> ListingValidation.validatePriceRange(200000, 100000))
                 .isInstanceOf(AuthFailure.class)
@@ -235,5 +263,21 @@ class ListingLifecycleHelperTest {
         UUID id2 = UUID.randomUUID();
         assertThat(ListingValidation.deduplicateItemIds(List.of(id1, id2, id1), true))
                 .containsExactly(id1, id2);
+    }
+
+    @Test
+    void reconcileAllExpiredListingsEnforcesBatchLimit() {
+        when(db.queryForList(anyString(), eq(UUID.class), eq(Timestamp.from(FIXED_NOW)), eq(25)))
+                .thenReturn(List.of());
+
+        assertThat(helper.reconcileAllExpiredListings(25)).isEqualTo(0);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(db).queryForList(sqlCaptor.capture(), eq(UUID.class), eq(Timestamp.from(FIXED_NOW)), eq(25));
+        assertThat(sqlCaptor.getValue())
+                .contains("trang_thai = 'CONG_KHAI'")
+                .contains("ORDER BY ma_tin ASC")
+                .contains("LIMIT ?")
+                .contains("FOR UPDATE SKIP LOCKED");
     }
 }
