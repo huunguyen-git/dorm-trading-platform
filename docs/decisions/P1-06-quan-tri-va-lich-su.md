@@ -15,14 +15,14 @@ V1 có bảng vai trò theo khoảng hiệu lực và quyết định chỉ tham
 3. Thang phạt dùng `version` và khóa hàng để không ghi đè bản sửa mới. Tên duy nhất theo `lower(btrim(ten))`; điểm/version kiểm tra kiểu JSON nguyên trước khi chuyển sang PostgreSQL, không chấp nhận Jackson ép số thập phân thành số nguyên. Tìm kiếm áp dụng tên và mô tả.
 4. Quyết định chụp tên/điểm/mô tả mức phạt bằng trigger DB lúc insert. Khóa `FOR SHARE` trên mức phạt để đồng bộ với sửa/ngừng; mức đã ngừng không dùng cho quyết định mới. Reference và snapshot của quyết định đã lưu không được sửa. Cách này bảo vệ cả các caller P2-06 về sau, không chỉ service hiện tại.
 5. `governance_audit` lưu actor ID/tên tại thời điểm thao tác, action, đối tượng, timestamp, JSON trước/sau. Không có API sửa/xóa audit và không ghi hash mật khẩu/token/ảnh thẻ. UI chỉ dịch trường enum; tên/mô tả tự do phải hiển thị nguyên văn và lookup không đi qua prototype.
-6. V5 giữ khóa của sáu mức mẫu V2 để bảo toàn FK nhưng chuyển `NGUNG_SU_DUNG`; không nạp mức mới hoặc xem số mẫu là chính sách đã duyệt. Quản trị viên cấp cao tạo mức áp dụng của mình qua UC-40. Giữ nguyên V1–V4.
+6. V6 giữ khóa của sáu mức mẫu V2 để bảo toàn FK nhưng chuyển `NGUNG_SU_DUNG`; không nạp mức mới hoặc xem số mẫu là chính sách đã duyệt. Quản trị viên cấp cao tạo mức áp dụng của mình qua UC-40. Giữ nguyên V1–V5.
 
 ## Tác động và giới hạn
 
-- V5 bổ sung `bao_caos.nguoi_xu_ly_id`, mô tả/version/ràng buộc mức phạt, audit và snapshot quyết định. P2-06 dùng các cột này thay vì suy ra điểm quyết định cũ từ thang phạt hiện tại.
-- Khi nâng DB có quyết định cũ, chỉ backfill được từ giá trị mức phạt hiện có; giá trị lịch sử chưa từng lưu không thể khôi phục. Backfill trước khi ngừng seed. Có test nâng V4→V5 trong schema riêng và xóa schema sau test.
+- V6 bổ sung `bao_caos.nguoi_xu_ly_id`, mô tả/version/ràng buộc mức phạt, audit và snapshot quyết định. P2-06 dùng các cột này thay vì suy ra điểm quyết định cũ từ thang phạt hiện tại.
+- Khi nâng DB có quyết định cũ, chỉ backfill được từ giá trị mức phạt hiện có; giá trị lịch sử chưa từng lưu không thể khôi phục. Backfill trước khi ngừng seed. Test nâng V5→V6 dùng schema riêng và xóa schema sau test; chưa chạy lại sau rebase (cần JDK 21).
 - Không xóa mức phạt hoặc kích hoạt lại mức đã ngừng: UC-40 không có hai thao tác đó. Không tự tính lại uy tín hoặc triển khai xử lý báo cáo Phase 2 trong task này.
-- Chi tiết hợp đồng, kết quả 37 test backend/9 test web và smoke client/API thật nằm tại [spec P1-06](../specs/P1-06.md).
+- Chi tiết hợp đồng, kết quả 37 test backend/17 test web và smoke client/API thật nằm tại [spec P1-06](../specs/P1-06.md).
 
 ## Phương án không chọn
 

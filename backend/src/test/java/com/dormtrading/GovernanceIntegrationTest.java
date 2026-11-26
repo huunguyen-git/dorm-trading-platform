@@ -321,17 +321,17 @@ class GovernanceIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void upgradesV4BackfillsExistingDecisionBeforeDiscontinuingAllSixSamples() throws Exception {
+    void upgradesV5BackfillsExistingDecisionBeforeDiscontinuingAllSixSamples() throws Exception {
         var pg = PostgresTestContainer.getInstance();
         String schema = "gov_upgrade_" + UUID.randomUUID().toString().replace("-", "");
         var config = Flyway.configure().dataSource(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword()).schemas(schema).defaultSchema(schema);
         try {
-            config.target("4").load().migrate();
+            config.target("5").load().migrate();
             try (var connection = DriverManager.getConnection(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword()); var sql = connection.createStatement()) {
                 sql.execute("set search_path to " + schema);
                 sql.execute("insert into thanh_viens(user_id,email,mat_khau_hash,ho_ten,mssv) values ('" + senior + "','legacy@uni.edu.vn','unused','Legacy','LEGACY')");
                 sql.execute("insert into quyet_dinhs(nguoi_ra_quyet_dinh_id,ma_thang_phat,ket_luan,can_cu) values ('" + senior + "','TP_BO_HEN_LAN_1','legacy','legacy')");
-                config.target("5").load().migrate();
+                config.target("6").load().migrate();
                 try (var rows = sql.executeQuery("select q.ten_thang_phat_snapshot,q.diem_tru_snapshot,q.mo_ta_thang_phat_snapshot,p.ten,p.diem_tru,p.trang_thai "
                         + "from quyet_dinhs q join thang_phats p using(ma_thang_phat)")) {
                     assertThat(rows.next()).isTrue();
