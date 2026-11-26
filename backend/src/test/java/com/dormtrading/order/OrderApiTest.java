@@ -1153,7 +1153,7 @@ class OrderApiTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemWithdraw))
                 .isEqualTo("KHA_DUNG");
 
-        // UC-09 regression (V7 ON DELETE SET NULL): after withdraw listing, seller CAN delete item (204)
+        // UC-09 regression (V10 ON DELETE SET NULL): after withdraw listing, seller CAN delete item (204)
         // AND cancelled order STILL preserves historical item snapshot & itemCount == 1
         given()
                 .auth().oauth2(seller.token())

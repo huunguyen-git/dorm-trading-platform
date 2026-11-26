@@ -8,13 +8,18 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class V7MigrationIntegrationTest extends BaseIntegrationTest {
+class V10MigrationIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate db;
 
     @Test
-    void migrationV7CreatesOrderTablesColumnsConstraintsAndPartialUniqueIndexes() {
+    void migrationV10CreatesOrderTablesColumnsConstraintsAndPartialUniqueIndexes() {
+        Boolean v10Applied = db.queryForObject(
+                "SELECT success FROM flyway_schema_history WHERE version = '10'",
+                Boolean.class
+        );
+        assertThat(v10Applied).isTrue();
         List<String> tables = db.queryForList(
                 """
                 SELECT table_name

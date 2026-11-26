@@ -1,6 +1,6 @@
 # P2-04, P2-05 · Giữ chỗ nguyên tử, hẹn lịch giao nhận hai bên và thông báo bắt đầu giao
 
-Ngày: **25–26/11/2026** · Trạng thái: **Đã triển khai, xử lý review PR #34 và kiểm chứng tự động (Chờ review)** trên nhánh `feat/p2-04-p2-05-order-reservation` (tách từ `origin/feat/p2-01-p2-02-listings-discovery`; giữ migration `V7`, đổi sang `V10` khi rebase lên `main` sau khi PR #33 & #25 merge).
+Ngày: **25–26/11/2026** · Trạng thái: **Đã triển khai, xử lý review PR #34 và kiểm chứng tự động (Chờ review)** trên nhánh `feat/p2-04-p2-05-order-reservation` (xếp chồng trên `origin/feat/p2-01-p2-02-listings-discovery` `V6` cho đến khi PR #33 merge vào `main`; đã đánh số sẵn migration `V10` để chừa `V7–V9` cho các PR song song).
 
 ## Bối cảnh và căn cứ
 
@@ -22,7 +22,7 @@ Các yêu cầu cốt lõi bắt buộc:
      - Mọi thao tác ghi trong `OrderService` (`accept`, `reject`, `cancel`, `startDelivery`, `scheduleOps`) sử dụng **`FOR NO KEY UPDATE`** thay cho `FOR UPDATE` trên `thanh_viens`, `tin_dangs`, `giao_dichs`, `lich_hen_giao_dichs`, `do_vats` theo đúng thứ tự toàn cục:
        `thanh_viens (UUID tăng dần khi chạm cả người mua và người bán)` → `tin_dangs (ma_tin)` → `giao_dichs (ma_giao_dich)` → `do_vats (ORDER BY ma_vat ASC)`.
      - Lý do (fix review PR #34 #2): trên PostgreSQL 16, `INSERT INTO giao_dichs` / `INSERT INTO thong_baos` tự động lấy khóa khóa ngoại **`FOR KEY SHARE`** trên `thanh_viens` và `tin_dangs`, vốn **xung đột** với `FOR UPDATE` nhưng **tương thích** với `FOR NO KEY UPDATE`. Riêng `createReservationRequest` lấy **`FOR KEY SHARE`** trên `thanh_viens(buyer, seller)` theo thứ tự UUID tăng dần **trước** khi khóa `tin_dangs` để đồng nhất thứ tự khóa với `ListingService.updateListing` (`FOR UPDATE`) và không chặn đồng thời các giao dịch `OrderService` (`FOR NO KEY UPDATE`).
-  2. **Lớp cơ sở dữ liệu (`V7` Partial Unique Indexes, bảo toàn snapshot lịch sử & tương thích `UC-09`)**:
+  2. **Lớp cơ sở dữ liệu (`V10` Partial Unique Indexes, bảo toàn snapshot lịch sử & tương thích `UC-09`)**:
      - `uq_giao_dichs_active_listing ON giao_dichs(ma_tin) WHERE trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')` — bảo đảm tối đa 1 giữ chỗ hiệu lực/tin.
      - Bảng `giao_dich_do_vat(id UUID PK, ma_giao_dich, ma_vat REFERENCES do_vats ON DELETE SET NULL, ten_vat_snapshot, tinh_trang_snapshot, giu_hieu_luc)` kèm 2 partial unique index `uq_giao_dich_do_vat_order_item(ma_giao_dich, ma_vat) WHERE ma_vat IS NOT NULL` và `uq_giao_dich_do_vat_active_item(ma_vat) WHERE giu_hieu_luc = TRUE AND ma_vat IS NOT NULL`, cùng `idx_giao_dich_do_vat_ma_giao_dich` — bảo đảm tối đa 1 giữ chỗ hiệu lực/đồ vật ở cấp PostgreSQL, cho phép `InventoryService.deleteItem` (`UC-09`, `204`) xóa đồ vật `KHA_DUNG` sau khi rút tin và hủy đơn, **đồng thời bảo toàn nguyên vẹn tên/tình trạng lịch sử trên đơn đã hủy** (`LEFT JOIN do_vats` fallback `'DA_XOA'`).
      - `uq_giao_dichs_pending_buyer_listing ON giao_dichs(ma_tin, nguoi_mua_id) WHERE trang_thai = 'YEU_CAU'` — ngăn nhấn đúp tạo nhiều yêu cầu trùng trên cùng một tin trong khi vẫn cho phép người mua gửi không giới hạn yêu cầu trên các tin khác nhau.
@@ -31,7 +31,7 @@ Các yêu cầu cốt lõi bắt buộc:
      - Khi hủy giữ chỗ trên tin đang `GIU_CHO` và không còn giữ chỗ hiệu lực nào, `cancelReservation` đối chiếu mở khóa tạm `FR-12` và kiểm tra trạng thái tài khoản người bán đã khóa `FOR NO KEY UPDATE`: chỉ mở lại `tin_dangs` về `CONG_KHAI` khi người bán đang hoạt động (`HOAT_DONG && email_verified && profile_approved`), chưa quá hạn `FR-13` và toàn bộ đồ vật `KHA_DUNG`; ngược lại chuyển `HET_HAN` nếu quá hạn hoặc `DA_RUT` (`closed_at = now`) nếu người bán bị khóa/vô hiệu hóa hoặc còn đồ vật `DA_CHUYEN_GIAO`/bị giữ ở đơn khác.
 
 ### 2. Tách biệt rạch ròi `thoi_diem_bat_dau_giao` (`UC-26`) và `thoi_diem_bao_giao` (`UC-27`)
-- Bổ sung cột `thoi_diem_bat_dau_giao TIMESTAMPTZ` trên `giao_dichs` trong `V7`, giữ nguyên `thoi_diem_bao_giao` và `anh_ban_giao` cho `P3-02` (`UC-27`).
+- Bổ sung cột `thoi_diem_bat_dau_giao TIMESTAMPTZ` trên `giao_dichs` trong `V10`, giữ nguyên `thoi_diem_bao_giao` và `anh_ban_giao` cho `P3-02` (`UC-27`).
 - `UC-24` kiểm tra `trang_thai IN ('CHO_XAC_NHAN', 'CHO_XU_LY') OR thoi_diem_bao_giao IS NOT NULL` để từ chối bằng `409 POST_DELIVERY_CANCELLATION_REQUIRED` và hướng sang `UC-28`; ngược lại khi mới ở `DANG_GIAO` (`thoi_diem_bao_giao IS NULL`), `UC-24` vẫn cho phép hủy hợp lệ theo `UC-24 A3`.
 
 ### 3. Đề xuất & xác nhận lịch hẹn hai bên (`lich_hen_giao_dichs`, `UC-25`)
