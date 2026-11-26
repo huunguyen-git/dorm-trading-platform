@@ -17,18 +17,23 @@ export default function ProfileDetailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reasonError, setReasonError] = useState('');
+  // Tách khỏi `error` vì `load()` xóa `error` mỗi lần chạy và sẽ nuốt mất thông báo xung đột.
+  const [stale, setStale] = useState('');
+
+  const [refresh, setRefresh] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
+      // Server trả 409 ở bước quyết định nếu người khác đã xử lý; chi tiết luôn đọc được để trang không kẹt.
       const fresh = await adminProfiles.detail(id);
       setProfile(fresh);
       setCardUrl(fresh.hasStudentCard ? await adminProfiles.cardUrl(id) : null);
     } catch (cause) {
       const status = cause instanceof ApiError ? cause.status : 0;
-      setError(status === 404 ? 'Hồ sơ không còn chờ duyệt.' : status === 409 ? 'Hồ sơ đã được người khác xử lý. Danh sách vừa được làm mới.' : (cause as Error).message);
+      setError(status === 404 ? 'Hồ sơ không tồn tại.' : (cause as Error).message);
     } finally { setLoading(false); }
-  }, [id]);
+  }, [id, refresh]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => () => { if (cardUrl) URL.revokeObjectURL(cardUrl); }, [cardUrl]);
@@ -47,8 +52,9 @@ export default function ProfileDetailPage() {
     } catch (cause) {
       const status = cause instanceof ApiError ? cause.status : 0;
       if (status === 409) {
-        await load();
-        setError('Trạng thái hồ sơ đã thay đổi, đang tải lại thông tin mới nhất.');
+        setRejecting(false);
+        setStale('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
+        setRefresh((value) => value + 1);
       } else if (status === 400) setReasonError((cause as Error).message);
       else setError((cause as Error).message);
     } finally { setBusy(false); }
@@ -64,13 +70,17 @@ export default function ProfileDetailPage() {
     ['Họ tên', profile.name], ['MSSV', profile.studentId], ['Email', profile.email], ['Số điện thoại', profile.phone],
     ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
   ];
+  // Hồ sơ đã xử lý (duyệt hoặc từ chối) không quyết định lại được, server sẽ trả 409.
+  const decidable = profile.profileStatus === 'CHO_DUYET';
   return <section className="page-content profile-detail">
     <header className="page-heading"><h1>{profile.name}</h1></header>
+    {stale && <p className="notice notice-error" role="alert">{stale}</p>}
     {error && <p className="notice notice-error" role="alert">{error}</p>}
     <div className="profile-detail-grid">
       <div className="account-card">
         <dl className="account-details">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || 'Chưa cập nhật'}</dd></div>)}</dl>
         <p className="form-help">Điểm uy tín hiện tại {profile.reputation} · Trạng thái {profile.profileStatus}</p>
+        {profile.rejectReason && <p className="notice">Lý do từ chối gần nhất: {profile.rejectReason}</p>}
       </div>
       <div className="account-card">
         <h2>Ảnh thẻ sinh viên</h2>
@@ -90,9 +100,10 @@ export default function ProfileDetailPage() {
             <button className="button" type="button" disabled={busy} onClick={() => { setRejecting(false); setReasonError(''); }}>Huỷ</button>
           </div>
         </div> : <>
-          <button className="button button-primary" data-testid="approve" disabled={busy} onClick={() => void decide('approve')}>{busy ? 'Đang xử lý…' : 'Chấp thuận'}</button>
-          <button className="button" data-testid="reject" disabled={busy} onClick={() => setRejecting(true)}>Từ chối</button>
+          <button className="button button-primary" data-testid="approve" disabled={busy || !decidable} onClick={() => void decide('approve')}>{busy ? 'Đang xử lý…' : 'Chấp thuận'}</button>
+          <button className="button" data-testid="reject" disabled={busy || !decidable} onClick={() => setRejecting(true)}>Từ chối</button>
         </>}
+        {!decidable && <p className="notice">Hồ sơ này đã được xử lý nên không thể duyệt hay từ chối lại.</p>}
         <button className="button" disabled={busy} onClick={() => navigate('/profiles')}>Quay lại</button>
       </div>
     </div>

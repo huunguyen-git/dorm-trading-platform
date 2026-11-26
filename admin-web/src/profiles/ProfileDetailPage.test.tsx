@@ -34,9 +34,21 @@ it('blocks rejecting a profile without a reason', async () => {
 it('reports a stale profile on approve 409 and reloads it', async () => {
   vi.mocked(api).mockResolvedValueOnce(profile)
     .mockRejectedValueOnce(new ApiError(409, 'PROFILE_ALREADY_HANDLED'))
-    .mockResolvedValueOnce({ ...profile, profileStatus: 'DA_DUYET' });
+    .mockResolvedValueOnce({ ...profile, profileApproved: true, profileStatus: 'DA_DUYET' });
   renderPage();
   fireEvent.click(await screen.findByTestId('approve'));
-  expect(await screen.findByRole('alert')).toHaveTextContent('Trạng thái hồ sơ đã thay đổi, đang tải lại thông tin mới nhất.');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
   await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => String(path) === '/admin/profiles/u1')).toHaveLength(2));
+  // Sau khi tải lại, hồ sơ đã xử lý thì không quyết định lại được.
+  expect(await screen.findByTestId('approve')).toBeDisabled();
+  expect(screen.getByTestId('reject')).toBeDisabled();
+  expect(screen.getByText('Hồ sơ này đã được xử lý nên không thể duyệt hay từ chối lại.')).toBeInTheDocument();
+  // Thông báo xung đột phải sống sót qua lần tải lại, không bị load() xóa.
+  expect(screen.getByRole('alert')).toHaveTextContent('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
+});
+
+it('shows the latest rejection reason for an approved profile', async () => {
+  vi.mocked(api).mockResolvedValueOnce({ ...profile, profileApproved: true, profileStatus: 'DA_DUYET', rejectReason: 'Ảnh thẻ mờ.' });
+  renderPage();
+  expect(await screen.findByText('Lý do từ chối gần nhất: Ảnh thẻ mờ.')).toBeInTheDocument();
 });
