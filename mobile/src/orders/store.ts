@@ -67,6 +67,11 @@ function markCatalogStale() {
   }
 }
 
+let ordersReqSeq = 0;
+let detailReqSeq = 0;
+let notificationsReqSeq = 0;
+let sessionEpoch = 0;
+
 export const useOrders = create<OrdersState>((set, get) => ({
   orders: [],
   page: 0,
@@ -104,6 +109,9 @@ export const useOrders = create<OrdersState>((set, get) => ({
     const targetPage = opts?.page ?? 0;
     const isRefresh = Boolean(opts?.refresh);
 
+    const seq = ++ordersReqSeq;
+    const epoch = sessionEpoch;
+
     set({
       loading: !isRefresh,
       refreshing: isRefresh,
@@ -121,6 +129,7 @@ export const useOrders = create<OrdersState>((set, get) => ({
         page: targetPage,
         size: 30,
       });
+      if (seq !== ordersReqSeq || epoch !== sessionEpoch) return;
       set((prev) => ({
         orders: targetPage > 0 ? [...prev.orders, ...result.items] : result.items,
         page: result.page ?? targetPage,
@@ -131,6 +140,7 @@ export const useOrders = create<OrdersState>((set, get) => ({
         error: null,
       }));
     } catch (err) {
+      if (seq !== ordersReqSeq || epoch !== sessionEpoch) return;
       if (isRestrictedError(err)) {
         set({ loading: false, refreshing: false, error: null });
         return;
@@ -141,12 +151,16 @@ export const useOrders = create<OrdersState>((set, get) => ({
   },
 
   loadOrderDetail: async (orderId) => {
+    const seq = ++detailReqSeq;
+    const epoch = sessionEpoch;
     set({ detailLoading: true, detailError: null });
     try {
       const detail = await orderApi.fetchOrderDetail(orderId);
+      if (seq !== detailReqSeq || epoch !== sessionEpoch) return null;
       set({ selectedOrder: detail, detailLoading: false, detailError: null });
       return detail;
     } catch (err) {
+      if (seq !== detailReqSeq || epoch !== sessionEpoch) return null;
       if (isRestrictedError(err)) {
         set({ detailLoading: false, detailError: null });
         return null;
@@ -158,17 +172,26 @@ export const useOrders = create<OrdersState>((set, get) => ({
   },
 
   loadNotifications: async () => {
+    const seq = ++notificationsReqSeq;
+    const epoch = sessionEpoch;
     try {
       const page = await orderApi.fetchNotifications({ page: 0, size: 20 });
-      set({ notifications: page.items, unreadCount: page.unreadCount });
+      if (seq !== notificationsReqSeq || epoch !== sessionEpoch) return;
+      set({
+        notifications: Array.isArray(page?.items) ? page.items : [],
+        unreadCount: typeof page?.unreadCount === 'number' ? page.unreadCount : 0,
+      });
     } catch {
+      if (seq !== notificationsReqSeq || epoch !== sessionEpoch) return;
       // Non-blocking secondary feed
     }
   },
 
   markNotificationRead: async (id) => {
+    const epoch = sessionEpoch;
     try {
       const updated = await orderApi.markNotificationRead(id);
+      if (epoch !== sessionEpoch) return;
       set((state) => {
         const nextList = state.notifications.map((n) => (n.id === id ? updated : n));
         const wasUnread = state.notifications.find((n) => n.id === id)?.read === false;
@@ -181,8 +204,10 @@ export const useOrders = create<OrdersState>((set, get) => ({
   },
 
   markAllNotificationsRead: async () => {
+    const epoch = sessionEpoch;
     try {
       await orderApi.markAllNotificationsRead();
+      if (epoch !== sessionEpoch) return;
       set((state) => ({
         notifications: state.notifications.map((n) => ({ ...n, read: true })),
         unreadCount: 0,
@@ -193,106 +218,158 @@ export const useOrders = create<OrdersState>((set, get) => ({
   },
 
   createRequest: async (payload) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const created = await orderApi.createOrderRequest(payload);
-      set({ selectedOrder: created, submitting: false });
-      markCatalogStale();
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: created, submitting: false });
+        markCatalogStale();
+      }
       return created;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   accept: async (orderId, expectedVersion) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.acceptOrder(orderId, expectedVersion);
-      set({ selectedOrder: updated, submitting: false });
-      markCatalogStale();
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+        markCatalogStale();
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   reject: async (orderId, reason, expectedVersion) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.rejectOrder(orderId, reason, expectedVersion);
-      set({ selectedOrder: updated, submitting: false });
-      markCatalogStale();
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+        markCatalogStale();
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   cancel: async (orderId, reason, expectedVersion) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.cancelOrder(orderId, reason, expectedVersion);
-      set({ selectedOrder: updated, submitting: false });
-      markCatalogStale();
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+        markCatalogStale();
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   proposeSchedule: async (orderId, payload) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.proposeSchedule(orderId, payload);
-      set({ selectedOrder: updated, submitting: false });
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   confirmSchedule: async (orderId, proposalId) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.confirmSchedule(orderId, proposalId);
-      set({ selectedOrder: updated, submitting: false });
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   rejectSchedule: async (orderId, proposalId, reason) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.rejectSchedule(orderId, proposalId, reason);
-      set({ selectedOrder: updated, submitting: false });
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
   startDelivery: async (orderId, expectedVersion) => {
+    const epoch = sessionEpoch;
     set({ submitting: true });
     try {
       const updated = await orderApi.startDelivery(orderId, expectedVersion);
-      set({ selectedOrder: updated, submitting: false });
+      if (epoch === sessionEpoch) {
+        detailReqSeq += 1;
+        set({ selectedOrder: updated, submitting: false });
+      }
       return updated;
     } catch (err) {
-      set({ submitting: false });
+      if (epoch === sessionEpoch) {
+        set({ submitting: false });
+      }
       throw err;
     }
   },
 
-  reset: () =>
+  reset: () => {
+    sessionEpoch += 1;
+    ordersReqSeq += 1;
+    detailReqSeq += 1;
+    notificationsReqSeq += 1;
     set({
       orders: [],
       page: 0,
@@ -311,7 +388,8 @@ export const useOrders = create<OrdersState>((set, get) => ({
       submitting: false,
       notifications: [],
       unreadCount: 0,
-    }),
+    });
+  },
 }));
 
 registerLogoutReset(() => {

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,10 +16,11 @@ import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
-import { formatReputationSummary, formatVnd } from '../listings/types';
+import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
 import {
   buildPresetMeetingTime,
+  formatExactVnd,
   formatOrderDateTime,
   getOrderStepperState,
   ORDER_CANCEL_REASONS,
@@ -98,6 +99,8 @@ export default function OrderDetailScreen() {
     [],
   );
 
+  const skipInitialFocusRef = useRef(true);
+
   const refresh = useCallback(() => {
     void loadOrderDetail(orderId);
   }, [loadOrderDetail, orderId]);
@@ -108,7 +111,20 @@ export default function OrderDetailScreen() {
 
   useEffect(() => {
     if (typeof navigation?.addListener !== 'function') return;
-    return navigation.addListener('focus', refresh);
+    const unsubBlur = navigation.addListener('blur', () => {
+      skipInitialFocusRef.current = false;
+    });
+    const unsubFocus = navigation.addListener('focus', () => {
+      if (skipInitialFocusRef.current) {
+        skipInitialFocusRef.current = false;
+        return;
+      }
+      refresh();
+    });
+    return () => {
+      unsubBlur?.();
+      unsubFocus?.();
+    };
   }, [navigation, refresh]);
 
   const order = selectedOrder?.id === orderId ? selectedOrder : null;
@@ -296,7 +312,8 @@ export default function OrderDetailScreen() {
   const counterpartyInitial = (counterparty.displayName.trim()[0] ?? 'T').toUpperCase();
   const counterpartyRep = formatReputationSummary(counterparty.reputationScore);
   const isHighTrustCounterparty = counterparty.reputationScore >= 120;
-  const isFree = order.listing.isFree || order.agreedPriceVnd === 0;
+  const isFreeListing = Boolean(order.listing.isFree || order.listing.listedPriceVnd === 0);
+  const hasPriceDiff = order.agreedPriceVnd !== order.listing.listedPriceVnd;
   const listingThumbUri = order.listing.thumbnailUrl
     ? resolveMediaUrl(order.listing.thumbnailUrl)
     : null;
@@ -458,12 +475,26 @@ export default function OrderDetailScreen() {
                 <Text style={styles.listingTitle} numberOfLines={2}>
                   {order.listing.title}
                 </Text>
-                <View style={styles.priceBadgeRow}>
-                  <Text style={[styles.price, isFree && styles.priceFree]}>
-                    {isFree ? '0đ · Cho tặng' : formatVnd(order.agreedPriceVnd)}
-                  </Text>
-                  {order.listing.isCombo ? (
-                    <StatusIndicator variant="soft" tone="accent" label="Combo nguyên bộ" />
+                <View style={styles.priceBlock}>
+                  <View style={styles.priceBadgeRow}>
+                    <Text
+                      testID="order-detail-agreed-price"
+                      style={[styles.price, isFreeListing && !hasPriceDiff && styles.priceFree]}
+                    >
+                      {isFreeListing && !hasPriceDiff
+                        ? '0đ · Cho tặng'
+                        : hasPriceDiff
+                          ? `Giá thỏa thuận: ${formatExactVnd(order.agreedPriceVnd)}`
+                          : formatExactVnd(order.agreedPriceVnd)}
+                    </Text>
+                    {order.listing.isCombo ? (
+                      <StatusIndicator variant="soft" tone="accent" label="Combo nguyên bộ" />
+                    ) : null}
+                  </View>
+                  {hasPriceDiff ? (
+                    <Text testID="order-detail-listed-price" style={styles.listedPriceText}>
+                      {`Giá niêm yết: ${isFreeListing ? '0đ · Cho tặng' : formatExactVnd(order.listing.listedPriceVnd)}`}
+                    </Text>
                   ) : null}
                 </View>
               </View>
@@ -565,11 +596,12 @@ export default function OrderDetailScreen() {
                         </Text>
                       </View>
                       <StatusIndicator
+                        testID={`order-item-status-${item.id}`}
                         variant="dot"
                         tone={
                           item.status === 'DANG_GIU'
                             ? 'warning'
-                            : item.status === 'DA_CHUYEN_GIAO'
+                            : item.status === 'DA_CHUYEN_GIAO' || item.status === 'DA_XOA'
                               ? 'neutral'
                               : 'success'
                         }
@@ -578,7 +610,9 @@ export default function OrderDetailScreen() {
                             ? 'Đang giữ'
                             : item.status === 'DA_CHUYEN_GIAO'
                               ? 'Đã chuyển giao'
-                              : 'Khả dụng'
+                              : item.status === 'DA_XOA'
+                                ? 'Đã xóa khỏi kho'
+                                : 'Khả dụng'
                         }
                       />
                     </View>
@@ -1329,12 +1363,15 @@ const styles = StyleSheet.create({
   listingTitle: {
     ...semantic.type.cardTitle,
   },
+  priceBlock: {
+    marginTop: primitive.space[1],
+    gap: 2,
+  },
   priceBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: primitive.space[2],
-    marginTop: primitive.space[1],
   },
   price: {
     ...semantic.type.price,
@@ -1342,6 +1379,11 @@ const styles = StyleSheet.create({
   },
   priceFree: {
     color: semantic.color.freeFg,
+  },
+  listedPriceText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   counterpartyRow: {
     flexDirection: 'row',

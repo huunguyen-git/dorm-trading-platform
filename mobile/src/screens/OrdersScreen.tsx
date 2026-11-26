@@ -14,9 +14,9 @@ import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
-import { formatVnd } from '../listings/types';
 import { useOrders } from '../orders/store';
 import {
+  formatExactVnd,
   formatOrderDateTime,
   getNotificationTone,
   ORDER_STATUS_META,
@@ -69,7 +69,12 @@ export default function OrdersScreen() {
     restriction ?? (restrictionDismissed ? null : resolveUserRestriction(user));
   const isLocked = Boolean(visibleRestriction) || user?.accountStatus === 'BI_KHOA';
   const isActiveMember = Boolean(
-    token && user?.roles.includes('MEMBER') && user?.accountStatus !== 'BI_KHOA',
+    token &&
+      user?.roles.includes('MEMBER') &&
+      user?.accountStatus === 'HOAT_DONG' &&
+      user?.emailVerified &&
+      user?.profileApproved &&
+      !restriction,
   );
 
   const {
@@ -96,7 +101,7 @@ export default function OrdersScreen() {
   const routeListingId = route.params?.listingId;
   const routeListingTitle = route.params?.listingTitle;
 
-  const hasMountedRef = useRef(false);
+  const skipInitialFocusRef = useRef(true);
 
   const fetchWithRouteOrCurrent = useCallback(
     (isInitialMount: boolean) => {
@@ -126,17 +131,25 @@ export default function OrdersScreen() {
   );
 
   useEffect(() => {
-    hasMountedRef.current = true;
     fetchWithRouteOrCurrent(true);
   }, [fetchWithRouteOrCurrent]);
 
   useEffect(() => {
     if (typeof navigation?.addListener !== 'function') return;
-    return navigation.addListener('focus', () => {
-      if (hasMountedRef.current) {
-        fetchWithRouteOrCurrent(false);
-      }
+    const unsubBlur = navigation.addListener('blur', () => {
+      skipInitialFocusRef.current = false;
     });
+    const unsubFocus = navigation.addListener('focus', () => {
+      if (skipInitialFocusRef.current) {
+        skipInitialFocusRef.current = false;
+        return;
+      }
+      fetchWithRouteOrCurrent(false);
+    });
+    return () => {
+      unsubBlur?.();
+      unsubFocus?.();
+    };
   }, [navigation, fetchWithRouteOrCurrent]);
 
   const handleGoBack = () => {
@@ -259,7 +272,8 @@ export default function OrdersScreen() {
     const meta = ORDER_STATUS_META[order.status] ?? ORDER_STATUS_META.YEU_CAU;
     const isSeller = user?.id === order.seller.id;
     const counterparty = isSeller ? order.buyer : order.seller;
-    const isFree = order.listing.isFree || order.agreedPriceVnd === 0;
+    const isFreeListing = Boolean(order.listing.isFree || order.listing.listedPriceVnd === 0);
+    const hasPriceDiff = order.agreedPriceVnd !== order.listing.listedPriceVnd;
     const thumbUri = order.listing.thumbnailUrl
       ? resolveMediaUrl(order.listing.thumbnailUrl)
       : null;
@@ -308,14 +322,26 @@ export default function OrdersScreen() {
             </Text>
 
             <View style={styles.metaRow}>
-              <Text style={[styles.priceText, isFree && styles.priceFreeText]}>
-                {isFree ? 'Miễn phí (0đ)' : formatVnd(order.agreedPriceVnd)}
+              <Text
+                testID={`order-price-${order.id}`}
+                style={[styles.priceText, isFreeListing && !hasPriceDiff && styles.priceFreeText]}
+              >
+                {isFreeListing && !hasPriceDiff
+                  ? '0đ · Cho tặng'
+                  : hasPriceDiff
+                    ? `Giá thỏa thuận: ${formatExactVnd(order.agreedPriceVnd)}`
+                    : formatExactVnd(order.agreedPriceVnd)}
               </Text>
               <Text style={styles.dot}>·</Text>
               <Text style={styles.metaText}>
                 {order.listing.isCombo ? `Combo ${order.itemCount} món` : '1 món'}
               </Text>
             </View>
+            {hasPriceDiff ? (
+              <Text testID={`order-listed-price-${order.id}`} style={styles.listedPriceText}>
+                {`Giá niêm yết: ${isFreeListing ? '0đ · Cho tặng' : formatExactVnd(order.listing.listedPriceVnd)}`}
+              </Text>
+            ) : null}
 
             <Text style={styles.metaText} numberOfLines={1}>
               {isSeller ? 'Người mua' : 'Người bán'}: {counterparty.displayName} · Uy tín{' '}
@@ -779,6 +805,7 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: primitive.space[1.5],
   },
   priceText: {
@@ -788,6 +815,11 @@ const styles = StyleSheet.create({
   },
   priceFreeText: {
     color: semantic.color.freeFg,
+  },
+  listedPriceText: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   dot: {
     ...semantic.type.micro,

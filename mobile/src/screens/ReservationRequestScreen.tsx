@@ -16,10 +16,11 @@ import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
 import { useDiscovery } from '../listings/discoveryStore';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
-import { formatReputationSummary, formatVnd } from '../listings/types';
+import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
 import {
   buildPresetMeetingTime,
+  formatExactVnd,
   parseMeetingTimeInput,
   QUICK_MEETING_LOCATIONS,
 } from '../orders/types';
@@ -52,6 +53,7 @@ export default function ReservationRequestScreen() {
 
   const selectedDetail = useDiscovery((s) => s.selectedDetail);
   const detailLoading = useDiscovery((s) => s.detailLoading);
+  const detailError = useDiscovery((s) => s.detailError);
   const detailNotFound = useDiscovery((s) => s.detailNotFound);
   const loadDetail = useDiscovery((s) => s.loadDetail);
   const createRequest = useOrders((s) => s.createRequest);
@@ -91,16 +93,25 @@ export default function ReservationRequestScreen() {
     }
   }, [detail?.locationName]);
 
+  const isListingFree = Boolean(preview && (preview.isFree || preview.priceVnd === 0));
+
   const appliedPriceVnd = useMemo(() => {
-    if (preview?.isFree || preview?.priceVnd === 0) return 0;
-    if (typeof params?.agreedPriceVnd === 'number' && params.agreedPriceVnd >= 0) {
-      return params.agreedPriceVnd;
+    if (!preview) return null;
+    if (isListingFree) return 0;
+    if (typeof params?.agreedPriceVnd === 'number' && Number.isFinite(params.agreedPriceVnd)) {
+      return Math.round(params.agreedPriceVnd);
     }
-    return preview?.priceVnd ?? 0;
-  }, [params?.agreedPriceVnd, preview]);
+    return preview.priceVnd;
+  }, [isListingFree, params?.agreedPriceVnd, preview]);
 
   const isCombo = Boolean(preview?.isCombo || (detail && detail.items.length >= 2));
-  const isFree = Boolean(preview?.isFree || appliedPriceVnd === 0);
+  const hasPriceDiff = Boolean(
+    preview && appliedPriceVnd !== null && appliedPriceVnd !== preview.priceVnd,
+  );
+  const invalidPaidPriceError =
+    preview && !isListingFree && (appliedPriceVnd === null || appliedPriceVnd <= 0)
+      ? 'Tin có phí không thể đặt giá 0đ.'
+      : '';
 
   const unavailableReason = useMemo(() => {
     if (!detail) return '';
@@ -122,7 +133,8 @@ export default function ReservationRequestScreen() {
     return '';
   }, [detail]);
 
-  const isSubmitBlocked = Boolean(unavailableReason) || mutating;
+  const isSubmitBlocked =
+    !preview || Boolean(unavailableReason) || Boolean(invalidPaidPriceError) || mutating;
   const shouldOfferSearchRedirect =
     Boolean(errorCode && LISTING_GONE_CODES.has(errorCode)) ||
     Boolean(detail && detail.status !== 'CONG_KHAI' && detail.status !== 'GIU_CHO');
@@ -138,7 +150,12 @@ export default function ReservationRequestScreen() {
     : null;
 
   const handleSubmit = async () => {
-    if (!listingId || isSubmitBlocked) return;
+    if (!preview || !listingId || mutating) return;
+    if (!isListingFree && (appliedPriceVnd === null || appliedPriceVnd <= 0)) {
+      setError('Tin có phí không thể đặt giá 0đ.');
+      return;
+    }
+    if (unavailableReason) return;
     setError('');
     setErrorCode(null);
     setTimeError('');
@@ -159,7 +176,7 @@ export default function ReservationRequestScreen() {
     try {
       const created = await createRequest({
         listingId,
-        agreedPriceVnd: appliedPriceVnd,
+        agreedPriceVnd: isListingFree ? 0 : appliedPriceVnd!,
         proposedMeetingTime: isoTime,
         proposedMeetingLocation: meetingLocation.trim() || null,
         note: note.trim() || null,
@@ -225,6 +242,22 @@ export default function ReservationRequestScreen() {
               title="Gửi yêu cầu chưa phải là đã giữ đồ"
               message="Tin đăng và đồ vật chỉ được chính thức giữ chỗ sau khi người bán bấm Chấp nhận yêu cầu của bạn."
             />
+
+            {detailError && !preview ? (
+              <InlineBanner
+                testID="reservation-detail-error-banner"
+                tone="danger"
+                title="Không thể tải thông tin tin đăng"
+                message={detailError}
+                actionLabel="Thử lại"
+                actionTestID="reservation-detail-retry-button"
+                onActionPress={() => {
+                  if (listingId) {
+                    void loadDetail(listingId);
+                  }
+                }}
+              />
+            ) : null}
 
             {unavailableReason ? (
               <InlineBanner
@@ -303,14 +336,31 @@ export default function ReservationRequestScreen() {
                 <HairlineDivider />
 
                 <View style={styles.priceRow}>
-                  <Text style={styles.priceLabel}>Mức giá áp dụng</Text>
-                  <Text
-                    testID="reservation-applied-price"
-                    style={[styles.priceValue, isFree && styles.priceFree]}
-                  >
-                    {isFree ? '0đ · Cho tặng' : formatVnd(appliedPriceVnd)}
+                  <Text style={styles.priceLabel}>
+                    {hasPriceDiff ? 'Giá thỏa thuận' : 'Mức giá áp dụng'}
                   </Text>
+                  <View style={styles.priceValueCol}>
+                    <Text
+                      testID="reservation-applied-price"
+                      style={[styles.priceValue, isListingFree && styles.priceFree]}
+                    >
+                      {isListingFree ? '0đ · Cho tặng' : formatExactVnd(appliedPriceVnd)}
+                    </Text>
+                    {hasPriceDiff ? (
+                      <Text testID="reservation-listed-price" style={styles.listedPriceCaption}>
+                        {`Giá niêm yết: ${isListingFree ? '0đ · Cho tặng' : formatExactVnd(preview.priceVnd)}`}
+                      </Text>
+                    ) : null}
+                  </View>
                 </View>
+
+                {invalidPaidPriceError ? (
+                  <InlineBanner
+                    testID="reservation-price-error"
+                    tone="danger"
+                    message={invalidPaidPriceError}
+                  />
+                ) : null}
 
                 {isCombo ? (
                   <View style={styles.comboBox} testID="reservation-combo-note">
@@ -458,8 +508,15 @@ export default function ReservationRequestScreen() {
         <View style={[styles.stickyBar, { paddingBottom: stickyBottomPad }]}>
           <View style={styles.stickySummaryRow}>
             <Text style={styles.stickySummaryLabel}>Giá áp dụng</Text>
-            <Text style={[styles.stickySummaryPrice, isFree && styles.priceFree]}>
-              {isFree ? 'Miễn phí (0đ)' : formatVnd(appliedPriceVnd)}
+            <Text
+              testID="reservation-sticky-price"
+              style={[styles.stickySummaryPrice, isListingFree && styles.priceFree]}
+            >
+              {!preview
+                ? '—'
+                : isListingFree
+                  ? '0đ · Cho tặng'
+                  : formatExactVnd(appliedPriceVnd)}
             </Text>
           </View>
 
@@ -586,6 +643,10 @@ const styles = StyleSheet.create({
   priceLabel: {
     ...semantic.type.caption,
   },
+  priceValueCol: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
   priceValue: {
     ...semantic.type.price,
     fontSize: primitive.fontSize.lg,
@@ -593,6 +654,11 @@ const styles = StyleSheet.create({
   },
   priceFree: {
     color: semantic.color.freeFg,
+  },
+  listedPriceCaption: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   comboBox: {
     backgroundColor: semantic.color.bgSubtle,

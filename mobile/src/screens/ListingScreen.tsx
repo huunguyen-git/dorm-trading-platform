@@ -611,11 +611,7 @@ export default function ListingScreen() {
             navigation.navigate('Orders', {
               initialRole: 'SELLER',
               initialStatus:
-                detail && detail.pendingRequestCount > 0
-                  ? 'YEU_CAU'
-                  : display.status === 'GIU_CHO'
-                    ? 'GIU_CHO'
-                    : 'ALL',
+                detail && detail.pendingRequestCount > 0 ? 'YEU_CAU' : 'ALL',
               listingId: display.id,
               listingTitle: display.title,
             }),
@@ -994,7 +990,7 @@ export default function ListingScreen() {
                   ? () =>
                       navigation.navigate('Orders', {
                         initialRole: 'SELLER',
-                        initialStatus: 'GIU_CHO',
+                        initialStatus: 'ALL',
                         listingId: display.id,
                         listingTitle: display.title,
                       })

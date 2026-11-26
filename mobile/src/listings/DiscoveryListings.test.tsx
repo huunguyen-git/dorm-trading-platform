@@ -1419,7 +1419,17 @@ describe('UC-20 ListingScreen (Rich Detail, Gallery, Trust Card, Role/State Alte
     fireEvent.press(viewReservedBtn);
     expect(mockNavigate).toHaveBeenCalledWith('Orders', {
       initialRole: 'SELLER',
-      initialStatus: 'GIU_CHO',
+      initialStatus: 'ALL',
+      listingId: 'listing-1',
+      listingTitle: sampleDetail1.title,
+    });
+
+    mockNavigate.mockClear();
+    fireEvent.press(screen.getByTestId('listing-more-button'));
+    fireEvent.press(screen.getByTestId('action-sheet-orders'));
+    expect(mockNavigate).toHaveBeenCalledWith('Orders', {
+      initialRole: 'SELLER',
+      initialStatus: 'ALL',
       listingId: 'listing-1',
       listingTitle: sampleDetail1.title,
     });

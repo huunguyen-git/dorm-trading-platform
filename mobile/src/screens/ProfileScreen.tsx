@@ -158,7 +158,14 @@ export default function ProfileScreen() {
   const syncQuota = useCallback(() => {
     if (!isActiveMember) return;
     void loadQuota().catch(() => { });
-  }, [isActiveMember, loadQuota]);
+    if (
+      sessionUser?.accountStatus === 'HOAT_DONG' &&
+      sessionUser.emailVerified &&
+      sessionUser.profileApproved
+    ) {
+      void useOrders.getState().loadNotifications().catch(() => { });
+    }
+  }, [isActiveMember, loadQuota, sessionUser?.accountStatus, sessionUser?.emailVerified, sessionUser?.profileApproved]);
 
   useEffect(() => {
     void load();

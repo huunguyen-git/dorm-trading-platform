@@ -316,7 +316,7 @@ export default function MyListingsScreen() {
         onPress: () =>
           navigation.navigate('Orders', {
             initialRole: 'SELLER',
-            initialStatus: item.status === 'GIU_CHO' ? 'GIU_CHO' : 'ALL',
+            initialStatus: 'ALL',
             listingId: item.id,
             listingTitle: item.title,
           }),
@@ -737,7 +737,7 @@ export default function MyListingsScreen() {
                   onActionPress={() =>
                     navigation.navigate('Orders', {
                       initialRole: 'SELLER',
-                      initialStatus: 'GIU_CHO',
+                      initialStatus: 'ALL',
                       listingId: item.id,
                       listingTitle: item.title,
                     })

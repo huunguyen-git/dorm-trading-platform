@@ -20,24 +20,55 @@ import OrderDetailScreen from '../screens/OrderDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import MyListingsScreen from '../screens/MyListingsScreen';
 
+jest.setTimeout(15000);
+
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
 const mockGoBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
-const mockAddListener = jest.fn(() => () => {});
+const focusListeners = new Set<() => void>();
+const blurListeners = new Set<() => void>();
+const mockAddListener = jest.fn((event: string, cb: () => void) => {
+  if (event === 'focus') {
+    focusListeners.add(cb);
+  } else if (event === 'blur') {
+    blurListeners.add(cb);
+  }
+  return () => {
+    focusListeners.delete(cb);
+    blurListeners.delete(cb);
+  };
+});
+const mockNavigation = {
+  navigate: mockNavigate,
+  replace: mockReplace,
+  goBack: mockGoBack,
+  canGoBack: mockCanGoBack,
+  addListener: mockAddListener,
+};
 let mockRouteParams: Record<string, unknown> = {};
+
+function emitFocusEvent() {
+  act(() => {
+    for (const listener of Array.from(focusListeners)) {
+      listener();
+    }
+  });
+}
+
+function emitBlurEvent() {
+  act(() => {
+    for (const listener of Array.from(blurListeners)) {
+      listener();
+    }
+  });
+}
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native') as Record<string, unknown>;
   return {
     ...actual,
-    useNavigation: () => ({
-      navigate: mockNavigate,
-      replace: mockReplace,
-      goBack: mockGoBack,
-      canGoBack: mockCanGoBack,
-      addListener: mockAddListener,
-    }),
+    useNavigation: () => mockNavigation,
     useRoute: () => ({
       params: mockRouteParams,
     }),
@@ -265,6 +296,9 @@ function makeNotification(id: string, overrides: Partial<AppNotification> = {}):
 describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedApi.mockReset();
+    focusListeners.clear();
+    blurListeners.clear();
     mockRouteParams = {};
     useOrders.getState().reset();
     useDiscovery.getState().reset();
@@ -284,7 +318,15 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
 
   test('parseMeetingTimeInput and getOrderStepperState handle edge cases cleanly', () => {
     expect(parseMeetingTimeInput('2026-12-01 18:30')).toBeTruthy();
+    expect(parseMeetingTimeInput('2026-12-01 18:30:45')).toBeTruthy();
+    expect(parseMeetingTimeInput('2026-12-01T18:30:00Z')).toBeTruthy();
     expect(parseMeetingTimeInput('2026-02-31 18:00')).toBeNull();
+    expect(parseMeetingTimeInput('2026-12-01 10:99')).toBeNull();
+    expect(parseMeetingTimeInput('2026-12-01 25:00')).toBeNull();
+    expect(parseMeetingTimeInput('2026-12-01 12:00:75')).toBeNull();
+    expect(parseMeetingTimeInput('2026-13-01 10:00')).toBeNull();
+    expect(parseMeetingTimeInput('2026-12-01T25:00:00Z')).toBeNull();
+    expect(parseMeetingTimeInput('2026-02-31T10:00:00Z')).toBeNull();
     expect(parseMeetingTimeInput('not-a-date')).toBeNull();
 
     expect(getOrderStepperState(makeOrderDetail({ status: 'YEU_CAU' })).currentStep).toBe(0);
@@ -492,10 +534,10 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     fireEvent.press(screen.getByTestId('accept-reservation-button'));
 
     await waitFor(() => {
-      expect(mockedApi).toHaveBeenCalledWith(
-        '/orders/order-1/accept',
-        expect.objectContaining({ method: 'POST' }),
-      );
+      const acceptCall = mockedApi.mock.calls.find((c) => c[0] === '/orders/order-1/accept');
+      expect(acceptCall).toBeTruthy();
+      expect(acceptCall?.[1]?.method).toBe('POST');
+      expect(JSON.parse(String(acceptCall?.[1]?.body))).toEqual({ expectedVersion: 0 });
       expect(screen.getByTestId('order-action-notice')).toBeTruthy();
       expect(screen.getByTestId('order-progress-stepper').props.accessibilityValue.now).toBe(1);
       expect(screen.getByTestId('start-delivery-button').props.accessibilityState.disabled).toBe(
@@ -1011,9 +1053,19 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     expect(mockNavigate).toHaveBeenCalledWith('OrderDetail', { id: 'order-1' });
   });
 
-  test('ProfileScreen renders exactly one profile-shortcut-orders tile and MyListingsScreen links sellers to Orders', async () => {
+  test('ProfileScreen loads unread order notifications badge and MyListingsScreen links GIU_CHO listings to Orders with initialStatus ALL', async () => {
     useSession.setState({ token: 'seller-jwt', user: sellerUser, loading: false });
     mockedApi.mockImplementation(async (path: string) => {
+      if (path.startsWith('/notifications')) {
+        return {
+          items: [makeNotification('n-1'), makeNotification('n-2'), makeNotification('n-3')],
+          unreadCount: 3,
+          page: 0,
+          size: 20,
+          totalElements: 3,
+          totalPages: 1,
+        };
+      }
       if (path.startsWith('/listings/quota')) {
         return {
           reputationScore: 120,
@@ -1092,6 +1144,12 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     const { unmount } = render(<ProfileScreen />);
     const orderShortcuts = screen.getAllByTestId('profile-shortcut-orders');
     expect(orderShortcuts).toHaveLength(1);
+    const unreadBadge = await screen.findByTestId('profile-orders-unread-badge');
+    expect(unreadBadge).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(
+      mockedApi.mock.calls.some((call) => String(call[0]).startsWith('/notifications?')),
+    ).toBe(true);
     fireEvent.press(orderShortcuts[0]);
     expect(mockNavigate).toHaveBeenCalledWith('Orders');
     unmount();
@@ -1105,7 +1163,17 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     fireEvent.press(await screen.findByTestId('my-listing-view-order-tin-giu-cho'));
     expect(mockNavigate).toHaveBeenCalledWith('Orders', {
       initialRole: 'SELLER',
-      initialStatus: 'GIU_CHO',
+      initialStatus: 'ALL',
+      listingId: 'tin-giu-cho',
+      listingTitle: 'Bàn học KTX Khu A',
+    });
+
+    mockNavigate.mockClear();
+    fireEvent.press(screen.getByTestId('my-listing-more-tin-giu-cho'));
+    fireEvent.press(screen.getByTestId('action-sheet-orders-tin-giu-cho'));
+    expect(mockNavigate).toHaveBeenCalledWith('Orders', {
+      initialRole: 'SELLER',
+      initialStatus: 'ALL',
       listingId: 'tin-giu-cho',
       listingTitle: 'Bàn học KTX Khu A',
     });
@@ -1198,5 +1266,440 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     expect(
       screen.getAllByText('Người bán đã báo đã giao, cần chuyển sang UC-28.').length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  test('OrdersScreen gates CHO_KICH_HOAT, VO_HIEU_HOA, unverified email, and unapproved profile without calling /orders', () => {
+    const gatedUsers: User[] = [
+      { ...buyerUser, accountStatus: 'CHO_KICH_HOAT' },
+      { ...buyerUser, accountStatus: 'VO_HIEU_HOA' },
+      { ...buyerUser, emailVerified: false },
+      { ...buyerUser, profileApproved: false },
+    ];
+
+    for (const gatedUser of gatedUsers) {
+      mockedApi.mockClear();
+      useSession.setState({
+        token: 'jwt-token',
+        user: gatedUser,
+        loading: false,
+        restriction: null,
+        restrictionDismissed: false,
+      });
+
+      const { unmount } = render(<OrdersScreen />);
+      expect(screen.getByText('Tài khoản chưa kích hoạt')).toBeTruthy();
+      expect(mockedApi).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  test('useOrders ignores stale out-of-order responses and discards in-flight responses finishing after reset()/logout()', async () => {
+    // 1. Out-of-order loadOrders (older tab resolves after newer tab, and older error does not clobber newer success)
+    let resolveOlderOrders!: (v: unknown) => void;
+    let resolveNewerOrders!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlderOrders = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewerOrders = resolve;
+          }),
+      );
+
+    const pOlder = useOrders.getState().loadOrders({ status: 'YEU_CAU' });
+    const pNewer = useOrders.getState().loadOrders({ status: 'DANG_GIAO' });
+
+    resolveNewerOrders({
+      items: [makeOrderSummary({ id: 'order-newer', status: 'DANG_GIAO' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    await pNewer;
+
+    resolveOlderOrders({
+      items: [makeOrderSummary({ id: 'order-older', status: 'YEU_CAU' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    await pOlder;
+
+    expect(useOrders.getState().orders).toHaveLength(1);
+    expect(useOrders.getState().orders[0].id).toBe('order-newer');
+    expect(useOrders.getState().statusFilter).toBe('DANG_GIAO');
+
+    // 2. Stale error from older request must not overwrite newer error/loading state
+    let rejectOlderErr!: (e: Error) => void;
+    let resolveNewerOk!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectOlderErr = reject;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewerOk = resolve;
+          }),
+      );
+
+    const pErr = useOrders.getState().loadOrders({ status: 'HUY' });
+    const pOk = useOrders.getState().loadOrders({ status: 'HOAN_TAT' });
+    resolveNewerOk({
+      items: [makeOrderSummary({ id: 'order-done', status: 'HOAN_TAT' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    await pOk;
+
+    rejectOlderErr(new Error('Stale network failure'));
+    await pErr;
+
+    expect(useOrders.getState().error).toBeNull();
+    expect(useOrders.getState().orders[0].id).toBe('order-done');
+
+    // 3. In-flight loadOrders, loadOrderDetail & loadNotifications resolving after logout()/reset() must NEVER leak data
+    let resolveOrdersAfterLogout!: (v: unknown) => void;
+    let resolveDetailAfterLogout!: (v: unknown) => void;
+    let resolveNotifsAfterLogout!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOrdersAfterLogout = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDetailAfterLogout = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNotifsAfterLogout = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({}); // /auth/logout
+
+    const pList = useOrders.getState().loadOrders({ status: 'ALL' });
+    const pDetail = useOrders.getState().loadOrderDetail('order-secret');
+    const pNotif = useOrders.getState().loadNotifications();
+
+    await act(async () => {
+      await useSession.getState().logout();
+    });
+
+    resolveOrdersAfterLogout({
+      items: [makeOrderSummary({ id: 'leaked-order' })],
+      page: 0,
+      size: 30,
+      totalElements: 1,
+      totalPages: 1,
+    });
+    resolveDetailAfterLogout(makeOrderDetail({ id: 'order-secret' }));
+    resolveNotifsAfterLogout({
+      items: [makeNotification('leaked-notif')],
+      unreadCount: 5,
+      page: 0,
+      size: 20,
+      totalElements: 1,
+      totalPages: 1,
+    });
+
+    await Promise.all([pList, pDetail, pNotif]);
+
+    const afterState = useOrders.getState();
+    expect(afterState.orders).toHaveLength(0);
+    expect(afterState.selectedOrder).toBeNull();
+    expect(afterState.notifications).toHaveLength(0);
+    expect(afterState.unreadCount).toBe(0);
+    expect(afterState.loading).toBe(false);
+    expect(afterState.detailLoading).toBe(false);
+  });
+
+  test('ReservationRequestScreen blocks submit when !preview after network error, recovers on retry, and blocks 0đ on paid listings', async () => {
+    // 1. Opened with only { listingId } and loadDetail fails with non-404 network error
+    mockRouteParams = { listingId: 'listing-net-err' };
+    mockedApi
+      .mockRejectedValueOnce(new Error('Không thể kết nối máy chủ.'))
+      .mockResolvedValueOnce(makeListingDetailPayload({ id: 'listing-net-err', priceVnd: 150000 }));
+
+    const { unmount } = render(<ReservationRequestScreen />);
+
+    expect(await screen.findByTestId('reservation-detail-error-banner')).toBeTruthy();
+    expect(screen.getByTestId('reservation-sticky-price').props.children).toBe('—');
+    expect(screen.getByTestId('submit-reservation-request').props.accessibilityState.disabled).toBe(
+      true,
+    );
+
+    // Pressing disabled submit must NOT post agreedPriceVnd: 0
+    fireEvent.press(screen.getByTestId('submit-reservation-request'));
+    expect(mockedApi).toHaveBeenCalledTimes(1);
+    expect(mockedApi.mock.calls.some((c) => c[0] === '/orders')).toBe(false);
+
+    // Pressing retry loads preview and unblocks submit
+    fireEvent.press(screen.getByTestId('reservation-detail-retry-button'));
+    expect(await screen.findByTestId('reservation-listing-summary')).toBeTruthy();
+    expect(screen.getByTestId('submit-reservation-request').props.accessibilityState.disabled).toBe(
+      false,
+    );
+    unmount();
+
+    // 2. Paid listing with agreedPriceVnd === 0 displays validation error and blocks submit without labeling Cho tặng
+    useDiscovery.getState().reset();
+    mockedApi.mockClear();
+    mockRouteParams = {
+      listingId: 'listing-paid',
+      listing: {
+        id: 'listing-paid',
+        title: 'Quạt đứng Senko',
+        priceVnd: 150000,
+        isCombo: false,
+        isFree: false,
+        itemCount: 1,
+        locationName: 'KTX Khu A ĐHQG-HCM',
+      },
+      agreedPriceVnd: 0,
+    };
+    mockedApi.mockResolvedValueOnce(
+      makeListingDetailPayload({
+        id: 'listing-paid',
+        title: 'Quạt đứng Senko',
+        priceVnd: 150000,
+        isCombo: false,
+        isFree: false,
+      }),
+    );
+
+    render(<ReservationRequestScreen />);
+
+    expect(await screen.findByTestId('reservation-price-error')).toBeTruthy();
+    expect(screen.getByText('Tin có phí không thể đặt giá 0đ.')).toBeTruthy();
+    expect(screen.getByTestId('reservation-applied-price').props.children).toBe('0đ');
+    expect(screen.queryByText(/Cho tặng/)).toBeNull();
+    expect(screen.getByTestId('submit-reservation-request').props.accessibilityState.disabled).toBe(
+      true,
+    );
+    fireEvent.press(screen.getByTestId('submit-reservation-request'));
+    expect(mockedApi.mock.calls.some((c) => c[0] === '/orders')).toBe(false);
+  });
+
+  test('OrderDetailScreen & OrdersScreen only label Cho tặng for free listings, show listedPriceVnd when different, and render DA_XOA items', async () => {
+    // 1. OrderDetailScreen with paid listing having agreedPriceVnd: 0 + deleted snapshot item DA_XOA
+    useSession.setState({ token: 'buyer-jwt', user: buyerUser, loading: false });
+    mockRouteParams = { id: 'order-paid-zero' };
+    mockedApi.mockResolvedValueOnce(
+      makeOrderDetail({
+        id: 'order-paid-zero',
+        agreedPriceVnd: 0,
+        status: 'HUY',
+        listing: {
+          id: 'listing-1',
+          title: 'Bàn học gấp gỗ',
+          listedPriceVnd: 150000,
+          listingType: 'BAN_LE',
+          isCombo: false,
+          isFree: false,
+          status: 'DA_RUT',
+          thumbnailUrl: null,
+          locationName: 'KTX Khu A',
+        },
+        items: [
+          {
+            id: 'item-deleted',
+            name: 'Bàn học gấp cũ',
+            condition: 'Tốt 90%',
+            status: 'DA_XOA',
+            images: [],
+            heldByThisOrder: false,
+          },
+        ],
+        viewer: {
+          isBuyer: true,
+          isSeller: false,
+          canAccept: false,
+          canReject: false,
+          canCancel: false,
+          canProposeSchedule: false,
+          canStartDelivery: false,
+          requiresPostDeliveryCancel: false,
+        },
+      }),
+    );
+
+    const { unmount: unmountPaidDetail } = render(<OrderDetailScreen />);
+    expect(await screen.findByTestId('order-detail-agreed-price')).toBeTruthy();
+    expect(screen.getByTestId('order-detail-agreed-price').props.children).toBe(
+      'Giá thỏa thuận: 0đ',
+    );
+    expect(screen.getByTestId('order-detail-listed-price')).toBeTruthy();
+    expect(screen.getByText(/Giá niêm yết:\s*150\.000đ/)).toBeTruthy();
+    expect(screen.queryByText(/Cho tặng/)).toBeNull();
+    expect(screen.getByTestId('order-item-status-item-deleted')).toBeTruthy();
+    expect(screen.getByText('Đã xóa khỏi kho')).toBeTruthy();
+    unmountPaidDetail();
+
+    // 2. OrderDetailScreen with genuinely free listing shows Cho tặng and hides redundant listed price
+    useOrders.getState().reset();
+    mockRouteParams = { id: 'order-free-1' };
+    mockedApi.mockResolvedValueOnce(
+      makeOrderDetail({
+        id: 'order-free-1',
+        agreedPriceVnd: 0,
+        listing: {
+          id: 'listing-free',
+          title: 'Tặng đèn bàn học',
+          listedPriceVnd: 0,
+          listingType: 'CHO_TANG',
+          isCombo: false,
+          isFree: true,
+          status: 'CONG_KHAI',
+          thumbnailUrl: null,
+          locationName: 'KTX Khu B',
+        },
+      }),
+    );
+    const { unmount: unmountFreeDetail } = render(<OrderDetailScreen />);
+    expect(await screen.findByTestId('order-detail-agreed-price')).toBeTruthy();
+    expect(screen.getByTestId('order-detail-agreed-price').props.children).toBe('0đ · Cho tặng');
+    expect(screen.queryByTestId('order-detail-listed-price')).toBeNull();
+    unmountFreeDetail();
+
+    // 3. OrdersScreen renders negotiated/0đ paid order vs genuine free listing cleanly
+    useOrders.getState().reset();
+    mockRouteParams = {};
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path.startsWith('/notifications')) {
+        return { items: [], unreadCount: 0, page: 0, size: 20, totalElements: 0, totalPages: 0 };
+      }
+      return {
+        items: [
+          makeOrderSummary({
+            id: 'order-paid-zero',
+            agreedPriceVnd: 0,
+            listing: {
+              id: 'listing-paid',
+              title: 'Nồi cơm mini',
+              listedPriceVnd: 200000,
+              listingType: 'BAN_LE',
+              isCombo: false,
+              isFree: false,
+              status: 'GIU_CHO',
+              thumbnailUrl: null,
+              locationName: 'KTX Khu A',
+            },
+          }),
+          makeOrderSummary({
+            id: 'order-free-row',
+            agreedPriceVnd: 0,
+            listing: {
+              id: 'listing-free',
+              title: 'Tặng sổ tay SE100',
+              listedPriceVnd: 0,
+              listingType: 'CHO_TANG',
+              isCombo: false,
+              isFree: true,
+              status: 'GIU_CHO',
+              thumbnailUrl: null,
+              locationName: 'KTX Khu B',
+            },
+          }),
+        ],
+        page: 0,
+        size: 30,
+        totalElements: 2,
+        totalPages: 1,
+      };
+    });
+
+    render(<OrdersScreen />);
+    expect(await screen.findByTestId('order-price-order-paid-zero')).toBeTruthy();
+    expect(screen.getByTestId('order-price-order-paid-zero').props.children).toBe(
+      'Giá thỏa thuận: 0đ',
+    );
+    expect(screen.getByTestId('order-listed-price-order-paid-zero')).toBeTruthy();
+    expect(screen.getByText(/Giá niêm yết:\s*200\.000đ/)).toBeTruthy();
+    expect(screen.getByTestId('order-price-order-free-row').props.children).toBe('0đ · Cho tặng');
+    expect(screen.queryByTestId('order-listed-price-order-free-row')).toBeNull();
+  });
+
+  test('OrdersScreen and OrderDetailScreen avoid duplicate API calls on initial mount + focus while refreshing on return focus', async () => {
+    // 1. OrdersScreen
+    mockRouteParams = {};
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path.startsWith('/notifications')) {
+        return { items: [], unreadCount: 0, page: 0, size: 20, totalElements: 0, totalPages: 0 };
+      }
+      return {
+        items: [makeOrderSummary()],
+        page: 0,
+        size: 30,
+        totalElements: 1,
+        totalPages: 1,
+      };
+    });
+
+    const { unmount: unmountOrders } = render(<OrdersScreen />);
+    expect(await screen.findByTestId('order-card-order-1')).toBeTruthy();
+
+    // Simulate React Navigation emitting initial focus immediately after mount
+    emitFocusEvent();
+    await waitFor(() => {
+      const orderCalls = mockedApi.mock.calls.filter((c) => String(c[0]).startsWith('/orders?'));
+      const notifCalls = mockedApi.mock.calls.filter((c) =>
+        String(c[0]).startsWith('/notifications?'),
+      );
+      expect(orderCalls).toHaveLength(1);
+      expect(notifCalls).toHaveLength(1);
+    });
+
+    // Simulate navigating away and returning (blur -> focus)
+    emitBlurEvent();
+    emitFocusEvent();
+    await waitFor(() => {
+      const orderCalls = mockedApi.mock.calls.filter((c) => String(c[0]).startsWith('/orders?'));
+      const notifCalls = mockedApi.mock.calls.filter((c) =>
+        String(c[0]).startsWith('/notifications?'),
+      );
+      expect(orderCalls).toHaveLength(2);
+      expect(notifCalls).toHaveLength(2);
+    });
+    unmountOrders();
+
+    // 2. OrderDetailScreen
+    mockedApi.mockClear();
+    focusListeners.clear();
+    blurListeners.clear();
+    useOrders.getState().reset();
+    mockRouteParams = { id: 'order-1' };
+    mockedApi.mockResolvedValue(makeOrderDetail());
+
+    render(<OrderDetailScreen />);
+    expect(await screen.findByTestId('order-status-card')).toBeTruthy();
+
+    // Immediate initial focus right after mount must NOT re-fetch
+    emitFocusEvent();
+    expect(mockedApi).toHaveBeenCalledTimes(1);
+
+    // Returning from another screen triggers refresh
+    emitBlurEvent();
+    emitFocusEvent();
+    await waitFor(() => {
+      expect(mockedApi).toHaveBeenCalledTimes(2);
+    });
   });
 });

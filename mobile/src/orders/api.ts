@@ -40,14 +40,10 @@ export async function fetchOrderDetail(orderId: string): Promise<OrderDetail> {
 export async function acceptOrder(
   orderId: string,
   expectedVersion?: number,
-  agreedPriceVnd?: number,
 ): Promise<OrderDetail> {
   return api<OrderDetail>(`/orders/${orderId}/accept`, {
     method: 'POST',
-    body: JSON.stringify({
-      ...(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
-      ...(typeof agreedPriceVnd === 'number' ? { agreedPriceVnd } : {}),
-    }),
+    body: JSON.stringify(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
   });
 }
 

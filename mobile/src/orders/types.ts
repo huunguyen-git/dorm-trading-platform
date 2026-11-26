@@ -36,11 +36,13 @@ export interface OrderListingSummary {
   locationName: string | null;
 }
 
+export type OrderItemStatus = InventoryItemStatus | 'DA_XOA';
+
 export interface OrderItem {
   id: string;
   name: string;
   condition: string;
-  status: InventoryItemStatus;
+  status: OrderItemStatus;
   images: string[];
   heldByThisOrder: boolean;
 }
@@ -352,7 +354,21 @@ export function formatLocalInputFromDate(date: Date): string {
 }
 
 /**
- * Parses either "YYYY-MM-DD HH:mm" (local time) or an ISO-8601 timestamp string into ISO UTC string.
+ * Formats a numeric VND amount without inferring "Miễn phí" when price is 0.
+ * Only use `listing.isFree` (`listedPriceVnd === 0`) to label giveaway ("Cho tặng") listings.
+ */
+export function formatExactVnd(priceVnd: number | null | undefined): string {
+  const value =
+    typeof priceVnd === 'number' && Number.isFinite(priceVnd)
+      ? Math.max(0, Math.round(priceVnd))
+      : 0;
+  const grouped = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${grouped}đ`;
+}
+
+/**
+ * Parses either "YYYY-MM-DD HH:mm[:ss]" (local time) or an ISO-8601 timestamp string into ISO UTC string.
+ * Strictly validates date/time ranges to reject JS Date rollover (e.g. "2026-12-01 10:99", "2026-12-01 25:00").
  * Returns null if invalid.
  */
 export function parseMeetingTimeInput(raw: string): string | null {
@@ -360,25 +376,74 @@ export function parseMeetingTimeInput(raw: string): string | null {
   if (!trimmed) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed);
   if (match) {
-    const [, y, m, d, hh, mm, ss] = match;
-    const date = new Date(
-      Number(y),
-      Number(m) - 1,
-      Number(d),
-      Number(hh),
-      Number(mm),
-      ss ? Number(ss) : 0,
-      0,
-    );
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = match[6] ? Number(match[6]) : 0;
+    if (
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31 ||
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59 ||
+      second < 0 ||
+      second > 59
+    ) {
+      return null;
+    }
+    const date = new Date(year, month - 1, day, hour, minute, second, 0);
     if (
       Number.isNaN(date.getTime()) ||
-      date.getFullYear() !== Number(y) ||
-      date.getMonth() !== Number(m) - 1 ||
-      date.getDate() !== Number(d)
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day ||
+      date.getHours() !== hour ||
+      date.getMinutes() !== minute ||
+      date.getSeconds() !== second
     ) {
       return null;
     }
     return date.toISOString();
+  }
+  const isoMatch =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+      trimmed,
+    );
+  if (!isoMatch) {
+    return null;
+  }
+  const isoYear = Number(isoMatch[1]);
+  const isoMonth = Number(isoMatch[2]);
+  const isoDay = Number(isoMatch[3]);
+  const isoHour = Number(isoMatch[4]);
+  const isoMinute = Number(isoMatch[5]);
+  const isoSecond = isoMatch[6] ? Number(isoMatch[6]) : 0;
+  if (
+    isoMonth < 1 ||
+    isoMonth > 12 ||
+    isoDay < 1 ||
+    isoDay > 31 ||
+    isoHour < 0 ||
+    isoHour > 23 ||
+    isoMinute < 0 ||
+    isoMinute > 59 ||
+    isoSecond < 0 ||
+    isoSecond > 59
+  ) {
+    return null;
+  }
+  const calendarCheck = new Date(Date.UTC(isoYear, isoMonth - 1, isoDay));
+  if (
+    calendarCheck.getUTCFullYear() !== isoYear ||
+    calendarCheck.getUTCMonth() !== isoMonth - 1 ||
+    calendarCheck.getUTCDate() !== isoDay
+  ) {
+    return null;
   }
   const direct = new Date(trimmed);
   if (Number.isNaN(direct.getTime())) {
