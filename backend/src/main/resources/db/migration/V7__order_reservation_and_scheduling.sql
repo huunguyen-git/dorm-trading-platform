@@ -40,20 +40,31 @@ CREATE INDEX IF NOT EXISTS idx_giao_dichs_seller_status_created
   ON giao_dichs(nguoi_ban_id, trang_thai, thoi_diem_tao DESC);
 
 -- 2. Bảng liên kết snapshot đồ vật thuộc giao dịch (giao_dich_do_vat)
--- Phòng vệ tầng CSDL (FR-08, NFR-02): tối đa 1 giữ chỗ hiệu lực (giu_hieu_luc = TRUE) trên mỗi đồ vật
+-- Phòng vệ tầng CSDL (FR-08, NFR-02): tối đa 1 giữ chỗ hiệu lực (giu_hieu_luc = TRUE) trên mỗi đồ vật,
+-- đồng thời bảo toàn snapshot lịch sử đồ vật trên đơn đã hủy ngay cả khi xóa đồ vật ở kho cá nhân (UC-09).
 CREATE TABLE IF NOT EXISTS giao_dich_do_vat (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ma_giao_dich UUID NOT NULL REFERENCES giao_dichs(ma_giao_dich) ON DELETE CASCADE,
-  ma_vat UUID NOT NULL REFERENCES do_vats(ma_vat) ON DELETE CASCADE,
-  giu_hieu_luc BOOLEAN NOT NULL DEFAULT FALSE,
-  PRIMARY KEY (ma_giao_dich, ma_vat)
+  ma_vat UUID REFERENCES do_vats(ma_vat) ON DELETE SET NULL,
+  ten_vat_snapshot VARCHAR(255) NOT NULL DEFAULT '',
+  tinh_trang_snapshot TEXT NOT NULL DEFAULT '',
+  giu_hieu_luc BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_giao_dich_do_vat_order_item
+  ON giao_dich_do_vat(ma_giao_dich, ma_vat)
+  WHERE ma_vat IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_giao_dich_do_vat_active_item
   ON giao_dich_do_vat(ma_vat)
-  WHERE giu_hieu_luc = TRUE;
+  WHERE giu_hieu_luc = TRUE AND ma_vat IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_giao_dich_do_vat_ma_giao_dich
+  ON giao_dich_do_vat(ma_giao_dich);
 
 CREATE INDEX IF NOT EXISTS idx_giao_dich_do_vat_ma_vat
-  ON giao_dich_do_vat(ma_vat);
+  ON giao_dich_do_vat(ma_vat)
+  WHERE ma_vat IS NOT NULL;
 
 -- 3. Bảng đề xuất & xác nhận lịch hẹn giao nhận hai bên (UC-25)
 CREATE TABLE IF NOT EXISTS lich_hen_giao_dichs (
@@ -69,7 +80,9 @@ CREATE TABLE IF NOT EXISTS lich_hen_giao_dichs (
   ly_do_tu_choi TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_lich_hen_trang_thai
-    CHECK (trang_thai IN ('CHO_XAC_NHAN', 'DA_XAC_NHAN', 'TU_CHOI', 'DA_THAY_THE'))
+    CHECK (trang_thai IN ('CHO_XAC_NHAN', 'DA_XAC_NHAN', 'TU_CHOI', 'DA_THAY_THE')),
+  CONSTRAINT chk_lich_hen_distinct_responder
+    CHECK (nguoi_phan_hoi_id IS NULL OR nguoi_phan_hoi_id <> nguoi_de_xuat_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lich_hen_giao_dich_created

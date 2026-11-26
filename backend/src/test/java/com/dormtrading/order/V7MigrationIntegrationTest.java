@@ -50,6 +50,26 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
                 "updated_at"
         );
 
+        List<String> orderItemColumns = db.queryForList(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'giao_dich_do_vat'
+                  AND column_name IN (
+                      'id', 'ma_giao_dich', 'ma_vat', 'ten_vat_snapshot', 'tinh_trang_snapshot', 'giu_hieu_luc'
+                  )
+                """,
+                String.class
+        );
+        assertThat(orderItemColumns).containsExactlyInAnyOrder(
+                "id",
+                "ma_giao_dich",
+                "ma_vat",
+                "ten_vat_snapshot",
+                "tinh_trang_snapshot",
+                "giu_hieu_luc"
+        );
+
         List<String> indexes = db.queryForList(
                 """
                 SELECT indexname
@@ -58,7 +78,9 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
                   AND indexname IN (
                       'uq_giao_dichs_active_listing',
                       'uq_giao_dichs_pending_buyer_listing',
+                      'uq_giao_dich_do_vat_order_item',
                       'uq_giao_dich_do_vat_active_item',
+                      'idx_giao_dich_do_vat_ma_giao_dich',
                       'uq_lich_hen_pending_per_order',
                       'idx_thong_baos_recipient'
                   )
@@ -68,7 +90,9 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
         assertThat(indexes).containsExactlyInAnyOrder(
                 "uq_giao_dichs_active_listing",
                 "uq_giao_dichs_pending_buyer_listing",
+                "uq_giao_dich_do_vat_order_item",
                 "uq_giao_dich_do_vat_active_item",
+                "idx_giao_dich_do_vat_ma_giao_dich",
                 "uq_lich_hen_pending_per_order",
                 "idx_thong_baos_recipient"
         );
@@ -78,14 +102,20 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
                 SELECT conname
                 FROM pg_constraint
                 WHERE connamespace = 'public'::regnamespace
-                  AND conname IN ('chk_giao_dichs_trang_thai', 'chk_giao_dichs_distinct_parties', 'chk_lich_hen_trang_thai')
+                  AND conname IN (
+                      'chk_giao_dichs_trang_thai',
+                      'chk_giao_dichs_distinct_parties',
+                      'chk_lich_hen_trang_thai',
+                      'chk_lich_hen_distinct_responder'
+                  )
                 """,
                 String.class
         );
         assertThat(constraints).containsExactlyInAnyOrder(
                 "chk_giao_dichs_trang_thai",
                 "chk_giao_dichs_distinct_parties",
-                "chk_lich_hen_trang_thai"
+                "chk_lich_hen_trang_thai",
+                "chk_lich_hen_distinct_responder"
         );
 
         String itemFkDeleteRule = db.queryForObject(
@@ -101,6 +131,6 @@ class V7MigrationIntegrationTest extends BaseIntegrationTest {
                 """,
                 String.class
         );
-        assertThat(itemFkDeleteRule).isEqualTo("CASCADE");
+        assertThat(itemFkDeleteRule).isEqualTo("SET NULL");
     }
 }

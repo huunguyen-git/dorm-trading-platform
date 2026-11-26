@@ -364,4 +364,222 @@ class OrderConcurrencyTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listing))
                 .isEqualTo("GIU_CHO");
     }
+
+    @Test
+    void concurrentBuyerScheduleOpsAndSellerDeliveryOrCancelNeverDeadlocks() throws Exception {
+        Account seller = createActiveAccount("s5");
+        Account buyer = createActiveAccount("b5");
+
+        Instant baseTime = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+
+        // (1) Buyer proposeSchedule vs Seller startDelivery (with pre-confirmed schedule)
+        UUID item1 = createItem(seller.token(), "Bàn học gấp race 1");
+        UUID listing1 = publishListing(seller.token(), "Bàn học gấp 1", List.of(item1));
+        UUID order1 = requestReservation(buyer.token(), listing1);
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + order1 + "/accept").then().statusCode(200);
+        String p1 = given().auth().oauth2(buyer.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.toString(), "proposedLocation", "Sảnh A1"))
+                .post("/api/v1/orders/" + order1 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+        given().auth().oauth2(seller.token())
+                .post("/api/v1/orders/" + order1 + "/schedules/" + p1 + "/confirm").then().statusCode(200);
+
+        List<Outcome> raceProposeVsStart = runSimultaneously(List.of(
+                () -> postAction(buyer.token(), "/api/v1/orders/" + order1 + "/schedules", Map.of(
+                        "proposedTime", baseTime.plus(4, ChronoUnit.HOURS).toString(),
+                        "proposedLocation", "Cổng KTX A"
+                )),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order1 + "/start-delivery", Map.of())
+        ));
+        assertThat(raceProposeVsStart).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, order1))
+                .isEqualTo("DANG_GIAO");
+
+        // (2) Buyer proposeSchedule vs Seller cancelReservation
+        UUID item2 = createItem(seller.token(), "Ghế gấp race 2");
+        UUID listing2 = publishListing(seller.token(), "Ghế gấp 2", List.of(item2));
+        UUID order2 = requestReservation(buyer.token(), listing2);
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + order2 + "/accept").then().statusCode(200);
+
+        List<Outcome> raceProposeVsCancel = runSimultaneously(List.of(
+                () -> postAction(buyer.token(), "/api/v1/orders/" + order2 + "/schedules", Map.of(
+                        "proposedTime", baseTime.plus(6, ChronoUnit.HOURS).toString(),
+                        "proposedLocation", "Sảnh B2"
+                )),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order2 + "/cancel", Map.of("reason", "Hủy đồng thời"))
+        ));
+        assertThat(raceProposeVsCancel).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, order2))
+                .isEqualTo("HUY");
+        assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, item2))
+                .isEqualTo("KHA_DUNG");
+
+        // (3) Buyer confirmSchedule vs Seller cancelReservation
+        UUID item3 = createItem(seller.token(), "Đèn bàn race 3");
+        UUID listing3 = publishListing(seller.token(), "Đèn bàn 3", List.of(item3));
+        UUID order3 = requestReservation(buyer.token(), listing3);
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + order3 + "/accept").then().statusCode(200);
+        String sellerProp3 = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.plus(8, ChronoUnit.HOURS).toString(), "proposedLocation", "Cổng UIT"))
+                .post("/api/v1/orders/" + order3 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+
+        List<Outcome> raceConfirmVsCancel = runSimultaneously(List.of(
+                () -> postAction(buyer.token(), "/api/v1/orders/" + order3 + "/schedules/" + sellerProp3 + "/confirm", Map.of()),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order3 + "/cancel", Map.of("reason", "Hủy khi người mua xác nhận"))
+        ));
+        assertThat(raceConfirmVsCancel).allSatisfy(o -> assertThat(o.status()).isIn(200, 409));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, order3))
+                .isEqualTo("HUY");
+
+        // (4) Buyer rejectSchedule vs Seller startDelivery (with pre-confirmed schedule + seller reschedule proposal)
+        UUID item4 = createItem(seller.token(), "Bình giữ nhiệt race 4");
+        UUID listing4 = publishListing(seller.token(), "Bình giữ nhiệt 4", List.of(item4));
+        UUID order4 = requestReservation(buyer.token(), listing4);
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + order4 + "/accept").then().statusCode(200);
+        String initProp4 = given().auth().oauth2(buyer.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.toString(), "proposedLocation", "Thư viện ĐHQG"))
+                .post("/api/v1/orders/" + order4 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+        given().auth().oauth2(seller.token())
+                .post("/api/v1/orders/" + order4 + "/schedules/" + initProp4 + "/confirm").then().statusCode(200);
+        String sellerResched4 = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.plus(10, ChronoUnit.HOURS).toString(), "proposedLocation", "Nhà Văn hóa SV"))
+                .post("/api/v1/orders/" + order4 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+
+        List<Outcome> raceRejectVsStart = runSimultaneously(List.of(
+                () -> postAction(buyer.token(), "/api/v1/orders/" + order4 + "/schedules/" + sellerResched4 + "/reject", Map.of("reason", "Giữ lịch cũ")),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order4 + "/start-delivery", Map.of())
+        ));
+        assertThat(raceRejectVsStart).allSatisfy(o -> assertThat(o.status()).isIn(200, 409));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, order4))
+                .isEqualTo("DANG_GIAO");
+
+        // (5) Buyer confirmSchedule vs Seller startDelivery (reschedule confirm racing with start-delivery)
+        UUID item5 = createItem(seller.token(), "Quạt mini race 5");
+        UUID listing5 = publishListing(seller.token(), "Quạt mini 5", List.of(item5));
+        UUID order5 = requestReservation(buyer.token(), listing5);
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + order5 + "/accept").then().statusCode(200);
+        String initProp5 = given().auth().oauth2(buyer.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.toString(), "proposedLocation", "Cổng KTX B"))
+                .post("/api/v1/orders/" + order5 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+        given().auth().oauth2(seller.token())
+                .post("/api/v1/orders/" + order5 + "/schedules/" + initProp5 + "/confirm").then().statusCode(200);
+        String sellerResched5 = given().auth().oauth2(seller.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.plus(12, ChronoUnit.HOURS).toString(), "proposedLocation", "Sảnh tòa C UIT"))
+                .post("/api/v1/orders/" + order5 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+
+        List<Outcome> raceConfirmVsStart = runSimultaneously(List.of(
+                () -> postAction(buyer.token(), "/api/v1/orders/" + order5 + "/schedules/" + sellerResched5 + "/confirm", Map.of()),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order5 + "/start-delivery", Map.of())
+        ));
+        assertThat(raceConfirmVsStart).allSatisfy(o -> assertThat(o.status()).isIn(200, 409));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, order5))
+                .isEqualTo("DANG_GIAO");
+    }
+
+    @Test
+    void concurrentBuyerCreateRequestAndSellerOrderOrListingMutationsNeverDeadlocks() throws Exception {
+        Account seller = createActiveAccount("s6");
+        Account buyer1 = createActiveAccount("b6a");
+        Account buyer2 = createActiveAccount("b6b");
+        Account buyer3 = createActiveAccount("b6c");
+
+        Instant baseTime = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+
+        // (1) Buyer2 createReservationRequest vs Seller acceptReservation (same listing & same seller)
+        UUID item1 = createItem(seller.token(), "Balo sinh viên race 1");
+        UUID listing1 = publishListing(seller.token(), "Balo race accept", List.of(item1));
+        UUID order1 = requestReservation(buyer1.token(), listing1);
+
+        List<Outcome> raceCreateVsAccept = runSimultaneously(List.of(
+                () -> postAction(buyer2.token(), "/api/v1/orders", Map.of("listingId", listing1.toString())),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order1 + "/accept", Map.of())
+        ));
+        assertThat(raceCreateVsAccept).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+        assertThat(raceCreateVsAccept.get(1).status()).isEqualTo(200);
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listing1))
+                .isEqualTo("GIU_CHO");
+
+        // (2) Buyer2 createReservationRequest vs Seller rejectReservation (same listing & same seller)
+        UUID item2 = createItem(seller.token(), "Tai nghe race 2");
+        UUID listing2 = publishListing(seller.token(), "Tai nghe race reject", List.of(item2));
+        UUID order2 = requestReservation(buyer1.token(), listing2);
+
+        List<Outcome> raceCreateVsReject = runSimultaneously(List.of(
+                () -> postAction(buyer2.token(), "/api/v1/orders", Map.of("listingId", listing2.toString())),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order2 + "/reject", Map.of("reason", "Không phù hợp"))
+        ));
+        assertThat(raceCreateVsReject).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+        assertThat(raceCreateVsReject.get(0).status()).isEqualTo(201);
+        assertThat(raceCreateVsReject.get(1).status()).isEqualTo(200);
+
+        // (3) Buyer3 createReservationRequest (on seller's listing2) vs Seller startDelivery (on seller's order1)
+        //     Directly exercises concurrent FK FOR KEY SHARE vs FOR NO KEY UPDATE on the SAME seller thanh_viens row!
+        String prop1 = given().auth().oauth2(buyer1.token()).contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", baseTime.toString(), "proposedLocation", "Sảnh A2"))
+                .post("/api/v1/orders/" + order1 + "/schedules")
+                .then().statusCode(201).extract().jsonPath().getString("pendingScheduleProposal.id");
+        given().auth().oauth2(seller.token())
+                .post("/api/v1/orders/" + order1 + "/schedules/" + prop1 + "/confirm").then().statusCode(200);
+
+        List<Outcome> raceCreateVsStartDelivery = runSimultaneously(List.of(
+                () -> postAction(buyer3.token(), "/api/v1/orders", Map.of("listingId", listing2.toString())),
+                () -> postAction(seller.token(), "/api/v1/orders/" + order1 + "/start-delivery", Map.of())
+        ));
+        assertThat(raceCreateVsStartDelivery).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+        assertThat(raceCreateVsStartDelivery.get(0).status()).isEqualTo(201);
+        assertThat(raceCreateVsStartDelivery.get(1).status()).isEqualTo(200);
+
+        // (4) Buyer createReservationRequest vs Seller updateListing (ListingService FOR UPDATE on thanh_viens -> tin_dangs)
+        //     Run 3 independent rounds to thoroughly exercise the lock acquisition window with zero 40P01 deadlocks!
+        for (int round = 1; round <= 3; round++) {
+            UUID itemUpd = createItem(seller.token(), "Sách giáo trình race update " + round);
+            UUID listingUpd = publishListing(seller.token(), "Sách giáo trình " + round, List.of(itemUpd));
+
+            Map<String, Object> updatePayload = new LinkedHashMap<>();
+            updatePayload.put("action", "KEEP");
+            updatePayload.put("version", 0);
+            updatePayload.put("title", "Sách giáo trình " + round + " (cập nhật)");
+            updatePayload.put("description", "Cập nhật thông tin đồng thời với tạo yêu cầu giữ chỗ");
+            updatePayload.put("condition", "Tốt");
+            updatePayload.put("priceVnd", 90000);
+            updatePayload.put("categoryId", "DO_GIA_DUNG");
+            updatePayload.put("locationCode", "KTX_KHU_A");
+            updatePayload.put("locationText", "Sảnh KTX");
+            updatePayload.put("images", List.of("https://cdn.example.edu.vn/occ/upd-" + round + ".jpg"));
+            updatePayload.put("itemIds", List.of(itemUpd.toString()));
+
+            List<Outcome> raceCreateVsUpdate = runSimultaneously(List.of(
+                    () -> postAction(buyer1.token(), "/api/v1/orders", Map.of("listingId", listingUpd.toString())),
+                    () -> {
+                        Response resp = given()
+                                .auth().oauth2(seller.token())
+                                .contentType(ContentType.JSON)
+                                .body(updatePayload)
+                                .put("/api/v1/listings/" + listingUpd);
+                        String code = null;
+                        if (resp.statusCode() >= 400) {
+                            try {
+                                code = resp.jsonPath().getString("code");
+                            } catch (Exception ignored) {
+                                code = null;
+                            }
+                        }
+                        return new Outcome(resp.statusCode(), code);
+                    }
+            ));
+            assertThat(raceCreateVsUpdate).allSatisfy(o -> assertThat(o.status()).isIn(200, 201, 409));
+            assertThat(raceCreateVsUpdate.get(0).status()).isEqualTo(201);
+            assertThat(raceCreateVsUpdate.get(1).status()).isEqualTo(200);
+        }
+    }
 }

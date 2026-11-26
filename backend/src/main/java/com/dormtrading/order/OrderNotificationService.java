@@ -106,11 +106,30 @@ public class OrderNotificationService {
             );
             for (UUID itemId : currentListingItems) {
                 db.update(
-                        "INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, giu_hieu_luc) VALUES (?, ?, FALSE) ON CONFLICT DO NOTHING",
+                        """
+                        INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, ten_vat_snapshot, tinh_trang_snapshot, giu_hieu_luc)
+                        SELECT ?, d.ma_vat, d.ten, d.tinh_trang, FALSE
+                        FROM do_vats d
+                        WHERE d.ma_vat = ?
+                        ON CONFLICT DO NOTHING
+                        """,
                         pending.orderId(),
                         itemId
                 );
             }
+
+            // Bump pending order version so stale /accept requests with old expectedVersion receive 409 VERSION_CONFLICT
+            db.update(
+                    """
+                    UPDATE giao_dichs
+                    SET version = version + 1,
+                        updated_at = ?
+                    WHERE ma_giao_dich = ?
+                      AND trang_thai = 'YEU_CAU'
+                    """,
+                    createdAt,
+                    pending.orderId()
+            );
 
             db.update(
                     """

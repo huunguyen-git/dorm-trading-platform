@@ -63,8 +63,7 @@ public final class OrderDtos {
     }
 
     public record AcceptOrderRequest(
-            Long expectedVersion,
-            Integer agreedPriceVnd
+            Long expectedVersion
     ) {
     }
 

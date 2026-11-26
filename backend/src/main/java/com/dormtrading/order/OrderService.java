@@ -33,9 +33,11 @@ import org.springframework.transaction.annotation.Transactional;
  * (UC-22, UC-23, UC-24, UC-25, UC-26; FR-04, FR-07, FR-08, FR-09, FR-12, NFR-01, NFR-02, NFR-03).
  *
  * <p>Uses plain {@code @Transactional} (full rollback on {@link AuthFailure}) and enforces strict
- * global lock ordering compatible with {@code ListingService} and {@code InventoryService}:
- * (1) {@code thanh_viens (sellerId)} -> (2) {@code tin_dangs (listingId)} -> (3) {@code giao_dichs (orderId)}
- * -> (4) {@code do_vats (ORDER BY ma_vat ASC)}.
+ * global lock ordering compatible with {@code ListingService} and {@code InventoryService} using
+ * PostgreSQL {@code FOR NO KEY UPDATE} / {@code FOR KEY SHARE} row locks (preventing AB-BA deadlocks
+ * with FK {@code FOR KEY SHARE} locks acquired by {@code INSERT INTO giao_dichs/thong_baos}):
+ * (1) {@code thanh_viens (canonical UUID ASC)} -> (2) {@code tin_dangs (listingId)}
+ * -> (3) {@code giao_dichs (orderId)} -> (4) {@code do_vats (ORDER BY ma_vat ASC)}.
  */
 @Service
 @Transactional
@@ -167,7 +169,15 @@ public class OrderService {
             throw new AuthFailure(400, "INVALID_MEETING_TIME", "Thời gian hẹn dự kiến không được ở quá khứ.");
         }
 
-        // Lock order: tin_dangs -> do_vats (ORDER BY ma_vat ASC)
+        // Lock order: (1) thanh_viens (canonical ASC, FOR KEY SHARE) -> (2) tin_dangs -> (3) do_vats ASC
+        // Taking FOR KEY SHARE on thanh_viens before tin_dangs aligns lock order with ListingService (FOR UPDATE)
+        // while staying non-blocking with OrderService FOR NO KEY UPDATE locks.
+        UUID listingSellerId = lookupListingSellerIdOrThrow(req.listingId());
+        if (listingSellerId.equals(buyerId)) {
+            throw new AuthFailure(400, "SELF_RESERVATION_NOT_ALLOWED", "Bạn không thể tự gửi yêu cầu giữ chỗ cho tin đăng của chính mình.");
+        }
+        lockMembersForKeyShareSorted(buyerId, listingSellerId);
+
         LockedListing listing = lockListingForUpdate(req.listingId());
 
         if (listing.sellerId().equals(buyerId)) {
@@ -182,7 +192,7 @@ public class OrderService {
             throw new AuthFailure(409, "LISTING_NOT_AVAILABLE", "Tin đăng không còn khả dụng để gửi yêu cầu giữ chỗ.");
         }
 
-        // Read-only counterparty check (no FOR UPDATE on thanh_viens after tin_dangs): reject if seller is locked/disabled
+        // Read-only counterparty check: reject if seller is locked/disabled
         if (!isAccountActivelyAvailableReadOnly(listing.sellerId(), current)) {
             throw new AuthFailure(409, "LISTING_NOT_AVAILABLE", "Người bán hiện không thể giao dịch nên tin đăng tạm thời không khả dụng.");
         }
@@ -197,6 +207,9 @@ public class OrderService {
         }
         if (listing.priceVnd() == 0 && agreedPrice != 0) {
             throw new AuthFailure(400, "INVALID_INPUT", "Tin cho tặng miễn phí chỉ áp dụng mức giá 0đ.");
+        }
+        if (listing.priceVnd() > 0 && agreedPrice == 0) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Tin đăng có phí không thể đặt giá thỏa thuận bằng 0đ.");
         }
 
         List<UUID> itemIds = findListingItemIdsSorted(listing.id());
@@ -319,13 +332,12 @@ public class OrderService {
             throw new AuthFailure(409, "LISTING_ALREADY_RESERVED", "Tin đăng đang có một giữ chỗ hợp lệ khác.");
         }
 
-        int finalPrice = (req != null && req.agreedPriceVnd() != null)
-                ? req.agreedPriceVnd()
-                : order.agreedPriceVnd();
-        if (finalPrice < 0) {
+        // Security & business rule: seller NEVER unilaterally overrides buyer's agreedPriceVnd on /accept
+        int agreedPrice = order.agreedPriceVnd();
+        if (agreedPrice < 0) {
             throw new AuthFailure(400, "INVALID_INPUT", "Giá thỏa thuận không được âm.");
         }
-        if (listing.priceVnd() == 0 && finalPrice != 0) {
+        if (listing.priceVnd() == 0 && agreedPrice != 0) {
             throw new AuthFailure(400, "INVALID_INPUT", "Tin cho tặng miễn phí chỉ chấp nhận mức giá thỏa thuận 0đ.");
         }
 
@@ -375,18 +387,16 @@ public class OrderService {
             // 3. Record active hold snapshot in giao_dich_do_vat (enforced by uq_giao_dich_do_vat_active_item)
             replaceOrderItems(orderId, itemIds, true);
 
-            // 4. Transition order to GIU_CHO (enforced by uq_giao_dichs_active_listing)
+            // 4. Transition order to GIU_CHO (enforced by uq_giao_dichs_active_listing); preserve gia_thoa_thuan
             db.update(
                     """
                     UPDATE giao_dichs
                     SET trang_thai = 'GIU_CHO',
-                        gia_thoa_thuan = ?,
                         thoi_diem_giu_cho = ?,
                         updated_at = ?,
                         version = version + 1
                     WHERE ma_giao_dich = ?
                     """,
-                    finalPrice,
                     tsNow,
                     tsNow,
                     orderId
@@ -508,15 +518,14 @@ public class OrderService {
                 ? ListingValidation.optionalText(req.reason(), MAX_REASON_LENGTH, "Lý do hủy không được vượt quá 1000 ký tự.")
                 : null;
 
-        // Verify caller account status without breaking global thanh_viens lock order (canonical UUID order)
+        // Verify caller & check seller status in canonical thanh_viens FOR NO KEY UPDATE lock order
+        // (reconciling expired temporary locks per FR-12 before deciding whether listing may reopen to CONG_KHAI)
+        boolean sellerActiveForReopen;
         if (isSeller) {
             lockAndVerifyActiveSeller(lookup.sellerId());
-        } else if (userId.toString().compareTo(lookup.sellerId().toString()) < 0) {
-            verifyActiveMemberReadOnly(userId);
-            lockSellerRowOnly(lookup.sellerId());
+            sellerActiveForReopen = true;
         } else {
-            lockSellerRowOnly(lookup.sellerId());
-            verifyActiveMemberReadOnly(userId);
+            sellerActiveForReopen = lockBuyerAndSellerCanonicalForCancel(userId, lookup.sellerId());
         }
 
         LockedListing listing = lockListingForUpdate(lookup.listingId());
@@ -643,7 +652,7 @@ public class OrderService {
                         listing.id()
                 );
                 bumpUnreleasedItemsVersion(orderItemIds, itemsToRelease, tsNow);
-            } else if (areAllListingItemsAvailable(listing.id())) {
+            } else if (sellerActiveForReopen && areAllListingItemsAvailable(listing.id())) {
                 db.update(
                         "UPDATE tin_dangs SET trang_thai = 'CONG_KHAI', updated_at = ?, version = version + 1 WHERE ma_tin = ?",
                         tsNow,
@@ -651,7 +660,7 @@ public class OrderService {
                 );
             } else {
                 // UC-24 postcondition & E3: never leave listing zombied in GIU_CHO with 0 active orders,
-                // and never reopen to CONG_KHAI when an item is DA_CHUYEN_GIAO or held by another valid order.
+                // and never reopen to CONG_KHAI when seller is BI_KHOA/VO_HIEU_HOA/inactive or an item is unavailable.
                 db.update(
                         "UPDATE tin_dangs SET trang_thai = 'DA_RUT', closed_at = ?, updated_at = ?, version = version + 1 WHERE ma_tin = ?",
                         tsNow,
@@ -808,6 +817,15 @@ public class OrderService {
                     409,
                     "PROPOSAL_STALE",
                     "Đề xuất lịch hẹn này đã bị thay thế hoặc từ chối. Vui lòng tải lại để xem đề xuất mới nhất."
+            );
+        }
+
+        // Reject expired CHO_XAC_NHAN proposals whose proposed time has already passed
+        if (proposal.proposedTime() == null || proposal.proposedTime().isBefore(current)) {
+            throw new AuthFailure(
+                    409,
+                    "PROPOSAL_EXPIRED",
+                    "Thời gian trong đề xuất lịch hẹn đã qua. Vui lòng gửi đề xuất lịch hẹn mới."
             );
         }
 
@@ -1317,17 +1335,22 @@ public class OrderService {
     private List<OrderDtos.OrderItemDto> loadOrderItems(UUID orderId, UUID listingId) {
         List<OrderDtos.OrderItemDto> snapshot = db.query(
                 """
-                SELECT d.ma_vat, d.ten, d.tinh_trang, d.trang_thai, d.hinh_anh, gdv.giu_hieu_luc
+                SELECT COALESCE(d.ma_vat, gdv.id) AS item_id,
+                       COALESCE(d.ten, gdv.ten_vat_snapshot) AS item_name,
+                       COALESCE(d.tinh_trang, gdv.tinh_trang_snapshot) AS item_condition,
+                       COALESCE(d.trang_thai, 'DA_XOA') AS item_status,
+                       d.hinh_anh,
+                       gdv.giu_hieu_luc
                 FROM giao_dich_do_vat gdv
-                JOIN do_vats d ON d.ma_vat = gdv.ma_vat
+                LEFT JOIN do_vats d ON d.ma_vat = gdv.ma_vat
                 WHERE gdv.ma_giao_dich = ?
-                ORDER BY d.ma_vat ASC
+                ORDER BY COALESCE(d.ma_vat, gdv.id) ASC
                 """,
                 (rs, rowNum) -> new OrderDtos.OrderItemDto(
-                        rs.getObject("ma_vat", UUID.class),
-                        rs.getString("ten"),
-                        rs.getString("tinh_trang"),
-                        rs.getString("trang_thai"),
+                        rs.getObject("item_id", UUID.class),
+                        rs.getString("item_name"),
+                        rs.getString("item_condition"),
+                        rs.getString("item_status"),
                         extractTextArray(rs, "hinh_anh"),
                         rs.getBoolean("giu_hieu_luc")
                 ),
@@ -1361,6 +1384,7 @@ public class OrderService {
             UUID viewerId,
             boolean isPreDeliveryActive
     ) {
+        Instant current = now();
         return db.query(
                 """
                 SELECT lh.id, lh.ma_giao_dich, lh.nguoi_de_xuat_id, u.ho_ten AS proposer_name,
@@ -1374,15 +1398,19 @@ public class OrderService {
                 (rs, rowNum) -> {
                     UUID proposedById = rs.getObject("nguoi_de_xuat_id", UUID.class);
                     String proposalStatus = rs.getString("trang_thai");
+                    Instant proposedTime = toInstant(rs.getTimestamp("thoi_gian_de_xuat"));
                     boolean isPendingForOther = isPreDeliveryActive
                             && OrderDtos.ScheduleProposalStatus.CHO_XAC_NHAN.name().equals(proposalStatus)
                             && !proposedById.equals(viewerId);
+                    boolean canConfirm = isPendingForOther
+                            && proposedTime != null
+                            && !proposedTime.isBefore(current);
                     return new OrderDtos.ScheduleProposalDto(
                             rs.getObject("id", UUID.class),
                             rs.getObject("ma_giao_dich", UUID.class),
                             proposedById,
                             rs.getString("proposer_name"),
-                            toInstant(rs.getTimestamp("thoi_gian_de_xuat")),
+                            proposedTime,
                             rs.getString("dia_diem_de_xuat"),
                             rs.getString("ghi_chu"),
                             proposalStatus,
@@ -1390,7 +1418,7 @@ public class OrderService {
                             toInstant(rs.getTimestamp("thoi_diem_phan_hoi")),
                             rs.getString("ly_do_tu_choi"),
                             toInstant(rs.getTimestamp("created_at")),
-                            isPendingForOther,
+                            canConfirm,
                             isPendingForOther
                     );
                 },
@@ -1430,22 +1458,75 @@ public class OrderService {
     }
 
     private void lockAndVerifyActiveSeller(UUID sellerId) {
-        reputationLedger.reconcileExpiredTemporaryLock(sellerId);
-        List<Map<String, Object>> rows = db.queryForList(
+        List<Map<String, Object>> rows = lockMemberRowForNoKeyUpdate(sellerId);
+        evaluateMemberRow(rows);
+    }
+
+    private List<Map<String, Object>> lockMemberRowForNoKeyUpdate(UUID memberId) {
+        reputationLedger.reconcileExpiredTemporaryLock(memberId);
+        return db.queryForList(
                 """
                 SELECT user_id, diem_uy_tin, trang_thai_tai_khoan, email_verified, profile_approved,
                        khoa_den_ngay, loai_han_che, ly_do_han_che, cho_phep_khieu_nai
                 FROM thanh_viens
                 WHERE user_id = ?
-                FOR UPDATE
+                FOR NO KEY UPDATE
                 """,
-                sellerId
+                memberId
         );
-        evaluateMemberRow(rows);
     }
 
-    private void lockSellerRowOnly(UUID sellerId) {
-        db.queryForList("SELECT user_id FROM thanh_viens WHERE user_id = ? FOR UPDATE", UUID.class, sellerId);
+    private boolean lockBuyerAndSellerCanonicalForCancel(UUID buyerId, UUID sellerId) {
+        if (buyerId.toString().compareTo(sellerId.toString()) < 0) {
+            List<Map<String, Object>> buyerRows = lockMemberRowForNoKeyUpdate(buyerId);
+            evaluateMemberRow(buyerRows);
+            List<Map<String, Object>> sellerRows = lockMemberRowForNoKeyUpdate(sellerId);
+            return isMemberRowActive(sellerRows);
+        }
+        List<Map<String, Object>> sellerRows = lockMemberRowForNoKeyUpdate(sellerId);
+        boolean sellerActive = isMemberRowActive(sellerRows);
+        List<Map<String, Object>> buyerRows = lockMemberRowForNoKeyUpdate(buyerId);
+        evaluateMemberRow(buyerRows);
+        return sellerActive;
+    }
+
+    private boolean isMemberRowActive(List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) {
+            return false;
+        }
+        Map<String, Object> row = rows.getFirst();
+        return "HOAT_DONG".equals(String.valueOf(row.get("trang_thai_tai_khoan")))
+                && Boolean.TRUE.equals(row.get("email_verified"))
+                && Boolean.TRUE.equals(row.get("profile_approved"));
+    }
+
+    private UUID lookupListingSellerIdOrThrow(UUID listingId) {
+        List<UUID> rows = db.queryForList(
+                "SELECT nguoi_dang_id FROM tin_dangs WHERE ma_tin = ?",
+                UUID.class,
+                listingId
+        );
+        if (rows.isEmpty()) {
+            throw new AuthFailure(404, "LISTING_NOT_FOUND", "Không tìm thấy tin đăng.");
+        }
+        return rows.getFirst();
+    }
+
+    private void lockMembersForKeyShareSorted(UUID first, UUID second) {
+        UUID[] sorted = first.toString().compareTo(second.toString()) <= 0
+                ? new UUID[]{first, second}
+                : new UUID[]{second, first};
+        db.query(
+                con -> {
+                    PreparedStatement ps = con.prepareStatement(
+                            "SELECT user_id FROM thanh_viens WHERE user_id = ANY(?) ORDER BY user_id ASC FOR KEY SHARE"
+                    );
+                    ps.setArray(1, con.createArrayOf("uuid", sorted));
+                    return ps;
+                },
+                rs -> {
+                }
+        );
     }
 
     private boolean isAccountActivelyAvailableReadOnly(UUID userId, Instant current) {
@@ -1517,7 +1598,7 @@ public class OrderService {
                 SELECT ma_tin, nguoi_dang_id, tieu_de, gia_vnd, hinh_thuc, trang_thai, expires_at, version
                 FROM tin_dangs
                 WHERE ma_tin = ?
-                FOR UPDATE
+                FOR NO KEY UPDATE
                 """,
                 (rs, rowNum) -> new LockedListing(
                         rs.getObject("ma_tin", UUID.class),
@@ -1548,7 +1629,7 @@ public class OrderService {
                        thoi_diem_bao_giao, thoi_diem_hoan_tat, thoi_diem_huy, updated_at, version
                 FROM giao_dichs
                 WHERE ma_giao_dich = ?
-                FOR UPDATE
+                FOR NO KEY UPDATE
                 """,
                 (rs, rowNum) -> new LockedOrder(
                         rs.getObject("ma_giao_dich", UUID.class),
@@ -1591,7 +1672,7 @@ public class OrderService {
                 FROM lich_hen_giao_dichs lh
                 JOIN thanh_viens u ON u.user_id = lh.nguoi_de_xuat_id
                 WHERE lh.id = ? AND lh.ma_giao_dich = ?
-                FOR UPDATE OF lh
+                FOR NO KEY UPDATE OF lh
                 """,
                 (rs, rowNum) -> new ScheduleProposalRow(
                         rs.getObject("id", UUID.class),
@@ -1627,7 +1708,7 @@ public class OrderService {
     private List<UUID> findOrderItemIdsSorted(UUID orderId, UUID listingId) {
         LinkedHashSet<UUID> union = new LinkedHashSet<>();
         union.addAll(db.queryForList(
-                "SELECT ma_vat FROM giao_dich_do_vat WHERE ma_giao_dich = ? ORDER BY ma_vat ASC",
+                "SELECT ma_vat FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND ma_vat IS NOT NULL ORDER BY ma_vat ASC",
                 UUID.class,
                 orderId
         ));
@@ -1654,7 +1735,7 @@ public class OrderService {
                             FROM do_vats
                             WHERE ma_vat = ANY(?)
                             ORDER BY ma_vat ASC
-                            FOR UPDATE
+                            FOR NO KEY UPDATE
                             """
                     );
                     ps.setArray(1, con.createArrayOf("uuid", sorted));
@@ -1676,10 +1757,15 @@ public class OrderService {
         db.update("DELETE FROM giao_dich_do_vat WHERE ma_giao_dich = ?", orderId);
         for (UUID itemId : itemIds) {
             db.update(
-                    "INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, giu_hieu_luc) VALUES (?, ?, ?)",
+                    """
+                    INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, ten_vat_snapshot, tinh_trang_snapshot, giu_hieu_luc)
+                    SELECT ?, d.ma_vat, d.ten, d.tinh_trang, ?
+                    FROM do_vats d
+                    WHERE d.ma_vat = ?
+                    """,
                     orderId,
-                    itemId,
-                    activeHold
+                    activeHold,
+                    itemId
             );
         }
     }

@@ -700,6 +700,23 @@ class OrderApiTest extends BaseIntegrationTest {
                 .body("items[0].orderId", equalTo(orderId.toString()))
                 .extract().response();
 
+        // UC-17 edit bumps pending YEU_CAU order version so stale expectedVersion=0 is rejected with 409 VERSION_CONFLICT
+        given()
+                .auth().oauth2(seller.token())
+                .get("/api/v1/orders/" + orderId)
+                .then()
+                .statusCode(200)
+                .body("version", equalTo(1));
+
+        given()
+                .auth().oauth2(seller.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("expectedVersion", 0))
+                .post("/api/v1/orders/" + orderId + "/accept")
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
+
         String notifId = notifResp.jsonPath().getString("items[0].id");
         given()
                 .auth().oauth2(buyer.token())
@@ -780,6 +797,19 @@ class OrderApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(409)
                 .body("code", equalTo("LISTING_NOT_AVAILABLE"));
+
+        // Paid listing (priceVnd > 0) MUST reject agreedPriceVnd == 0 with 400 INVALID_INPUT
+        UUID paidItem = createItem(seller.token(), "Bàn học gỗ trả phí");
+        UUID paidListing = publishListing(seller.token(), "Bàn học gỗ KTX", 120000, List.of(paidItem));
+        given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("listingId", paidListing.toString(), "agreedPriceVnd", 0))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"))
+                .body("message", equalTo("Tin đăng có phí không thể đặt giá thỏa thuận bằng 0đ."));
 
         // Free combo (BAN_COMBO with gia_vnd = 0) + input validations
         UUID freeComboItem1 = createItem(seller.token(), "Sách Giải tích 1");
@@ -1040,14 +1070,25 @@ class OrderApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(200);
 
-        // Pending order detail immediately reflects BOTH updated items before accept
+        // Pending order detail immediately reflects BOTH updated items and bumped version before accept
         given()
                 .auth().oauth2(seller.token())
                 .get("/api/v1/orders/" + orderId)
                 .then()
                 .statusCode(200)
                 .body("items", hasSize(2))
-                .body("listing.isCombo", equalTo(true));
+                .body("listing.isCombo", equalTo(true))
+                .body("version", equalTo(1));
+
+        // Stale expectedVersion=0 after UC-17 listing update MUST fail with 409 VERSION_CONFLICT
+        given()
+                .auth().oauth2(seller.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("expectedVersion", 0))
+                .post("/api/v1/orders/" + orderId + "/accept")
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("VERSION_CONFLICT"));
 
         // Backdate buyer's draft proposedMeetingTime into the past -> accept must NOT seed a past pending proposal
         db.update(
@@ -1056,16 +1097,17 @@ class OrderApiTest extends BaseIntegrationTest {
                 orderId
         );
 
-        // Accept succeeds (buyer's expired temp lock allowed per FR-12), locks BOTH items, and skips expired draft schedule
+        // Accept succeeds with refreshed expectedVersion=1 (buyer's expired temp lock allowed per FR-12),
+        // locks BOTH items, skips expired draft schedule, AND ignores any unilateral price override attempt (keeps 90000)
         given()
                 .auth().oauth2(seller.token())
                 .contentType(ContentType.JSON)
-                .body(Map.of("expectedVersion", 0, "agreedPriceVnd", 110000))
+                .body(Map.of("expectedVersion", 1, "agreedPriceVnd", 999000))
                 .post("/api/v1/orders/" + orderId + "/accept")
                 .then()
                 .statusCode(200)
                 .body("status", equalTo("GIU_CHO"))
-                .body("agreedPriceVnd", equalTo(110000))
+                .body("agreedPriceVnd", equalTo(90000))
                 .body("items", hasSize(2))
                 .body("pendingScheduleProposal", nullValue());
 
@@ -1111,7 +1153,8 @@ class OrderApiTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemWithdraw))
                 .isEqualTo("KHA_DUNG");
 
-        // UC-09 regression (V7 ON DELETE CASCADE): after withdraw listing, seller CAN delete item from inventory (204)
+        // UC-09 regression (V7 ON DELETE SET NULL): after withdraw listing, seller CAN delete item (204)
+        // AND cancelled order STILL preserves historical item snapshot & itemCount == 1
         given()
                 .auth().oauth2(seller.token())
                 .contentType(ContentType.JSON)
@@ -1124,8 +1167,20 @@ class OrderApiTest extends BaseIntegrationTest {
                 .delete("/api/v1/inventory/" + itemWithdraw)
                 .then()
                 .statusCode(204);
+        given()
+                .auth().oauth2(buyer.token())
+                .get("/api/v1/orders/" + pendingOrder)
+                .then()
+                .statusCode(200)
+                .body("items", hasSize(1))
+                .body("items[0].id", notNullValue())
+                .body("items[0].name", equalTo("Gối tựa lưng"))
+                .body("items[0].condition", equalTo("Mới 95%"))
+                .body("items[0].status", equalTo("DA_XOA"))
+                .body("items[0].heldByThisOrder", equalTo(false));
 
         // 2. UC-09 regression after GIU_CHO -> cancel -> withdraw listing -> DELETE inventory returns 204
+        //    AND GET /orders/{id} + GET /orders still preserve historical item snapshot & itemCount == 1
         UUID itemAfterCancel = createItem(seller.token(), "Kệ dép nhựa");
         UUID listingAfterCancel = publishListing(seller.token(), "Kệ dép 3 tầng", 35000, List.of(itemAfterCancel));
         UUID orderAfterCancel = UUID.fromString(given()
@@ -1144,6 +1199,25 @@ class OrderApiTest extends BaseIntegrationTest {
         given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of("version", listingVer))
                 .post("/api/v1/listings/" + listingAfterCancel + "/withdraw").then().statusCode(200);
         given().auth().oauth2(seller.token()).delete("/api/v1/inventory/" + itemAfterCancel).then().statusCode(204);
+
+        given()
+                .auth().oauth2(buyer.token())
+                .get("/api/v1/orders/" + orderAfterCancel)
+                .then()
+                .statusCode(200)
+                .body("items", hasSize(1))
+                .body("items[0].id", notNullValue())
+                .body("items[0].name", equalTo("Kệ dép nhựa"))
+                .body("items[0].condition", equalTo("Mới 95%"))
+                .body("items[0].status", equalTo("DA_XOA"))
+                .body("items[0].heldByThisOrder", equalTo(false));
+        given()
+                .auth().oauth2(buyer.token())
+                .get("/api/v1/orders?listingId=" + listingAfterCancel)
+                .then()
+                .statusCode(200)
+                .body("totalElements", equalTo(1))
+                .body("items[0].itemCount", equalTo(1));
 
         // 3. HOAN_TAT -> 409 ORDER_ALREADY_COMPLETED; CHO_XU_LY & DANG_GIAO+reportedDeliveredAt -> 409 POST_DELIVERY_CANCELLATION_REQUIRED
         UUID itemTerm = createItem(seller.token(), "Bình giữ nhiệt");
@@ -1703,5 +1777,189 @@ class OrderApiTest extends BaseIntegrationTest {
                 .then().statusCode(403);
         given().auth().oauth2(pendingMember.token()).get("/api/v1/notifications")
                 .then().statusCode(403);
+    }
+
+    @Test
+    void uc25RejectsExpiredPendingScheduleProposalAndKeepsStartDeliveryBlocked() {
+        MemberAccount seller = createActiveMember("SellerExpiredProp");
+        MemberAccount buyer = createActiveMember("BuyerExpiredProp");
+
+        UUID item = createItem(seller.token(), "Đèn bàn học sinh");
+        UUID listing = publishListing(seller.token(), "Đèn bàn chống cận", 85000, List.of(item));
+
+        UUID orderId = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("listingId", listing.toString()))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(201)
+                .extract().jsonPath().getString("id"));
+
+        given().auth().oauth2(seller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + orderId + "/accept").then().statusCode(200);
+
+        Instant futureTime = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+        UUID proposalId = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("proposedTime", futureTime.toString(), "proposedLocation", "Cổng KTX A"))
+                .post("/api/v1/orders/" + orderId + "/schedules")
+                .then()
+                .statusCode(201)
+                .extract().jsonPath().getString("pendingScheduleProposal.id"));
+
+        // Backdate proposal time into the past -> confirmSchedule MUST reject with 409 PROPOSAL_EXPIRED
+        db.update(
+                "UPDATE lich_hen_giao_dichs SET thoi_gian_de_xuat = ? WHERE id = ?",
+                Timestamp.from(Instant.now().minus(15, ChronoUnit.MINUTES)),
+                proposalId
+        );
+
+        given()
+                .auth().oauth2(seller.token())
+                .get("/api/v1/orders/" + orderId)
+                .then()
+                .statusCode(200)
+                .body("pendingScheduleProposal.canConfirm", equalTo(false))
+                .body("pendingScheduleProposal.canReject", equalTo(true));
+
+        given()
+                .auth().oauth2(seller.token())
+                .post("/api/v1/orders/" + orderId + "/schedules/" + proposalId + "/confirm")
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("PROPOSAL_EXPIRED"));
+
+        assertThat(db.queryForObject(
+                "SELECT lich_hen_da_xac_nhan FROM giao_dichs WHERE ma_giao_dich = ?",
+                Boolean.class,
+                orderId
+        )).isFalse();
+
+        // startDelivery MUST remain blocked with 409 SCHEDULE_NOT_CONFIRMED
+        given()
+                .auth().oauth2(seller.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of())
+                .post("/api/v1/orders/" + orderId + "/start-delivery")
+                .then()
+                .statusCode(409)
+                .body("code", equalTo("SCHEDULE_NOT_CONFIRMED"));
+    }
+
+    @Test
+    void uc24BuyerCancelClosesListingToDaRutWhenSellerLockedOrDisabledAndReopensIfTempLockExpired() {
+        MemberAccount buyer = createActiveMember("BuyerCancelSellerState");
+
+        // Case 1: Seller becomes BI_KHOA (active lock) -> buyer cancel releases item & transitions listing to DA_RUT
+        MemberAccount lockedSeller = createActiveMember("LockedSellerCancel");
+        UUID itemLocked = createItem(lockedSeller.token(), "Bàn gấp sinh viên");
+        UUID listingLocked = publishListing(lockedSeller.token(), "Bàn gấp KTX A", 75000, List.of(itemLocked));
+        UUID orderLocked = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("listingId", listingLocked.toString()))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(201)
+                .extract().jsonPath().getString("id"));
+        given().auth().oauth2(lockedSeller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + orderLocked + "/accept").then().statusCode(200);
+
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', khoa_den_ngay = ? WHERE user_id = ?",
+                Timestamp.from(Instant.now().plus(7, ChronoUnit.DAYS)),
+                lockedSeller.id()
+        );
+
+        given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "Người bán bị khóa tài khoản"))
+                .post("/api/v1/orders/" + orderLocked + "/cancel")
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("HUY"));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemLocked))
+                .isEqualTo("KHA_DUNG");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listingLocked))
+                .isEqualTo("DA_RUT");
+        assertThat(db.queryForObject("SELECT closed_at FROM tin_dangs WHERE ma_tin = ?", Timestamp.class, listingLocked))
+                .isNotNull();
+
+        // Case 2: Seller becomes VO_HIEU_HOA -> buyer cancel releases item & transitions listing to DA_RUT
+        MemberAccount disabledSeller = createActiveMember("DisabledSellerCancel");
+        UUID itemDisabled = createItem(disabledSeller.token(), "Quạt sạc mini");
+        UUID listingDisabled = publishListing(disabledSeller.token(), "Quạt sạc KTX B", 60000, List.of(itemDisabled));
+        UUID orderDisabled = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("listingId", listingDisabled.toString()))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(201)
+                .extract().jsonPath().getString("id"));
+        given().auth().oauth2(disabledSeller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + orderDisabled + "/accept").then().statusCode(200);
+
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'VO_HIEU_HOA', loai_han_che = NULL, khoa_den_ngay = NULL WHERE user_id = ?",
+                disabledSeller.id()
+        );
+
+        given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "Người bán bị vô hiệu hóa"))
+                .post("/api/v1/orders/" + orderDisabled + "/cancel")
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("HUY"));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemDisabled))
+                .isEqualTo("KHA_DUNG");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listingDisabled))
+                .isEqualTo("DA_RUT");
+        assertThat(db.queryForObject("SELECT closed_at FROM tin_dangs WHERE ma_tin = ?", Timestamp.class, listingDisabled))
+                .isNotNull();
+
+        // Case 3 (FR-12): Seller had an EXPIRED temporary lock -> reconciled to HOAT_DONG, listing reopens to CONG_KHAI
+        MemberAccount expiredLockSeller = createActiveMember("ExpiredLockSellerCancel");
+        UUID itemExpiredLock = createItem(expiredLockSeller.token(), "Giá treo quần áo");
+        UUID listingExpiredLock = publishListing(expiredLockSeller.token(), "Giá treo inox", 95000, List.of(itemExpiredLock));
+        UUID orderExpiredLock = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("listingId", listingExpiredLock.toString()))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(201)
+                .extract().jsonPath().getString("id"));
+        given().auth().oauth2(expiredLockSeller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/orders/" + orderExpiredLock + "/accept").then().statusCode(200);
+
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', khoa_den_ngay = ? WHERE user_id = ?",
+                Timestamp.from(Instant.now().minus(1, ChronoUnit.HOURS)),
+                expiredLockSeller.id()
+        );
+
+        given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "Hủy sau khi hết khóa tạm"))
+                .post("/api/v1/orders/" + orderExpiredLock + "/cancel")
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("HUY"));
+
+        assertThat(db.queryForObject("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class, expiredLockSeller.id()))
+                .isEqualTo("HOAT_DONG");
+        assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemExpiredLock))
+                .isEqualTo("KHA_DUNG");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listingExpiredLock))
+                .isEqualTo("CONG_KHAI");
     }
 }
