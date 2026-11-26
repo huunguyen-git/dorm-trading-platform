@@ -200,6 +200,27 @@ class GovernanceIntegrationTest extends BaseIntegrationTest {
         assertThat(auditCount()).isEqualTo(1);
         assertThat(db.queryForObject("select ten from thang_phats where ma_thang_phat=?", String.class, id)).isEqualTo(name);
     }
+    @Test
+    void deactivatedPenaltyNamesCanBeReusedButDeactivatedPenaltyCannotBeEdited() {
+        String name = "Reusable " + UUID.randomUUID();
+        String id = create(name, 5, "initial").jsonPath().getString("id");
+        post("/penalties/" + id + "/deactivate", Map.of("version", 0)).then().statusCode(200);
+
+        String replacementId = create("  " + name.toUpperCase(Locale.ROOT) + "  ", 3, "replacement")
+                .then().statusCode(201).extract().jsonPath().getString("id");
+        assertThat(replacementId).isNotEqualTo(id);
+        put("/penalties/" + id, Map.of("name", name + " edited", "points", 7, "version", 1))
+                .then().statusCode(409);
+        assertThat(db.queryForObject("select count(*) from thang_phats where lower(ten)=lower(?)", Long.class, name))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void penaltyDescriptionAcceptsFourThousandCharactersAndRejectsLongerValues() {
+        create("Description boundary " + UUID.randomUUID(), 2, "x".repeat(4000)).then().statusCode(201);
+        post("/penalties", Map.of("name", "Too long " + UUID.randomUUID(), "points", 2, "description", "x".repeat(4001)))
+                .then().statusCode(400);
+    }
 
     @Test
     void penaltyUpdatesUseOptimisticVersionsAndAuditExactBeforeAfter() throws Exception {

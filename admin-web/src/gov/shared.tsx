@@ -41,8 +41,10 @@ export function Pagination({ page, data, loading, onPage, label }: {
 }) {
   const total = data?.total;
   const pages = total === undefined ? undefined : Math.max(1, Math.ceil(total / pageSize));
+  const message = data ? `${total} kết quả · Trang ${page + 1}/${Math.max(page + 1, pages ?? 1)}`
+    : loading ? 'Đang tải phân trang…' : 'Không có dữ liệu phân trang.';
   return <nav className="gov-pagination" aria-label={label}>
-    <span>{total === undefined ? 'Đang tải phân trang…' : `${total} kết quả · Trang ${page + 1}/${Math.max(page + 1, pages ?? 1)}`}</span>
+    <span>{message}</span>
     <div className="gov-actions">
       <button type="button" className="button" disabled={loading || page === 0} onClick={() => onPage(page - 1)}>Trước</button>
       <button type="button" className="button" disabled={loading || !data || (page + 1) * pageSize >= data.total} onClick={() => onPage(page + 1)}>Sau</button>
@@ -97,6 +99,13 @@ function Snapshot({ title, value }: { title: string; value: Audit['before'] }) {
 }
 export function AuditHistory({ resourceType, revision }: { resourceType: Audit['resourceType']; revision: number }) {
   const [page, setPage] = useState(0);
+  const previousRevision = useRef(revision);
+  useEffect(() => {
+    if (previousRevision.current !== revision) {
+      previousRevision.current = revision;
+      setPage(0);
+    }
+  }, [revision]);
   const history = usePage<Audit>(listPath('audit', page, { resourceType }), revision);
   return <section className="gov-card gov-history" aria-labelledby={`history-${resourceType}`}>
     <header className="gov-section-heading"><div><p className="eyebrow">TRUY VẾT THAY ĐỔI</p><h2 id={`history-${resourceType}`}>Lịch sử {resourceType === 'MODERATOR' ? 'vai trò kiểm duyệt viên' : 'thang phạt'}</h2><p className="gov-muted">Chỉ đọc · Mới nhất trước · Ghi nhận người thực hiện và giá trị trước / sau.</p></div><button type="button" className="button" onClick={history.reload} disabled={history.loading}>Tải lại lịch sử</button></header>

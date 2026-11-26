@@ -9,20 +9,26 @@ function PenaltyEditor({ penalty, onClose, onSuccess, onReload }: {
   const [name, setName] = useState(penalty?.name ?? '');
   const [points, setPoints] = useState(penalty ? String(penalty.points) : '');
   const [description, setDescription] = useState(penalty?.description ?? '');
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; points?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; points?: string; description?: string }>({});
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const pointsInput = useRef<HTMLInputElement>(null);
+  const descriptionInput = useRef<HTMLTextAreaElement>(null);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     const invalidName = !name.trim() ? 'Nhập tên mức phạt.' : undefined;
     const invalidPoints = !/^\d+$/.test(points) || Number(points) < 1 || Number(points) > 2147483647
       ? 'Điểm trừ phải là số nguyên từ 1 đến 2.147.483.647.' : undefined;
-    setFieldErrors({ name: invalidName, points: invalidPoints });
-    if (invalidName || invalidPoints) { (invalidName ? nameInput : pointsInput).current?.focus(); return; }
+    const invalidDescription = description.length > 4000 ? 'Mô tả tối đa 4.000 ký tự.' : undefined;
+    setFieldErrors({ name: invalidName, points: invalidPoints, description: invalidDescription });
+    if (invalidName || invalidPoints || invalidDescription) {
+      const invalidField = invalidName ? nameInput.current : invalidPoints ? pointsInput.current : descriptionInput.current;
+      invalidField?.focus();
+      return;
+    }
     setBusy(true); setError(''); setConflict(false);
     try {
       await api<Penalty>(`${seniorApi}/penalties${penalty ? `/${encodeURIComponent(penalty.id)}` : ''}`, {
@@ -42,7 +48,8 @@ function PenaltyEditor({ penalty, onClose, onSuccess, onReload }: {
         <label htmlFor="penalty-points"><span>Số điểm trừ <span className="gov-required">(bắt buộc)</span></span><input ref={pointsInput} id="penalty-points" type="text" inputMode="numeric" value={points} onChange={(event) => setPoints(event.target.value)} required aria-invalid={!!fieldErrors.points} aria-describedby={`penalty-points-help${fieldErrors.points ? ' penalty-points-error' : ''}`} /></label>
         <p className="gov-muted gov-field-help" id="penalty-points-help">Số nguyên dương, tối đa 2.147.483.647; không nhập số thập phân.</p>
         {fieldErrors.points && <p className="error gov-field-error" id="penalty-points-error" role="alert">{fieldErrors.points}</p>}
-        <label htmlFor="penalty-description">Mô tả áp dụng<textarea id="penalty-description" rows={4} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+        <label htmlFor="penalty-description">Mô tả áp dụng<textarea ref={descriptionInput} id="penalty-description" rows={4} maxLength={4000} value={description} onChange={(event) => setDescription(event.target.value)} aria-invalid={!!fieldErrors.description} aria-describedby={fieldErrors.description ? 'penalty-description-error' : undefined} /></label>
+        {fieldErrors.description && <p className="error gov-field-error" id="penalty-description-error" role="alert">{fieldErrors.description}</p>}
       </fieldset>
       {error && <div className="notice notice-error" role="alert"><p>{error}</p>{conflict && <><p>Tên có thể đã tồn tại hoặc mức phạt đã được người khác thay đổi. Dữ liệu bạn nhập vẫn được giữ. Kiểm tra tên; nếu xung đột phiên bản, tải lại danh sách rồi mở lại bản mới trước khi sửa.</p><button type="button" className="button" disabled={busy} onClick={onReload}>Tải lại danh sách (đóng biểu mẫu)</button></>}</div>}
       <div className="gov-dialog-actions"><button type="button" className="button" disabled={busy} onClick={onClose}>Hủy</button><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Đang lưu…' : 'Lưu mức phạt'}</button></div>
@@ -82,7 +89,7 @@ export default function PenaltiesPage() {
     <section className="gov-card" aria-label="Danh sách thang phạt">
       <form className="gov-toolbar" onSubmit={(event) => { event.preventDefault(); setQuery(search.trim()); setPage(0); penalties.reload(); }}><label className="gov-search" htmlFor="penalty-search">Tìm mức phạt<input id="penalty-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tên hoặc mô tả mức phạt" /></label><label htmlFor="penalty-status">Trạng thái<select id="penalty-status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(0); }}><option value="">Tất cả trạng thái</option><option value="DANG_DUNG">Đang sử dụng</option><option value="NGUNG_SU_DUNG">Ngừng sử dụng</option></select></label><button className="button" type="submit">Tìm kiếm</button><button className="button" type="button" disabled={penalties.loading} onClick={penalties.reload}>Tải lại</button></form>
       <LoadState {...penalties} empty={penalties.data?.items.length === 0} emptyText={query || status ? 'Không có mức phạt phù hợp. Thử thay đổi từ khóa hoặc trạng thái.' : 'Chưa có mức phạt. Chọn “Thêm mức phạt” để quy định thang phạt.'} />
-      {penalties.data && penalties.data.items.length > 0 && <div className="gov-table-wrap"><table className="gov-table"><caption className="gov-sr-only">Các mức phạt trong thang phạt</caption><thead><tr><th scope="col">Tên mức phạt</th><th scope="col">Điểm trừ</th><th scope="col">Mô tả</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{penalties.data.items.map((penalty) => <tr key={penalty.id}><td data-label="Tên mức phạt"><strong>{penalty.name}</strong></td><td data-label="Điểm trừ" className="gov-points">{penalty.points.toLocaleString('vi-VN')}</td><td data-label="Mô tả" className="gov-description">{penalty.description || '—'}</td><td data-label="Trạng thái"><span className={`status-badge ${penalty.status === 'DANG_DUNG' ? 'gov-badge-active' : ''}`}>{readable(penalty.status)}</span></td><td data-label="Thao tác"><div className="gov-row-actions"><button type="button" className="button" aria-label={`Sửa ${penalty.name}`} onClick={() => { setSuccess(''); setEditor({ penalty }); }}>Sửa</button>{penalty.status === 'DANG_DUNG' && <button type="button" className="button gov-button-danger" aria-label={`Ngừng sử dụng ${penalty.name}`} onClick={() => { setDeactivating(penalty); setError(''); setConflict(false); setSuccess(''); }}>Ngừng sử dụng</button>}</div></td></tr>)}</tbody></table></div>}
+      {penalties.data && penalties.data.items.length > 0 && <div className="gov-table-wrap"><table className="gov-table"><caption className="gov-sr-only">Các mức phạt trong thang phạt</caption><thead><tr><th scope="col">Tên mức phạt</th><th scope="col">Điểm trừ</th><th scope="col">Mô tả</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{penalties.data.items.map((penalty) => <tr key={penalty.id}><td data-label="Tên mức phạt"><strong>{penalty.name}</strong></td><td data-label="Điểm trừ" className="gov-points">{penalty.points.toLocaleString('vi-VN')}</td><td data-label="Mô tả" className="gov-description">{penalty.description || '—'}</td><td data-label="Trạng thái"><span className={`status-badge ${penalty.status === 'DANG_DUNG' ? 'gov-badge-active' : ''}`}>{readable(penalty.status)}</span></td><td data-label="Thao tác"><div className="gov-actions">{penalty.status === 'DANG_DUNG' && <><button type="button" className="button" onClick={() => setEditor({ penalty })}>Sửa</button><button type="button" className="button gov-button-danger" onClick={() => { setError(''); setConflict(false); setDeactivating(penalty); }}>Ngừng sử dụng</button></>}</div></td></tr>)}</tbody></table></div>}
       <Pagination page={page} data={penalties.data} loading={penalties.loading} onPage={setPage} label="Phân trang thang phạt" />
     </section>
     <AuditHistory resourceType="PENALTY" revision={revision} />

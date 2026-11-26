@@ -1,5 +1,6 @@
 package com.dormtrading.gov;
 
+import java.sql.SQLException;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,7 +31,18 @@ class GovernanceErrors {
 
     @ExceptionHandler(DuplicateKeyException.class)
     ResponseEntity<Map<String, String>> duplicate(DuplicateKeyException failure) {
-        return error(409, "DUPLICATE_NAME", "Tên mức phạt đã tồn tại; vui lòng chọn tên khác.");
+        if (isActivePenaltyNameConstraint(failure))
+            return error(409, "DUPLICATE_NAME", "Tên mức phạt đã tồn tại; vui lòng chọn tên khác.");
+        LOG.error("Governance unique constraint failed", failure);
+        return error(503, "GOVERNANCE_UNAVAILABLE", "Chưa lưu được thay đổi. Không có thay đổi nào được áp dụng; vui lòng thử lại.");
+    }
+
+    private boolean isActivePenaltyNameConstraint(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql && sql.getMessage() != null
+                    && sql.getMessage().contains("uq_penalty_name_active")) return true;
+        }
+        return false;
     }
 
     @ExceptionHandler(ConcurrencyFailureException.class)

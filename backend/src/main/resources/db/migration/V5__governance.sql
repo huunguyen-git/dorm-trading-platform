@@ -7,7 +7,7 @@ ALTER TABLE thang_phats ADD COLUMN mo_ta TEXT NOT NULL DEFAULT '';
 ALTER TABLE thang_phats ADD COLUMN version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0);
 ALTER TABLE thang_phats ADD CONSTRAINT ck_penalty_name CHECK (length(btrim(ten)) > 0);
 ALTER TABLE thang_phats ADD CONSTRAINT ck_penalty_status CHECK (trang_thai IN ('DANG_DUNG', 'NGUNG_SU_DUNG'));
-CREATE UNIQUE INDEX uq_penalty_name_normalized ON thang_phats(lower(btrim(ten)));
+CREATE UNIQUE INDEX uq_penalty_name_active ON thang_phats(lower(btrim(ten))) WHERE trang_thai = 'DANG_DUNG';
 
 CREATE TABLE governance_audit (
     id UUID PRIMARY KEY,

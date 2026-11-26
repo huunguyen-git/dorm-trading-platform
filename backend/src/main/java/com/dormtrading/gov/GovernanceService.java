@@ -145,6 +145,7 @@ public class GovernanceService {
         long version = version(input.version());
         Penalty before = penaltyById(id, true);
         checkVersion(before, version);
+        if (!"DANG_DUNG".equals(before.status())) throw conflict("PENALTY_INACTIVE", "Mức phạt đã ngừng sử dụng.");
         db.update("update thang_phats set ten=?,diem_tru=?,mo_ta=?,version=version+1 where ma_thang_phat=?",
                 values.name(), values.points(), values.description(), id);
         Penalty after = penaltyById(id, false);
@@ -254,7 +255,9 @@ public class GovernanceService {
         JsonNode points = input.points();
         if (points == null || !points.isIntegralNumber() || !points.canConvertToInt() || points.intValue() <= 0)
             throw invalid("Điểm trừ phải là số nguyên dương, tối đa 2147483647.");
-        return new PenaltyValues(name, points.intValue(), input.description() == null ? "" : input.description().strip());
+        String description = input.description() == null ? "" : input.description().strip();
+        if (description.length() > 4000) throw invalid("Mô tả tối đa 4.000 ký tự.");
+        return new PenaltyValues(name, points.intValue(), description);
     }
 
     private long version(JsonNode value) {

@@ -33,11 +33,11 @@ function AppointDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     finally { setBusy(false); }
   }
   return <Dialog title={selected ? 'Xác nhận bổ nhiệm' : 'Thêm kiểm duyệt viên'} busy={busy} onClose={onClose}>
-    {error && <div className="notice notice-error" role="alert"><p>{error}</p>{conflict && <><p>Thông tin hoặc quyền đã thay đổi. Tải lại danh sách và kiểm tra điều kiện trước khi chọn lại.</p><button type="button" className="button" disabled={busy} onClick={() => { candidates.reload(); setSelected(null); }}>Tải lại ứng viên</button></>}</div>}
+    {error && <div className="notice notice-error" role="alert"><p>{error}</p>{conflict && <><p>Thông tin hoặc quyền đã thay đổi. Tải lại danh sách và kiểm tra điều kiện trước khi chọn lại.</p><button type="button" className="button" disabled={busy} onClick={() => { candidates.reload(); setSelected(null); setError(''); setConflict(false); }}>Tải lại ứng viên</button></>}</div>}
     {selected ? <>
       <p>Bổ nhiệm <strong>{selected.name}</strong> làm kiểm duyệt viên? Người này sẽ có quyền kiểm duyệt tin đăng và xử lý báo cáo.</p>
       <dl className="gov-identity"><div><dt>MSSV</dt><dd>{selected.studentId}</dd></div><div><dt>Email</dt><dd>{selected.email}</dd></div></dl>
-      <div className="gov-dialog-actions"><button type="button" className="button" disabled={busy} onClick={onClose}>Hủy</button><button type="button" className="button" disabled={busy} onClick={() => { setSelected(null); setError(''); }}>Chọn người khác</button><button type="button" className="button button-primary" disabled={busy || conflict} onClick={() => void appoint()}>{busy ? 'Đang bổ nhiệm…' : 'Xác nhận bổ nhiệm'}</button></div>
+      <div className="gov-dialog-actions"><button type="button" className="button" disabled={busy} onClick={onClose}>Hủy</button><button type="button" className="button" disabled={busy} onClick={() => { setSelected(null); setError(''); setConflict(false); }}>Chọn người khác</button><button type="button" className="button button-primary" disabled={busy || conflict} onClick={() => void appoint()}>{busy ? 'Đang bổ nhiệm…' : 'Xác nhận bổ nhiệm'}</button></div>
     </> : <>
       <p className="gov-muted">Chọn tài khoản đang hoạt động, đã xác minh email, có hồ sơ được duyệt và chưa là kiểm duyệt viên.</p>
       <form className="gov-toolbar" onSubmit={searchCandidates}><label className="gov-search" htmlFor="candidate-search">Tìm người dùng<input id="candidate-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Họ tên, MSSV hoặc email" autoFocus /></label><button className="button" type="submit">Tìm kiếm</button></form>
