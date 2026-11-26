@@ -23,7 +23,7 @@ Nghiệm thu bằng tài khoản đăng ký từ mobile được duyệt trên w
 
 | Task | Hạng mục và UC | Phụ trách | Hạn | Trạng thái | Bàn giao |
 |---|---|---|---|---|---|
-| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu ([UC-01](use-cases/UC-01.md), [UC-03](use-cases/UC-03.md), [UC-04](use-cases/UC-04.md), [UC-07](use-cases/UC-07.md), [UC-08](use-cases/UC-08.md)) | Nguyễn Hữu Nguyên | 08/11 | Hoàn thành | [Chốt trạng thái 25/11](specs/P1-01.md#chốt-trạng-thái-theo-chỉ-định--25112026) theo yêu cầu người dùng. [PR #32](https://github.com/huunguyen-git/dorm-trading-platform/pull/32) đang mở, đã yêu cầu hoangnguyen1007 review. Bằng chứng 24/11: backend 53/53, web 43/43, mobile 22/22 và live API/SMTP đạt. Tồn đọng UI lỗi giao OTP, native đầy đủ và ghép P1-02 vẫn được theo dõi trong spec. |
+| P1-01 | Đăng ký, OTP, Đăng nhập & Mật khẩu ([UC-01](use-cases/UC-01.md), [UC-03](use-cases/UC-03.md), [UC-04](use-cases/UC-04.md), [UC-07](use-cases/UC-07.md), [UC-08](use-cases/UC-08.md)) | Nguyễn Hữu Nguyên | 08/11 | Chờ review | [Sửa theo review 26/11](specs/P1-01.md#sửa-theo-review-pr-32--26112026) trên [PR #32](https://github.com/huunguyen-git/dorm-trading-platform/pull/32) sau rebase `main` (#27 P1-03). Backend 78/78, web 45/45, mobile 47/47 và build/export đạt; live API/SMTP 24/11 và native 22/11 chưa chạy lại sau lượt sửa 26/11. Chờ CI `required` xanh và hoangnguyen1007 duyệt; tồn đọng UI lỗi giao OTP, native đầy đủ và ghép P1-02 giữ trong spec. |
 | P1-02 | Hồ sơ cá nhân & Duyệt kích hoạt ([UC-02](use-cases/UC-02.md), [UC-05](use-cases/UC-05.md), [UC-06](use-cases/UC-06.md)) | Nguyễn Bảo Việt | 14/11 | Chưa thực hiện | Hồ sơ mobile, duyệt kích hoạt trên web và API tương ứng; ghép với P1-01. |
 | P1-03 | Quản lý Kho hàng cá nhân ([UC-09](use-cases/UC-09.md)) | Nguyễn Quốc Nguyên | 12/11 | Chờ review | [Spec P1-03](specs/P1-03.md) · Scope: API backend + mobile client. Nhánh: `feat/p1-03-inventory-management`. Backend 68/68 (25/25 inventory), Mobile 36/36 (20/20 inventory), TypeScript 0 lỗi. |
 | P1-04 | Tra cứu & Sửa hồ sơ Người dùng ([UC-11](use-cases/UC-11.md), [UC-12](use-cases/UC-12.md)) | Lê Vũ Hoàng Nguyên | 12/11 | Chờ review | [Spec và kết quả 18/11](specs/P1-04.md) · Backend 40/40, web 33/33, mobile 16/16 và build đạt; tra cứu đa tiêu chí, xem/sửa ảnh thẻ, khóa lạc quan và vết kiểm duyệt đạt. Chờ Nguyễn Hữu Nguyên review độc lập và ghép P1-02. |
@@ -92,6 +92,8 @@ Nghiệm thu bằng bản cài trên thiết bị thật, web/API triển khai �
 | P4-06 | Tổng duyệt & Bảo vệ Đồ án | — | 19/12 | Chưa thực hiện | — |
 
 ## Bàn giao hiện tại
+
+- **P1-01 · sửa review 26/11**: chuyển về **Chờ review** theo `AGENTS.md` và review `CHANGES_REQUESTED` trên [PR #32](https://github.com/huunguyen-git/dorm-trading-platform/pull/32); xem [chi tiết sửa và bằng chứng](specs/P1-01.md#sửa-theo-review-pr-32--26112026). Đã rebase lên `main` (`0217c0d` · P1-03 #27, giữ `ApiError.code`), xử lý toàn bộ mục inline của `hoangnguyen1007` và 4 bổ sung của `huunguyen-git`: backend 78/78 (Java 24 + Testcontainers), web 45/45, mobile 47/47 và build/export đạt. Chờ CI `required` xanh trên commit mới và `hoangnguyen1007` approve. Các ghi chú P1-01 bên dưới là lịch sử.
 
 - **P1-01 · chốt 25/11**: chuyển **Hoàn thành** theo chỉ định người dùng; [chi tiết và tồn đọng](specs/P1-01.md#chốt-trạng-thái-theo-chỉ-định--25112026). PR #32 đang mở, đã yêu cầu **hoangnguyen1007** (Lê Vũ Hoàng Nguyên) review thay cho phân công Quốc Nguyên trước đây. Chưa có approval, chưa merge; không chuyển các phép kiểm còn thiếu thành đạt. Các trạng thái P1-01 theo ngày bên dưới là lịch sử.
 

@@ -4,6 +4,7 @@ import com.dormtrading.common.BaseIntegrationTest;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
 import com.dormtrading.review.reputation.ReputationLedgerService;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -562,7 +563,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
 
     @Test
     @DisplayName("UC-03 3.3 & Admin-web restriction: Admin-web trả 403 ACCOUNT_RESTRICTED khi BI_KHOA; tài khoản VO_HIEU_HOA trả 401 INVALID_CREDENTIALS")
-    void adminWebRestrictedAndDeletedAccountsFollowUc03Rules() {
+    void adminWebRestrictedAndDeletedAccountsFollowUc03Rules() throws Exception {
         var senior = createAccount(true, "QUAN_TRI_VIEN_CAP_CAO");
         var modTarget = createAccount(true, "KIEM_DUYET_VIEN");
         var deletedAccount = createAccount(true, null);
@@ -590,14 +591,14 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
                 .post("/api/v1/auth/login");
         assertThat(modWebLogin.statusCode()).isEqualTo(200);
-        String staleGenToken = modWebLogin.jsonPath().getString("token");
-        String staleGenCookie = modWebLogin.getCookie("dorm_refresh");
+        String changedPasswordToken = modWebLogin.jsonPath().getString("token");
+        String changedPasswordCookie = modWebLogin.getCookie("dorm_refresh");
 
-        // UC-07 revokes every session; sign in again to obtain a session for the lock test.
+        // UC-07 revokes every session; sign in again to obtain active sessions for the lock and stale-generation checks.
         String newPassword = "three mountains over clear valley";
         var rotated = given()
                 .header("Origin", ALLOWED_ORIGIN)
-                .auth().oauth2(staleGenToken)
+                .auth().oauth2(changedPasswordToken)
                 .contentType("application/json")
                 .body(Map.of("currentPassword", PASSWORD, "password", newPassword))
                 .post("/api/v1/auth/password/change");
@@ -609,9 +610,27 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(signedInAgain.statusCode()).isEqualTo(200);
         String modWebToken = signedInAgain.jsonPath().getString("token");
         String refreshCookie = signedInAgain.getCookie("dorm_refresh");
+        UUID modWebSid = UUID.fromString(SignedJWT.parse(modWebToken).getJWTClaimsSet().getStringClaim("sid"));
 
-        // Keep a stale-generation fixture independently of UC-07 revocation.
-        db.update("UPDATE auth_session SET generation = generation + 1 WHERE user_id = ? AND revoked = TRUE", modTarget.id());
+        var staleGenLogin = given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", newPassword, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(staleGenLogin.statusCode()).isEqualTo(200);
+        String staleGenToken = staleGenLogin.jsonPath().getString("token");
+        String staleGenCookie = staleGenLogin.getCookie("dorm_refresh");
+        UUID staleGenSid = UUID.fromString(SignedJWT.parse(staleGenToken).getJWTClaimsSet().getStringClaim("sid"));
+
+        // Bump generation on an unrevoked session so the stale-generation branch is verified independently of revocation.
+        int updatedStale = db.update(
+                "UPDATE auth_session SET generation = generation + 1 WHERE id = ? AND revoked = FALSE",
+                staleGenSid
+        );
+        assertThat(updatedStale).isEqualTo(1);
+        given().auth().oauth2(staleGenToken)
+                .get("/api/v1/admin/users")
+                .then()
+                .statusCode(401);
 
         // Senior admin permanently locks modTarget (revokes all admin-web sessions immediately)
         given().auth().oauth2(seniorToken)
@@ -622,15 +641,15 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(200);
 
-        // 1) Revoked, logged-out, and stale-generation admin-web tokens/refresh MUST fail with 401 (never leak restriction details)
-        for (String invalidatedToken : new String[]{loggedOutToken, staleGenToken, modWebToken}) {
+        // 1) Revoked, logged-out, password-changed, and stale-generation admin-web tokens/refresh MUST fail with 401 (never leak restriction details)
+        for (String invalidatedToken : new String[]{loggedOutToken, changedPasswordToken, staleGenToken, modWebToken}) {
             given().auth().oauth2(invalidatedToken)
                     .get("/api/v1/admin/users")
                     .then()
                     .statusCode(401);
         }
 
-        for (String invalidatedCookie : new String[]{staleGenCookie, refreshCookie}) {
+        for (String invalidatedCookie : new String[]{changedPasswordCookie, staleGenCookie, refreshCookie}) {
             given().header("Origin", ALLOWED_ORIGIN)
                     .cookie("dorm_refresh", invalidatedCookie)
                     .contentType("application/json")
@@ -652,8 +671,13 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("restriction.appealable", equalTo(true));
 
         // 3) If an unrevoked admin-web session exists while DB row is BI_KHOA, it returns 403 ACCOUNT_RESTRICTED as defense-in-depth,
-        // while stale-generation tokens on that unrevoked session STILL reject with 401 before BI_KHOA check.
-        db.update("UPDATE auth_session SET revoked = FALSE WHERE user_id = ? AND client = 'admin-web'", modTarget.id());
+        // while stale-generation tokens on an unrevoked session STILL reject with 401 before BI_KHOA check.
+        int restoredSessions = db.update(
+                "UPDATE auth_session SET revoked = FALSE WHERE id IN (?, ?)",
+                modWebSid,
+                staleGenSid
+        );
+        assertThat(restoredSessions).isEqualTo(2);
         given().auth().oauth2(modWebToken)
                 .get("/api/v1/admin/users")
                 .then()

@@ -85,6 +85,21 @@ describe('api client', () => {
     await expect(api('/auth/password/change', { method: 'POST' })).rejects.toThrow('Wrong password');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('handles lowercase bearer challenge on password change and surfaces Vietnamese refresh 401 message', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    const onExpire = vi.fn(); window.addEventListener('session-expired', onExpire);
+    fetchMock
+      .mockResolvedValueOnce(new Response('', { status: 401, headers: { 'www-authenticate': 'bearer error="invalid_token"' } }))
+      .mockResolvedValueOnce(new Response('', { status: 401 }));
+    try {
+      await expect(api('/auth/password/change', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+        status: 401,
+        message: 'Phiên đã hết hạn. Vui lòng đăng nhập lại.',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(onExpire).toHaveBeenCalledOnce();
+    } finally { window.removeEventListener('session-expired', onExpire); }
+  });
   it('rejects without calling fetch when VITE_API_URL is missing', async () => {
     vi.stubEnv('VITE_API_URL', '');
     await expect(api('/auth/me')).rejects.toThrow('VITE_API_URL is required');

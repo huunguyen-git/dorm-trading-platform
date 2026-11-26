@@ -388,8 +388,8 @@ public class AuthService {
         if (found == null) throw denied();
         String email = found.get("email").toString(); lock(email);
         found = one("select * from auth_reset_grant where secret_hash=?",digest(grant));
-        if (Boolean.TRUE.equals(found.get("used")) || !instant(found,"expires_at").isAfter(now())) throw denied();
-        var row = account(email);
+        if (found == null || Boolean.TRUE.equals(found.get("used")) || !instant(found,"expires_at").isAfter(now())) throw denied();
+        var row = one("select * from thanh_viens where user_id=?", found.get("user_id"));
         if (!recoverable(row)) {
             db.update("update auth_reset_grant set used=true where user_id=?", found.get("user_id"));
             throw denied();

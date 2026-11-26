@@ -362,3 +362,58 @@ test('logout succeeds on expired credentials but does not hide network failure',
   await expect(useSession.getState().logout()).rejects.toThrow('offline');
   expect(store.clear).not.toHaveBeenCalled();
 });
+
+test('handles lowercase www-authenticate bearer challenge on password change, clears restriction, and preserves Vietnamese refresh 401 message', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired');
+  store.getRefresh.mockResolvedValue('expired-refresh');
+  useSession.setState({
+    token: 'expired',
+    user: activeUser,
+    loading: false,
+    restriction: {
+      accountStatus: 'BI_KHOA',
+      lockType: 'KHOA_TAM_THOI',
+      reason: 'Cũ',
+      lockedUntil: null,
+      appealable: false,
+      reputationScore: 45,
+      message: 'Cũ',
+    },
+    restrictionDismissed: true,
+  });
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: { get: (name: string) => (name === 'www-authenticate' ? 'bearer error="invalid_token"' : null) },
+      text: async () => '',
+    })
+    .mockResolvedValueOnce({ status: 401, ok: false, text: async () => '' });
+
+  await expect(api('/auth/password/change', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+    status: 401,
+    message: 'Phiên đã hết hạn.',
+  });
+  expect(store.clear).toHaveBeenCalledTimes(1);
+  expect(useSession.getState().token).toBeNull();
+  expect(useSession.getState().user).toBeNull();
+  expect(useSession.getState().restriction).toBeNull();
+  expect(useSession.getState().restrictionDismissed).toBe(false);
+});
+
+test('preserves server error code on ApiError for 409 inventory conflicts', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('valid-jwt');
+  fetchMock.mockResolvedValueOnce({
+    status: 409,
+    ok: false,
+    text: async () => JSON.stringify({ code: 'VERSION_CONFLICT', message: 'Phiên bản dữ liệu đã cũ.' }),
+  });
+
+  await expect(api('/inventory/item-1', { method: 'PUT', body: '{}' })).rejects.toMatchObject({
+    status: 409,
+    code: 'VERSION_CONFLICT',
+    message: 'Phiên bản dữ liệu đã cũ.',
+  });
+});

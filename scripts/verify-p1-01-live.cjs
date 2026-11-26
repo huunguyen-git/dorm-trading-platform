@@ -101,15 +101,37 @@ async function requireFreePort(port) {
       await runNode(['scripts/verify-p1-01-android.cjs']);
     }
   } finally {
-    if (server) await server.close();
+    if (server) {
+      try { await server.close(); } catch {}
+    }
     const running = [...children];
     await Promise.all(running.map(child => new Promise(resolve => {
-      child.once('exit', resolve);
-      // Oracle's Windows javapath launcher starts a second JVM process. Kill the
-      // owned process tree so the API port is released even when using that shim.
-      if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      else child.kill();
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(finish, 5000);
+      child.once('exit', finish);
+      child.once('error', finish);
+      try {
+        // Oracle's Windows javapath launcher starts a second JVM process. Kill the
+        // owned process tree so the API port is released even when using that shim.
+        if (process.platform === 'win32' && child.pid) {
+          execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        } else {
+          child.kill();
+        }
+      } catch {
+        if (child.exitCode !== null || child.signalCode !== null) finish();
+      }
     })));
-    fs.closeSync(log);
+    try { fs.closeSync(log); } catch {}
   }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

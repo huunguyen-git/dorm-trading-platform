@@ -39,6 +39,6 @@ Có quên mật khẩu bằng OTP và đổi mật khẩu trong phiên. Đăng x
 
 Giao diện xác thực đã có nhãn, trạng thái xử lý/lỗi/thành công và các bước OTP/mật khẩu. Xem [checklist GUI](../docs/specs/P1-01-gui-checklist.md) để mở từng luồng, phân biệt test fixture với API thật và phần cần thử trên thiết bị.
 
-Mật khẩu mới cần 8–128 code point sau NFC. HTTP 429 hiển thị số giây chờ từ server. Tài khoản quản trị bị khóa có màn bảo mật hạn chế; không gọi được API quản trị.
+Mật khẩu mới cần 8–128 code point sau NFC. HTTP 429 hiển thị số giây chờ từ server. Tài khoản quản trị bị khóa (`BI_KHOA`) bị từ chối bằng `403 ACCOUNT_RESTRICTED` khi đăng nhập, làm mới phiên và gọi API bảo vệ (`/auth/me`, `/admin/**`); giao diện ẩn thao tác đổi mật khẩu và không gọi API quản trị.
 
 Lượt 22/11 đã kiểm web/API/SMTP thật, gồm reset, change → đăng nhập lại, logout khi refresh offline/503 và tài khoản khóa. Dùng [bộ chạy live](../scripts/verify-p1-01-live.cjs) từ root theo [hướng dẫn chuẩn bị](../docs/specs/P1-01-gui-checklist.md#chạy-lại-bộ-live--22112026); bộ chạy tự mở/đóng API và Vite trên cổng thử riêng.

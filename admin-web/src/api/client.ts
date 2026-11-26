@@ -12,6 +12,10 @@ export class ApiError extends Error {
   }
 }
 const baseUrl = () => { const url = import.meta.env.VITE_API_URL; if (!url) throw new Error('VITE_API_URL is required'); return url; };
+function hasBearerChallenge(response: Response): boolean {
+  const header = response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
+  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+}
 export async function refreshSession() {
   if (!refreshFlight) {
     const generation = epoch;
@@ -42,7 +46,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const send = () => fetch(`${origin}${path}`, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(!publicCall && accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...init.headers } });
   const sentToken = accessToken;
   let response = await send();
-  if (response.status === 401 && !publicCall && response.headers?.get('WWW-Authenticate')?.startsWith('Bearer')) {
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     try {
       if (accessToken === sentToken) await refreshSession();
       // A security-filter 401 occurs before the controller; never replay other errors.
@@ -56,10 +61,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       // Only an explicit refresh 401 proves the session is no longer usable.
       // Network errors, 5xx and other rejections must leave credentials available for retry.
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
     }
   }
-  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || response.headers?.get('WWW-Authenticate')?.startsWith('Bearer'))) { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
+  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || hasBearerChallenge(response))) { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
   if (!response.ok) {
+    if (refreshError) throw refreshError;
     const raw = await response.text();
     let message = raw || `API ${response.status}`;
     let code: string | undefined;

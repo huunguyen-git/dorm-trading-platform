@@ -42,6 +42,12 @@ const baseUrl = () => {
   return url;
 };
 
+function hasBearerChallenge(response: Response): boolean {
+  const header =
+    response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
+  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+}
+
 async function readResponseText(response: Response): Promise<string> {
   if (typeof response.text === 'function') {
     return response.text();
@@ -186,21 +192,28 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   const sentToken = await tokenStore.get();
   let response = await send();
-  const authHeader =
-    response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
-  if (response.status === 401 && !publicCall && authHeader?.startsWith('Bearer')) {
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     try {
       if ((await tokenStore.get()) === sentToken) await refresh();
       response = await send();
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
     }
   }
-  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || response.headers?.get('WWW-Authenticate')?.startsWith('Bearer'))) {
+  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || hasBearerChallenge(response))) {
     await tokenStore.clear();
-    useSession.setState({ token: null, user: null, loading: false });
+    useSession.setState({
+      token: null,
+      user: null,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
   }
   if (!response.ok) {
+    if (refreshError) throw refreshError;
     const raw = await readResponseText(response);
     await handleRestrictedResponse(response, raw, path === '/auth/login' || path === '/auth/refresh');
     let message = `API ${response.status}: ${raw}`;

@@ -31,8 +31,14 @@ describe('role-based session', () => {
     request.mockResolvedValueOnce(undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Lưu mật khẩu' }));
     await screen.findByTestId('login-submit');
-    request.mockResolvedValueOnce({ token: 'new-token', user: moderator } as never);
+    expect(screen.getByText('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.')).toBeInTheDocument();
+    request.mockRejectedValueOnce(new Error('Sai mật khẩu.'));
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@student.edu.vn' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'wrong-pass' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(await screen.findByText('Sai mật khẩu.')).toBeInTheDocument();
+    expect(screen.queryByText('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.')).not.toBeInTheDocument();
+    request.mockResolvedValueOnce({ token: 'new-token', user: moderator } as never);
     fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'River!82' } });
     fireEvent.click(screen.getByTestId('login-submit'));
     expect(await screen.findByRole('button', { name: 'Đăng xuất phiên này' })).toBeInTheDocument();

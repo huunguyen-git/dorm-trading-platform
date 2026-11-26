@@ -44,12 +44,26 @@ export default function AuthFlowScreen() {
     if (mode === 'change') {
       if (!currentPassword) throw new Error('Nhập mật khẩu hiện tại.');
       await post<void>('/auth/password/change', { currentPassword, password });
-      await tokenStore.clear(); useSession.setState({ token: null, user: null, loading: false });
+      await tokenStore.clear();
+      useSession.setState({
+        token: null,
+        user: null,
+        loading: false,
+        restriction: null,
+        restrictionDismissed: false,
+      });
       setMessage('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.');
     } else if (grant) {
       if (!remaining) throw new Error('Quyền đặt lại mật khẩu đã hết hạn. Hãy yêu cầu mã mới.');
       await post('/auth/password/reset', { resetToken: grant, password });
-      await tokenStore.clear(); useSession.setState({ token: null, user: null, loading: false });
+      await tokenStore.clear();
+      useSession.setState({
+        token: null,
+        user: null,
+        loading: false,
+        restriction: null,
+        restrictionDismissed: false,
+      });
       setMessage('Đã đặt lại mật khẩu. Hãy đăng nhập bằng mật khẩu mới.');
     } else if (!challenge) { await send(); return; }
     else {
@@ -64,11 +78,22 @@ export default function AuthFlowScreen() {
   }
   function restart() { setGrant(''); setChallenge(null); setCode(''); setPassword(''); setConfirmation(''); setMessage(''); setError(''); }
   const title = mode === 'register' ? 'Tạo tài khoản' : mode === 'change' ? 'Đổi mật khẩu' : mode === 'verify' ? 'Xác minh email' : 'Khôi phục tài khoản';
-  const back = () => nav.replace((mode === 'change' && !done) || (mode === 'verify' && user) ? 'Profile' : 'Login');
+  const returnToProfile = ((mode === 'change' && !done) || mode === 'verify') && Boolean(user);
+  const back = () => {
+    if (returnToProfile) {
+      nav.replace('Profile');
+      return;
+    }
+    if (mode === 'change') {
+      nav.reset({ index: 1, routes: [{ name: 'Listings' }, { name: 'Login' }] });
+      return;
+    }
+    nav.replace('Login');
+  };
   const labels = mode === 'reset' ? ['Email', 'Xác minh', 'Mật khẩu mới'] : ['Thông tin', 'Xác minh'];
   const stage = grant ? 2 : challenge ? 1 : 0;
   return <AuthScreen title={done ? 'Hoàn tất' : title} subtitle={done ? 'Thông tin tài khoản của bạn đã được cập nhật.' : 'Bảo vệ tài khoản để an tâm trao đổi cùng cộng đồng.'}>
-    {done ? <><Notice message={message} /><Action title={(mode === 'change' && !done) || (mode === 'verify' && user) ? 'Về hồ sơ' : 'Đăng nhập'} onPress={back} testID="auth-success-continue" /></> : <>
+    {done ? <><Notice message={message} /><Action title={mode === 'verify' && user ? 'Về hồ sơ' : 'Đăng nhập'} onPress={back} testID="auth-success-continue" /></> : <>
       {mode !== 'change' && <Steps current={stage} labels={labels} />}
       {mode !== 'change' && <Field label="Email" testID="auth-email" placeholder="ban@truong.edu.vn" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={email} onChangeText={setEmail} editable={!challenge && !grant && !registered && !busy} />}
       {mode === 'register' && !challenge && <><Field label="Họ tên" maxLength={150} value={name} onChangeText={setName} editable={!busy} /><Field label="MSSV" maxLength={20} value={studentId} onChangeText={setStudentId} editable={!busy} /></>}
@@ -87,7 +112,7 @@ export default function AuthFlowScreen() {
       <Notice message={message} /><Notice message={error} error />
       <Action title={busy ? 'Đang xử lý…' : grant || mode === 'change' ? 'Lưu mật khẩu' : challenge ? 'Xác minh' : 'Tiếp tục'} testID="auth-submit" busy={busy} disabled={!!(challenge || grant) && !remaining} onPress={() => void run(submit)} />
       {mode === 'reset' && (challenge || grant) && <Action title={grant && !remaining ? 'Yêu cầu mã mới' : 'Dùng email khác'} secondary disabled={busy} onPress={restart} />}
-      <View style={ui.divider}><Action title={mode === 'change' ? 'Về hồ sơ' : 'Về đăng nhập'} secondary disabled={busy} onPress={back} /></View>
+      <View style={ui.divider}><Action title={returnToProfile ? 'Về hồ sơ' : 'Về đăng nhập'} secondary disabled={busy} onPress={back} /></View>
     </>}
   </AuthScreen>;
 }

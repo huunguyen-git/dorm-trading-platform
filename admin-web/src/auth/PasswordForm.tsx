@@ -37,7 +37,7 @@ export default function PasswordForm({ change = false, onClose }: { change?: boo
   }
   function restart() { setChallenge(null); setGrant(''); setCode(''); setPassword(''); setConfirmation(''); setMessage(''); setError(''); }
   const labels = ['Email', 'Xác minh', 'Mật khẩu mới']; const step = grant ? 2 : challenge ? 1 : 0;
-  if (done) return <section className="panel auth-form success-panel" data-testid="password-success"><span className="success-mark" aria-hidden="true">✓</span><h2>Hoàn tất</h2><p className="notice notice-success" role="status">{message}</p><button className="button button-primary" onClick={onClose}>{change ? 'Về tài khoản' : 'Về đăng nhập'}</button></section>;
+  if (done) return <section className="panel auth-form success-panel" data-testid="password-success"><span className="success-mark" aria-hidden="true">✓</span><h2>Hoàn tất</h2><p className="notice notice-success" role="status">{message}</p><button className="button button-primary" onClick={onClose}>Về đăng nhập</button></section>;
   return <form className="panel auth-form" onSubmit={(e) => void submit(e)} aria-label={change ? 'Đổi mật khẩu' : 'Khôi phục tài khoản'} aria-busy={busy}>
     <header className="form-heading"><p className="eyebrow">BẢO MẬT TÀI KHOẢN</p><h2>{change ? 'Đổi mật khẩu' : 'Quên mật khẩu'}</h2><p>{change ? 'Đổi mật khẩu sẽ đăng xuất tất cả thiết bị và yêu cầu đăng nhập lại.' : 'Xác minh email để lấy lại quyền truy cập tài khoản.'}</p></header>
     {!change && <ol className="form-steps" aria-label="Tiến trình khôi phục">{labels.map((label, i) => <li key={label} aria-current={step === i ? 'step' : undefined}><span>{i + 1}</span>{label}</li>)}</ol>}
