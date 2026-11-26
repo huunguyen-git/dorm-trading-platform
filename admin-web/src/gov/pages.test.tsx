@@ -40,7 +40,7 @@ it('does not offer editing or deactivation for stopped penalties', async () => {
   expect(row).not.toBeNull();
   expect(within(row!).queryByRole('button', { name: 'Sửa' })).not.toBeInTheDocument();
   expect(within(row!).queryByRole('button', { name: 'Ngừng sử dụng' })).not.toBeInTheDocument();
-  expect(screen.getAllByRole('button', { name: 'Sửa' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'Sửa Active rule' })).toHaveLength(1);
 });
 
 it('validates penalty points and retains entered values after a conflict', async () => {
@@ -91,12 +91,41 @@ it('clears appointment conflict state when reloading candidates', async () => {
   expect(await screen.findByRole('button', { name: 'Chọn Candidate User' })).toBeInTheDocument();
 });
 
+it('clears the previous success notice when opening edit and deactivate dialogs', async () => {
+  const user = userEvent.setup();
+  render(<PenaltiesPage />);
+
+  async function createPenalty(nameValue: string) {
+    await user.click(screen.getByRole('button', { name: 'Thêm mức phạt' }));
+    await user.type(screen.getByLabelText(/Tên mức phạt/), nameValue);
+    await user.type(screen.getByLabelText(/Số điểm trừ/), '3');
+    await user.click(screen.getByRole('button', { name: 'Lưu mức phạt' }));
+    expect(await screen.findByText(`Đã thêm mức phạt “${nameValue}”.`)).toBeInTheDocument();
+  }
+
+  await screen.findByText('Active rule');
+  await createPenalty('Created rule');
+  const activeRow = screen.getByText('Active rule').closest('tr');
+  expect(activeRow).not.toBeNull();
+  await user.click(within(activeRow!).getByRole('button', { name: 'Sửa Active rule' }));
+  expect(screen.queryByText('Đã thêm mức phạt “Created rule”.')).not.toBeInTheDocument();
+  const editor = screen.getByRole('dialog');
+  expect(within(editor).getByRole('heading', { name: 'Sửa mức phạt' })).toBeInTheDocument();
+  await user.click(within(editor).getByRole('button', { name: 'Hủy' }));
+
+  await createPenalty('Created another rule');
+  const currentActiveRow = screen.getByText('Active rule').closest('tr');
+  expect(currentActiveRow).not.toBeNull();
+  await user.click(within(currentActiveRow!).getByRole('button', { name: 'Ngừng sử dụng Active rule' }));
+  expect(screen.queryByText('Đã thêm mức phạt “Created another rule”.')).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Ngừng sử dụng mức phạt' })).toBeInTheDocument();
+});
 it('cancels penalty deactivation without making a request', async () => {
   const user = userEvent.setup();
   render(<PenaltiesPage />);
   const row = (await screen.findByText('Active rule')).closest('tr');
   expect(row).not.toBeNull();
-  await user.click(within(row!).getByRole('button', { name: 'Ngừng sử dụng' }));
+  await user.click(within(row!).getByRole('button', { name: 'Ngừng sử dụng Active rule' }));
   expect(await screen.findByRole('heading', { name: 'Ngừng sử dụng mức phạt' })).toBeInTheDocument();
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Hủy' }));
   expect(screen.queryByRole('heading', { name: 'Ngừng sử dụng mức phạt' })).not.toBeInTheDocument();
