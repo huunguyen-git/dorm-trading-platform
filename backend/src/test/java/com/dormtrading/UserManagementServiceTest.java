@@ -1,11 +1,13 @@
 package com.dormtrading;
 
 import com.dormtrading.common.BaseIntegrationTest;
+import com.dormtrading.common.ActivePenaltyFixtures;
 import com.dormtrading.iam.auth.AuthFailure;
 import com.dormtrading.iam.management.UserManagementDtos.UserSearchFilter;
 import com.dormtrading.iam.management.UserManagementService;
 import com.dormtrading.review.reputation.ReputationLedgerService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +46,12 @@ class UserManagementServiceTest extends BaseIntegrationTest {
     void setUpClock() {
         currentTime.set(Instant.parse("2026-11-18T09:00:00Z"));
         when(clock.instant()).thenAnswer(inv -> currentTime.get());
+        ActivePenaltyFixtures.seed(db);
+    }
+
+    @AfterEach
+    void clearPenaltyFixtures() {
+        ActivePenaltyFixtures.clear(db);
     }
 
     private UUID insertUser(
@@ -174,7 +182,7 @@ class UserManagementServiceTest extends BaseIntegrationTest {
         assertThat(txPage.items().get(1).agreedPrice()).isEqualTo(40000);
 
         // Trigger 14-day temporary lock via penalty (-15: 60 -> 45)
-        reputationLedger.applyPenaltyScale(buyer, "TP_BO_HEN_TAI_PHAM", "Bỏ hẹn giao dịch", "TXPEN:" + buyer, seller);
+        reputationLedger.applyPenaltyScale(buyer, ActivePenaltyFixtures.PENALTY_15, "Bỏ hẹn giao dịch", "TXPEN:" + buyer, seller);
         var lockedDetail = userManagement.getUserDetail(buyer);
         assertThat(lockedDetail.accountStatus()).isEqualTo("BI_KHOA");
         assertThat(lockedDetail.restrictionType()).isEqualTo("KHOA_TAM_THOI");
