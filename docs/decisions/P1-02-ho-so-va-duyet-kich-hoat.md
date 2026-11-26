@@ -1,4 +1,4 @@
-# P1-02 · Hồ sơ chờ duyệt dạng snapshot, ảnh thẻ trong DB và lớp tải tệp dùng chung
+# P1-02 · Hồ sơ chờ duyệt dạng snapshot, ảnh thẻ ở object storage và lớp tải tệp dùng chung
 
 | Mục | Nội dung |
 |---|---|
@@ -63,3 +63,11 @@ Kế hoạch ban đầu ghi `{version}` cho `approve`/`reject`. Thực tế khó
 **Bối cảnh.** `load()` của trang chi tiết xóa thông báo lỗi cũ để tránh hiển thị lỗi cũ; nếu đặt thông báo 409 trước khi `await load()` thì thông báo bị xóa ngay.
 
 **Lựa chọn.** Khi nhận 409, `await load()` rồi mới đặt thông báo "Trạng thái hồ sơ đã thay đổi, đang tải lại thông tin mới nhất." Người dùng thấy dữ liệu mới và lời giải thích cùng lúc. Test `reports a stale profile on approve 409 and reloads it` giữ hành vi này.
+
+## 8. Chỉnh index hàng đợi duyệt bằng migration V8, không sửa V6/V7
+
+**Bối cảnh.** Review PR #25 chỉ ra partial index `idx_thanh_viens_cho_duyet` của V6 không khớp vị từ thật của `ProfileService.pending()` (thiếu `cho_duyet_lai`), và `auth_challenge` thiếu index theo `user_id` cho truy vấn đổi email. Sửa thẳng V6/V7 là sai: hai migration đó đã áp dụng ở môi trường dev/CI và checksum Flyway sẽ lệch; PR #33/#34 cũng đang giữ V6/V7 ở nhánh của họ.
+
+**Lựa chọn.** Thêm `V8__profile_review_queue_indexes.sql`: `DROP INDEX IF EXISTS` index cũ rồi tạo lại đúng vị từ (`email_verified AND ly_do_tu_choi IS NULL AND (NOT profile_approved OR cho_duyet_lai)`), kèm `CREATE INDEX IF NOT EXISTS idx_auth_challenge_user ON auth_challenge(user_id)`. V6/V7 giữ nguyên byte-for-byte.
+
+**Hệ quả.** PR #25 không còn phụ thuộc thứ tự merge với #33/#34 ở V6/V7; nếu #33/#34 lên trước thì chúng nhận V9/V10. Index bán phần chỉ chứa hàng đợi thật nên giữ nhỏ khi `thanh_viens` lớn dần.
