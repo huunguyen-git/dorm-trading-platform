@@ -113,12 +113,17 @@ test('signup blocks mismatched passwords then verifies OTP with an explicit succ
   fireEvent.changeText(await screen.findByLabelText('Email'), 'an@truong.edu.vn');
   fireEvent.changeText(screen.getByLabelText('Họ tên'), 'Nguyễn An');
   fireEvent.changeText(screen.getByLabelText('MSSV'), '123456');
-  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'Cau mat khau rieng 123!');
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'River!8');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'River!8');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+  expect(await screen.findByText('Mật khẩu mới cần từ 8 đến 128 ký tự.')).toBeTruthy();
+  expect(mockedApi).not.toHaveBeenCalled();
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'River!82');
   fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'khong khop');
   fireEvent.press(screen.getByTestId('auth-submit'));
   expect(await screen.findByText('Mật khẩu xác nhận chưa khớp.')).toBeTruthy();
   expect(mockedApi).not.toHaveBeenCalled();
-  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'Cau mat khau rieng 123!');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'River!82');
   fireEvent.press(screen.getByTestId('auth-submit'));
   expect(await screen.findByTestId('auth-otp')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' }).props.accessibilityState.disabled).toBe(true);
@@ -267,5 +272,133 @@ test('clears stale restriction when submitting a new login attempt for another a
   fireEvent.press(screen.getByTestId('login-submit'));
 
   expect(await screen.findByText('Sai email hoặc mật khẩu.')).toBeTruthy();
+  expect(screen.queryByTestId('restricted-account-notice')).toBeNull();
+});
+
+test('password change clears restriction and resets navigation stack to Login without leaving Profile behind', async () => {
+  const mockedApi = jest.mocked(api);
+  mockedApi.mockReset();
+  mockedApi.mockResolvedValueOnce(undefined);
+  useSession.setState({
+    token: 'active-token',
+    user: {
+      id: '1',
+      name: 'Active User',
+      role: 'member',
+      email: 'active@uni.edu.vn',
+      studentId: '22120001',
+      roles: ['MEMBER'],
+      emailVerified: true,
+      profileApproved: true,
+      accountStatus: 'HOAT_DONG',
+    },
+    loading: false,
+    restriction: {
+      accountStatus: 'BI_KHOA',
+      lockType: 'KHOA_TAM_THOI',
+      reason: 'Stale banner',
+      lockedUntil: null,
+      appealable: false,
+      reputationScore: 45,
+      message: 'Stale banner',
+    },
+    restrictionDismissed: true,
+  });
+
+  render(<App />);
+  fireEvent.press(await screen.findByRole('button', { name: 'Hồ sơ' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Đổi mật khẩu' }));
+  fireEvent.changeText(await screen.findByLabelText('Mật khẩu hiện tại'), 'old password');
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'River!82');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'River!82');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+
+  expect(await screen.findByText('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.')).toBeTruthy();
+  expect(useSession.getState().restriction).toBeNull();
+  expect(useSession.getState().restrictionDismissed).toBe(false);
+
+  fireEvent.press(screen.getByTestId('auth-success-continue'));
+  expect(await screen.findByTestId('login-submit')).toBeTruthy();
+  expect(screen.queryByTestId('restricted-account-notice')).toBeNull();
+  expect(screen.queryByText('Hồ sơ của bạn')).toBeNull();
+});
+
+test('mid-flow 401 during password change switches back action to Login instead of empty Profile', async () => {
+  const mockedApi = jest.mocked(api);
+  mockedApi.mockReset();
+  useSession.setState({
+    token: 'active-token',
+    user: {
+      id: '1',
+      name: 'Active User',
+      role: 'member',
+      email: 'active@uni.edu.vn',
+      studentId: '22120001',
+      roles: ['MEMBER'],
+      emailVerified: true,
+      profileApproved: true,
+      accountStatus: 'HOAT_DONG',
+    },
+    loading: false,
+  });
+  mockedApi.mockImplementationOnce(async () => {
+    useSession.setState({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+    throw new Error('Phiên đã hết hạn.');
+  });
+
+  render(<App />);
+  fireEvent.press(await screen.findByRole('button', { name: 'Hồ sơ' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Đổi mật khẩu' }));
+  expect(await screen.findByRole('button', { name: 'Về hồ sơ' })).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu hiện tại'), 'old password');
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'River!82');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'River!82');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+
+  expect(await screen.findByText('Phiên đã hết hạn.')).toBeTruthy();
+  const backToLogin = await screen.findByRole('button', { name: 'Về đăng nhập' });
+  fireEvent.press(backToLogin);
+  expect(await screen.findByTestId('login-submit')).toBeTruthy();
+  expect(screen.queryByText('Hồ sơ của bạn')).toBeNull();
+});
+
+test('password reset clears stale restriction before returning to Login', async () => {
+  const mockedApi = jest.mocked(api);
+  mockedApi.mockReset();
+  mockedApi
+    .mockResolvedValueOnce({ challengeId: 'reset-1', expiresIn: 300, resendAfter: 60, message: 'Đã gửi mã.' })
+    .mockResolvedValueOnce({ resetToken: 'grant-1' })
+    .mockResolvedValueOnce(undefined);
+  useSession.setState({
+    token: null,
+    user: null,
+    loading: false,
+    restriction: {
+      accountStatus: 'BI_KHOA',
+      lockType: 'KHOA_TAM_THOI',
+      reason: 'Stale lock notice',
+      lockedUntil: null,
+      appealable: false,
+      reputationScore: 45,
+      message: 'Stale lock notice',
+    },
+    restrictionDismissed: false,
+  });
+
+  render(<App />);
+  fireEvent.press(await screen.findByRole('button', { name: 'Đăng nhập' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Quên mật khẩu' }));
+  fireEvent.changeText(await screen.findByTestId('auth-email'), 'locked@truong.edu.vn');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+  fireEvent.changeText(await screen.findByTestId('auth-otp'), '123456');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+  fireEvent.changeText(await screen.findByLabelText('Mật khẩu mới'), 'River!82');
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'River!82');
+  fireEvent.press(screen.getByTestId('auth-submit'));
+
+  expect(await screen.findByText('Đã đặt lại mật khẩu. Hãy đăng nhập bằng mật khẩu mới.')).toBeTruthy();
+  expect(useSession.getState().restriction).toBeNull();
+  fireEvent.press(screen.getByTestId('auth-success-continue'));
+  expect(await screen.findByTestId('login-submit')).toBeTruthy();
   expect(screen.queryByTestId('restricted-account-notice')).toBeNull();
 });

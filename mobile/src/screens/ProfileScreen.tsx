@@ -105,7 +105,7 @@ export default function ProfileScreen() {
       />
       <View style={ui.divider}>
         <Text style={ui.label}>Bảo mật tài khoản</Text>
-        <Text style={ui.caption}>Đổi mật khẩu giữ lại phiên này và đăng xuất các phiên khác.</Text>
+        <Text style={ui.caption}>Đổi mật khẩu sẽ đăng xuất tất cả thiết bị. Hãy đăng nhập lại sau khi đổi.</Text>
         <Action
           title="Đổi mật khẩu"
           secondary

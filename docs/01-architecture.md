@@ -54,3 +54,8 @@ Backend có auth API chung cho mobile/web, PostgreSQL session/challenge/outbox �
 Mobile lưu access/refresh trong SecureStore; web access trong bộ nhớ và refresh cookie HttpOnly/Secure/SameSite=Strict. Môi trường triển khai cần HTTPS và web/API cùng site; localhost là môi trường thử, không giảm Secure cho production. CORS chỉ cho origin cụ thể, credentials=true và expose WWW-Authenticate. Health chuẩn /api/v1/health. SMTP OTP gửi qua outbox mã hóa, có retry trong hạn mã; không in OTP/token/mật khẩu vào log.
 
 Vai trò MEMBER/MODERATOR/SENIOR_ADMIN, scope client và trạng thái tài khoản kiểm tại API. Các API quản trị mới dùng /admin/** hoặc /admin/senior/** đúng quyền; prefix này thay quy tắc ADMIN nền. Điểm100 và kích hoạt hồ sơ còn do P1-02; quyền tài khoản khóa chi tiết còn P1-05.
+
+
+### Cập nhật xác thực · 17/11/2026
+
+P1-01 dùng mật khẩu 8–128 code point NFC; change trả 204 và thu hồi mọi phiên. Sau ghép P1-05 ngày24/11, BI_KHOA có phiên hạn chế trên mobile, không được sửa hồ sơ/đổi mật khẩu; web từ chối đăng nhập. VO_HIEU_HOA bị từ chối. Reset kiểm email đã xác minh và tài khoản còn hiệu lực tại từng bước. HTTP 429 có retryAfter/Retry-After; CORS expose header thời gian chờ. P1-01 không thêm migration; giữ V5 của P1-04/P1-05 trên main. Xem [quyết định](decisions/P1-01-cap-nhat-constraint.md) và [spec](specs/P1-01.md).

@@ -30,7 +30,7 @@ public class PasswordPolicy {
     public String validate(String password, String email, String studentId) {
         String value = normalize(password);
         int size = value.codePointCount(0, value.length());
-        if (size < 15 || size > 128) throw weak();
+        if (size < 8 || size > 128) throw weak();
         String lower = value.toLowerCase(Locale.ROOT);
         String local = email.split("@")[0].toLowerCase(Locale.ROOT);
         if ((local.length() >= 4 && lower.contains(local)) ||
@@ -56,6 +56,6 @@ public class PasswordPolicy {
         }
         return value;
     }
-    private AuthFailure weak() { return new AuthFailure(400, "WEAK_PASSWORD", "Mật khẩu cần 15–128 ký tự và không phổ biến hoặc gắn với tài khoản."); }
+    private AuthFailure weak() { return new AuthFailure(400, "WEAK_PASSWORD", "Mật khẩu cần 8–128 ký tự và không phổ biến hoặc gắn với tài khoản."); }
     private AuthFailure unavailable() { return new AuthFailure(503, "PASSWORD_CHECK_UNAVAILABLE", "Chưa kiểm tra được mật khẩu bị lộ. Vui lòng thử lại."); }
 }
