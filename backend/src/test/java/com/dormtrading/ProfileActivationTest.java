@@ -313,6 +313,82 @@ class ProfileActivationTest extends BaseIntegrationTest {
                 .post("/api/v1/profile/email/verify").then().statusCode(400).body("code",equalTo("INVALID_OTP"));
     }
 
+    /** UC-02: hồ sơ đã bị từ chối rời hàng đợi, không quyết định lại được, và gửi lại thì quay về hàng đợi. */
+    @Test void rejectedRegistrationLeavesQueueUntilResubmitted() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        String admin = moderator();
+        UUID userId = id(email);
+        String body = "/api/v1/admin/profiles/" + userId;
+
+        given().auth().oauth2(admin).contentType(ContentType.JSON).body(Map.of("reason","Ảnh thẻ mờ."))
+                .post(body + "/reject").then().statusCode(204);
+
+        // Không còn trong danh sách chờ duyệt.
+        assertThat(given().auth().oauth2(admin).get("/api/v1/admin/profiles/pending")
+                .then().statusCode(200).extract().jsonPath().getList("email",String.class)).doesNotContain(email);
+        // Quyết định lần hai bị chặn, không ghi thêm bản kiểm duyệt.
+        given().auth().oauth2(admin).post(body + "/approve").then().statusCode(409).body("code",equalTo("PROFILE_ALREADY_HANDLED"));
+        given().auth().oauth2(admin).contentType(ContentType.JSON).body(Map.of("reason","Từ chối lần hai."))
+                .post(body + "/reject").then().statusCode(409).body("code",equalTo("PROFILE_ALREADY_HANDLED"));
+        assertThat(db.queryForObject("select count(*) from kiem_duyet_ho_so where user_id=?",Integer.class,userId)).isEqualTo(1);
+        // Trang chi tiết vẫn đọc được hồ sơ đã xử lý thay vì 409 để UI không kẹt.
+        given().auth().oauth2(admin).get(body).then().statusCode(200)
+                .body("profileStatus",equalTo("BI_TU_CHOI")).body("rejectReason",equalTo("Ảnh thẻ mờ."));
+
+        // Gửi lại hồ sơ đăng ký lại vào hàng đợi và vẫn là hồ sơ đăng ký mới.
+        var token = login(email,"mobile");
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("name","Test Resubmit"))
+                .patch("/api/v1/profile/me").then().statusCode(200).body("profileStatus",equalTo("CHO_DUYET"));
+        given().auth().oauth2(admin).get("/api/v1/admin/profiles/pending").then().statusCode(200)
+                .body("find { it.email == '" + email + "' }.kind", equalTo("DANG_KY"));
+    }
+
+    /** Bổ sung phạm vi P1-05: tài khoản bị khóa/vô hiệu hóa không sửa được hồ sơ hay đổi email. */
+    @Test void lockedAccountCannotMutateProfile() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        activate();
+        var token = login(email,"mobile");
+        String fresh = "l" + UUID.randomUUID().toString().substring(0,10) + NEW_EMAIL_DOMAIN;
+        byte[] png = {(byte)0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A,0,0,0,0};
+
+        db.update("update thanh_viens set trang_thai_tai_khoan='BI_KHOA' where email=?",email);
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("phone","0901 234 567"))
+                .patch("/api/v1/profile/me").then().statusCode(403).body("code",equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(token).multiPart("file","card.png",png,"image/png")
+                .post("/api/v1/profile/me/student-card").then().statusCode(403).body("code",equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("currentPassword",PASSWORD,"newEmail",fresh))
+                .patch("/api/v1/profile/email").then().statusCode(403).body("code",equalTo("ACCOUNT_RESTRICTED"));
+        assertThat(db.queryForObject("select count(*) from the_sinh_viens where user_id=?",Integer.class,id(email))).isZero();
+        assertThat(db.queryForObject("select count(*) from auth_challenge where user_id=? and purpose='CHANGE_EMAIL'",
+                Integer.class,id(email))).isZero();
+
+        db.update("update thanh_viens set trang_thai_tai_khoan='VO_HIEU_HOA' where email=?",email);
+        assertThat(given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("phone","0901 234 567"))
+                .patch("/api/v1/profile/me").then().extract().statusCode()).isIn(401, 403);
+    }
+
+    /** Ảnh thẻ mới thay thế ảnh cũ và object cũ bị xoá sau khi commit. */
+    @Test void replacingStudentCardKeepsOnlyLatestObject() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        UUID userId = id(email);
+        byte[] png = {(byte)0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A,0,0,0,0};
+
+        given().auth().oauth2(token).multiPart("file","card.png",png,"image/png")
+                .post("/api/v1/profile/me/student-card").then().statusCode(204);
+        String first = db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId);
+        given().auth().oauth2(token).multiPart("file","card.png",png,"image/png")
+                .post("/api/v1/profile/me/student-card").then().statusCode(204);
+        String second = db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId);
+
+        assertThat(second).isNotEqualTo(first);
+        assertThat(java.nio.file.Path.of(".local/student-cards", first)).doesNotExist();
+        assertThat(java.nio.file.Path.of(".local/student-cards", second)).exists();
+    }
+
     private static org.hamcrest.Matcher<Object> equalTo(Object value) {
         return org.hamcrest.Matchers.equalTo(value);
     }

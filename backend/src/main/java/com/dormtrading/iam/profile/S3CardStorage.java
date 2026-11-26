@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 class S3CardStorage implements CardStorage {
     private final MinioClient client;
     private final String bucket;
+    private volatile boolean bucketReady;
 
     S3CardStorage(@Value("${storage.s3.endpoint}") String endpoint,
                   @Value("${storage.s3.access-key}") String accessKey,
@@ -31,11 +32,16 @@ class S3CardStorage implements CardStorage {
     @Override
     public void put(String key, byte[] bytes, String mime) {
         try {
-            if (!client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build()))
-                client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+            // Chỉ kiểm tra/tạo bucket một lần: tránh gọi CreateBucket mỗi lần ghi.
+            if (!bucketReady) {
+                if (!client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build()))
+                    client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+                bucketReady = true;
+            }
             client.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
                     .stream(new ByteArrayInputStream(bytes), bytes.length, -1).contentType(mime).build());
         } catch (Exception e) {
+            bucketReady = false;
             throw new IllegalStateException("Không ghi được ảnh thẻ lên object storage.", e);
         }
     }

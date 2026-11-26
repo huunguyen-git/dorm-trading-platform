@@ -20,7 +20,8 @@ public class ProfileNotices {
     @Scheduled(fixedDelayString = "${app.auth.notice-delay-ms:30000}")
     @Transactional
     public void deliver() {
-        for (var row : db.queryForList("select * from ho_so_thong_bao where not sent order by id limit 20 for update skip locked")) {
+        // Thông báo lỗi nhiều lần bị bỏ qua để một email hóng không chặn cả hàng đợi.
+        for (var row : db.queryForList("select * from ho_so_thong_bao where not sent and failures < 5 order by id limit 20 for update skip locked")) {
             var message = new SimpleMailMessage();
             message.setFrom(from); message.setTo(row.get("email").toString());
             message.setSubject("Hồ sơ Dorm Trading chưa được duyệt");
@@ -31,7 +32,6 @@ public class ProfileNotices {
                 db.update("update ho_so_thong_bao set sent=true where id=?", row.get("id"));
             } catch (org.springframework.mail.MailException e) {
                 db.update("update ho_so_thong_bao set failures=failures+1 where id=?", row.get("id"));
-                break;
             }
         }
     }

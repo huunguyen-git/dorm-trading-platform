@@ -20,6 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -113,6 +115,7 @@ public class ProfileService {
     public Profile update(Jwt jwt, Update body) {
         UUID userId = auth.me(jwt).id();
         var current = locked(userId);
+        requireMutable(jwt, current);
         String name = text(body.name(), string(current, "ho_ten"), 150, "Họ tên không hợp lệ.");
         String studentId = text(body.studentId(), string(current, "mssv"), 20, "MSSV không hợp lệ.");
         String phone = optional(body.phone(), string(current, "so_dien_thoai"), 20);
@@ -164,6 +167,7 @@ public class ProfileService {
     @Transactional
     public void uploadCard(Jwt jwt, MultipartFile file) {
         UUID userId = auth.me(jwt).id();
+        requireMutable(jwt, locked(userId));
         if (file == null || file.isEmpty())
             throw new AuthFailure(400, "INVALID_STUDENT_CARD", "Chọn ảnh thẻ sinh viên để tải lên.");
         if (file.getSize() > MAX_CARD_BYTES)
@@ -174,9 +178,11 @@ public class ProfileService {
         String mime = sniff(bytes);
         if (mime == null) throw new AuthFailure(400, "INVALID_STUDENT_CARD", "Ảnh thẻ phải là JPEG hoặc PNG.");
         String objectKey = userId + "/" + UUID.randomUUID() + ("image/png".equals(mime) ? ".png" : ".jpg");
-        cards.put(objectKey, bytes, mime);
-        String previous = db.query("select object_key from the_sinh_viens where user_id=?",
+        String previous = db.query("select object_key from the_sinh_viens where user_id=? for update",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
+        cards.put(objectKey, bytes, mime);
+        // Object mới chỉ được xoá khi transaction rollback; object cũ chỉ xoá sau commit để không mất ảnh đang dùng.
+        afterCompletion(() -> discard(objectKey));
         db.update("""
                 insert into the_sinh_viens(user_id,object_key,mime,kich_thuoc,uploaded_at) values (?,?,?,?,?)
                 on conflict (user_id) do update set object_key=excluded.object_key,mime=excluded.mime,
@@ -185,9 +191,25 @@ public class ProfileService {
             ps.setObject(1, userId); ps.setString(2, objectKey); ps.setString(3, mime);
             ps.setInt(4, bytes.length); ps.setTimestamp(5, at());
         });
-        if (previous != null) cards.delete(previous);
+        if (previous != null && !previous.equals(objectKey))
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { discard(previous); }
+            });
         db.update("update thanh_viens set cho_duyet_lai=true,ly_do_tu_choi=null,updated_at=?,version=version+1 where user_id=?",
                 at(), userId);
+    }
+
+    /** Xoá object vừa ghi nếu transaction không commit; lỗi xoá chỉ gây rác, không làm hỏng request. */
+    private void afterCompletion(Runnable onRollback) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) onRollback.run();
+            }
+        });
+    }
+
+    private void discard(String key) {
+        try { cards.delete(key); } catch (RuntimeException ignored) { /* rác trong object storage, không chặn nghiệp vụ */ }
     }
 
     public Card card(Jwt jwt, UUID ownerId) {
@@ -208,18 +230,20 @@ public class ProfileService {
         return db.query("""
                 select v.user_id,v.ho_ten,v.mssv,v.email,v.updated_at,
                        exists(select 1 from the_sinh_viens t where t.user_id=v.user_id) as co_anh,
-                       (v.diem_khoi_tao or exists(select 1 from kiem_duyet_ho_so k where k.user_id=v.user_id)) as da_kich_hoat
+                       (v.profile_approved or v.diem_khoi_tao) as da_kich_hoat
                 from thanh_viens v
-                where v.email_verified and (not v.profile_approved or v.cho_duyet_lai)
+                where v.email_verified and v.ly_do_tu_choi is null
+                    and (not v.profile_approved or v.cho_duyet_lai)
                 order by v.updated_at desc limit ? offset ?
                 """, (rs, i) -> new Pending((UUID) rs.getObject("user_id"), rs.getString("ho_ten"), rs.getString("mssv"),
                 rs.getString("email"), rs.getBoolean("da_kich_hoat") ? "CAP_NHAT" : "DANG_KY",
                 rs.getTimestamp("updated_at").toInstant(), rs.getBoolean("co_anh")), limit, offset);
     }
 
+    /** Chi tiết hồ sơ: kiểm duyệt viên vẫn xem được hồ sơ đã xử lý (không 409) để trang không bị kẹt. */
     public Profile detail(UUID userId) {
         var row = row(userId);
-        pendingOrThrow(row);
+        if (row == null) throw new AuthFailure(404, "PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.");
         return view(row);
     }
 
@@ -276,6 +300,7 @@ public class ProfileService {
         UUID userId = auth.me(jwt).id();
         String email = auth.email(newEmail);
         var current = row(userId);
+        requireMutable(jwt, current);
         if (!encoder.matches(password(currentPassword), current.get("mat_khau_hash").toString()))
             throw new AuthFailure(401, "INVALID_CREDENTIALS", "Mật khẩu hiện tại không đúng.");
         if (email.equals(string(current, "email")))
@@ -305,6 +330,7 @@ public class ProfileService {
     @Transactional(noRollbackFor = AuthFailure.class)
     public void verifyEmailChange(Jwt jwt, UUID challengeId, String code) {
         UUID userId = auth.me(jwt).id();
+        requireMutable(jwt, row(userId));
         var rows = db.queryForList("""
                 select * from auth_challenge where id=? and purpose='CHANGE_EMAIL' and user_id=? for update
                 """, challengeId, userId);
@@ -346,8 +372,17 @@ public class ProfileService {
         if (row == null) throw new AuthFailure(404, "PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.");
         if (!Boolean.TRUE.equals(row.get("email_verified")))
             throw new AuthFailure(409, "EMAIL_NOT_VERIFIED", "Hồ sơ chưa xác minh email.");
-        if (Boolean.TRUE.equals(row.get("profile_approved")) && !Boolean.TRUE.equals(row.get("cho_duyet_lai")))
+        // Hồ sơ đã quyết định (duyệt xong, hoặc bị từ chối mà chưa gửi lại) không được quyết định lần nữa.
+        boolean handled = !Boolean.TRUE.equals(row.get("cho_duyet_lai"))
+                && (Boolean.TRUE.equals(row.get("profile_approved")) || row.get("ly_do_tu_choi") != null);
+        if (handled)
             throw new AuthFailure(409, "PROFILE_ALREADY_HANDLED", "Hồ sơ đã được xử lý. Tải lại danh sách.");
+    }
+
+    /** Bổ sung phạm vi P1-05: tài khoản bị khóa không được sửa hồ sơ hay đổi email. */
+    private void requireMutable(Jwt jwt, Map<String, Object> row) {
+        if (row == null) throw new AuthFailure(404, "PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.");
+        auth.findActiveRestriction(jwt).ifPresent(failure -> { throw failure; });
     }
 
     private String text(String value, String current, int max, String message) {
