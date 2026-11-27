@@ -101,6 +101,9 @@ public class AuthService {
                 subject, kind, at(now().minusSeconds(seconds)));
         return events.size() < limit ? 0 : secondsUntil(instant(events.get(limit - 1), "happened_at").plusSeconds(seconds));
     }
+    /** Dùng chung bộ đếm sai mật khẩu với đổi mật khẩu để endpoint đổi email không thành đường dò mật khẩu. */
+    public long passwordWrongWait(String email) { return limitWait(email, "PASSWORD_WRONG", 3600, 5); }
+    public void recordPasswordWrong(String email) { event(email, "PASSWORD_WRONG"); }
     private boolean recoverable(Map<String,Object> row) {
         return row != null && Boolean.TRUE.equals(row.get("email_verified")) && !"VO_HIEU_HOA".equals(row.get("trang_thai_tai_khoan"));
     }

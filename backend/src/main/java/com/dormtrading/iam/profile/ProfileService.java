@@ -13,6 +13,7 @@ import javax.crypto.spec.SecretKeySpec;
 import com.dormtrading.iam.auth.AuthFailure;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
+import com.dormtrading.review.reputation.ReputationLedgerService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,18 +33,21 @@ public class ProfileService {
     private final PasswordEncoder encoder;
     private final OtpDelivery delivery;
     private final CardStorage cards;
+    private final ReputationLedgerService reputationLedger;
     private final Clock clock;
     private final SecureRandom random;
     private final byte[] key;
     private final int otpSeconds, resendSeconds, otpAttempts;
 
     public ProfileService(JdbcTemplate db, AuthService auth, PasswordEncoder encoder, OtpDelivery delivery,
-                          CardStorage cards, Clock clock, SecureRandom random,
+                          CardStorage cards, ReputationLedgerService reputationLedger,
+                          Clock clock, SecureRandom random,
                           @Value("${app.jwt.secret}") String secret,
                           @Value("${app.auth.otp-seconds:300}") int otpSeconds,
                           @Value("${app.auth.resend-seconds:60}") int resendSeconds,
                           @Value("${app.auth.otp-attempts:5}") int otpAttempts) {
         this.db = db; this.auth = auth; this.encoder = encoder; this.delivery = delivery; this.cards = cards;
+        this.reputationLedger = reputationLedger;
         this.clock = clock; this.random = random; this.key = Base64.getDecoder().decode(secret);
         this.otpSeconds = otpSeconds; this.resendSeconds = resendSeconds; this.otpAttempts = otpAttempts;
     }
@@ -100,13 +104,20 @@ public class ProfileService {
                 pick(pending, row, "nganh_hoc"), pick(pending, row, "nien_khoa"), string(row, "trang_thai_sv"),
                 ((Number) row.get("diem_uy_tin")).intValue(), Boolean.TRUE.equals(row.get("email_verified")),
                 approved, status, reject, pendingUpdate,
-                db.queryForObject("select exists(select 1 from the_sinh_viens where user_id=?)", Boolean.class, id),
+                // Ảnh đang chờ duyệt cũng phải báo có ảnh, nếu không kiểm duyệt viên không biết cần xem gì.
+                hasRow(db, "the_sinh_viens", id) || hasRow(db, "the_sinh_viens_cho_duyet", id),
                 string(row, "trang_thai_tai_khoan"));
     }
 
+    // Có hồ sơ chờ duyệt thì mọi trường định danh đọc theo hồ sơ đó, kể cả trường bị xoá (null).
+    // Nếu lấy giá trị cũ của from thanh_viens thì trường vừa xoá vẫn hiện lại và kiểm duyệt viên duyệt nhầm dữ liệu.
     private static String pick(Map<String, Object> pending, Map<String, Object> row, String column) {
-        String value = string(pending, column);
-        return value != null ? value : string(row, column);
+        return pending != null ? string(pending, column) : string(row, column);
+    }
+
+    private static boolean hasRow(JdbcTemplate db, String table, UUID userId) {
+        return Boolean.TRUE.equals(db.queryForObject(
+                "select exists(select 1 from " + table + " where user_id=?)", Boolean.class, userId));
     }
 
     public Profile me(Jwt jwt) { return view(row(auth.me(jwt).id())); }
@@ -178,13 +189,14 @@ public class ProfileService {
         String mime = sniff(bytes);
         if (mime == null) throw new AuthFailure(400, "INVALID_STUDENT_CARD", "Ảnh thẻ phải là JPEG hoặc PNG.");
         String objectKey = userId + "/" + UUID.randomUUID() + ("image/png".equals(mime) ? ".png" : ".jpg");
-        String previous = db.query("select object_key from the_sinh_viens where user_id=? for update",
+        // UC-02: ảnh mới chờ duyệt nằm ở bảng riêng, ảnh đang dùng trong the_sinh_viens không bị đụng tới.
+        String previous = db.query("select object_key from the_sinh_viens_cho_duyet where user_id=? for update",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
         cards.put(objectKey, bytes, mime);
         // Object mới chỉ được xoá khi transaction rollback; object cũ chỉ xoá sau commit để không mất ảnh đang dùng.
         afterCompletion(() -> discard(objectKey));
         db.update("""
-                insert into the_sinh_viens(user_id,object_key,mime,kich_thuoc,uploaded_at) values (?,?,?,?,?)
+                insert into the_sinh_viens_cho_duyet(user_id,object_key,mime,kich_thuoc,uploaded_at) values (?,?,?,?,?)
                 on conflict (user_id) do update set object_key=excluded.object_key,mime=excluded.mime,
                     kich_thuoc=excluded.kich_thuoc,uploaded_at=excluded.uploaded_at
                 """, ps -> {
@@ -216,7 +228,9 @@ public class ProfileService {
         var user = auth.me(jwt);
         if (!user.id().equals(ownerId) && !user.roles().contains("MODERATOR"))
             throw new AuthFailure(403, "STUDENT_CARD_FORBIDDEN", "Không có quyền xem ảnh thẻ này.");
-        var rows = db.queryForList("select object_key,mime from the_sinh_viens where user_id=?", ownerId);
+        // Kiểm duyệt viên phải xem được ảnh vừa tải lên đang chờ duyệt, nên ảnh chờ duyệt được ưu tiên.
+        var rows = db.queryForList("select object_key,mime from the_sinh_viens_cho_duyet where user_id=?", ownerId);
+        if (rows.isEmpty()) rows = db.queryForList("select object_key,mime from the_sinh_viens where user_id=?", ownerId);
         if (rows.isEmpty())
             throw new AuthFailure(404, "STUDENT_CARD_NOT_FOUND", "Hồ sơ chưa có ảnh thẻ sinh viên.");
         var row = rows.getFirst();
@@ -229,10 +243,12 @@ public class ProfileService {
     public List<Pending> pending(int offset, int limit) {
         return db.query("""
                 select v.user_id,v.ho_ten,v.mssv,v.email,v.updated_at,
-                       exists(select 1 from the_sinh_viens t where t.user_id=v.user_id) as co_anh,
+                       (exists(select 1 from the_sinh_viens t where t.user_id=v.user_id)
+                           or exists(select 1 from the_sinh_viens_cho_duyet p where p.user_id=v.user_id)) as co_anh,
                        (v.profile_approved or v.diem_khoi_tao) as da_kich_hoat
                 from thanh_viens v
                 where v.email_verified and v.ly_do_tu_choi is null
+                    and v.trang_thai_tai_khoan <> 'VO_HIEU_HOA'
                     and (not v.profile_approved or v.cho_duyet_lai)
                 order by v.updated_at desc limit ? offset ?
                 """, (rs, i) -> new Pending((UUID) rs.getObject("user_id"), rs.getString("ho_ten"), rs.getString("mssv"),
@@ -250,7 +266,8 @@ public class ProfileService {
     @Transactional
     public void approve(Jwt jwt, UUID userId) {
         UUID moderator = auth.me(jwt).id();
-        pendingOrThrow(locked(userId));
+        var current = locked(userId);
+        pendingOrThrow(current);
         try {
             db.update("""
                     update thanh_viens v set ho_ten=p.ho_ten,mssv=p.mssv,truong=p.truong,co_so=p.co_so,
@@ -261,18 +278,46 @@ public class ProfileService {
             throw new AuthFailure(409, "STUDENT_ID_IN_USE", "MSSV đã gắn với tài khoản khác.");
         }
         db.update("delete from ho_so_cap_nhat where user_id=?", userId);
-        // FR-03: điểm 100 khởi tạo đúng một lần; duyệt bản cập nhật giữ nguyên điểm hiện có (UC-02).
+        promoteCard(userId);
+        boolean activated = !Boolean.TRUE.equals(current.get("diem_khoi_tao"));
         db.update("""
                 update thanh_viens set profile_approved=true,cho_duyet_lai=false,ly_do_tu_choi=null,
-                    diem_uy_tin=case when diem_khoi_tao then diem_uy_tin else 100 end,
-                    diem_khoi_tao=true,
                     trang_thai_tai_khoan=case when trang_thai_tai_khoan='CHO_KICH_HOAT' then 'HOAT_DONG'
                         else trang_thai_tai_khoan end,
                     updated_at=?,version=version+1
                 where user_id=?
                 """, at(), userId);
+        // FR-03: điểm 100 khởi tạo đúng một lần, ghi qua sổ cái để có lịch sử; duyệt bản cập nhật giữ nguyên điểm.
+        if (activated) {
+            reputationLedger.initializeActivationScore(userId, moderator);
+            db.update("update thanh_viens set diem_khoi_tao=true where user_id=?", userId);
+        }
         db.update("insert into kiem_duyet_ho_so(user_id,nguoi_duyet_id,ket_qua) values (?,?,'CHAP_THUAN')",
                 userId, moderator);
+    }
+
+    /** Ảnh thẻ chờ duyệt trở thành ảnh chính thức; object cũ bị xoá sau commit để không mất ảnh đang dùng. */
+    private void promoteCard(UUID userId) {
+        var rows = db.queryForList("select object_key,mime,kich_thuoc,uploaded_at from the_sinh_viens_cho_duyet where user_id=?", userId);
+        if (rows.isEmpty()) return;
+        var pending = rows.getFirst();
+        String previous = db.query("select object_key from the_sinh_viens where user_id=? for update",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+        db.update("""
+                insert into the_sinh_viens(user_id,object_key,mime,kich_thuoc,uploaded_at) values (?,?,?,?,?)
+                on conflict (user_id) do update set object_key=excluded.object_key,mime=excluded.mime,
+                    kich_thuoc=excluded.kich_thuoc,uploaded_at=excluded.uploaded_at
+                """, ps -> {
+            ps.setObject(1, userId); ps.setString(2, pending.get("object_key").toString());
+            ps.setString(3, pending.get("mime").toString());
+            ps.setInt(4, ((Number) pending.get("kich_thuoc")).intValue());
+            ps.setTimestamp(5, (java.sql.Timestamp) pending.get("uploaded_at"));
+        });
+        db.update("delete from the_sinh_viens_cho_duyet where user_id=?", userId);
+        if (previous != null && !previous.equals(pending.get("object_key").toString()))
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { discard(previous); }
+            });
     }
 
     @Transactional
@@ -284,6 +329,7 @@ public class ProfileService {
         var row = locked(userId);
         pendingOrThrow(row);
         db.update("delete from ho_so_cap_nhat where user_id=?", userId);
+        discardPendingCard(userId);
         // Tài khoản đã kích hoạt vẫn giữ quyền và dữ liệu cũ; lý do từ chối bản cập nhật vẫn được lưu.
         db.update("""
                 update thanh_viens set cho_duyet_lai=false,ly_do_tu_choi=?,updated_at=?,version=version+1
@@ -301,8 +347,15 @@ public class ProfileService {
         String email = auth.email(newEmail);
         var current = row(userId);
         requireMutable(jwt, current);
-        if (!encoder.matches(password(currentPassword), current.get("mat_khau_hash").toString()))
+        // Chống dò mật khẩu qua endpoint đổi email: cùng ngưỡng và bộ đếm với đổi mật khẩu (P1-01).
+        String accountEmail = string(current, "email");
+        long wait = auth.passwordWrongWait(accountEmail);
+        if (wait > 0)
+            throw new AuthFailure(429, "RATE_LIMITED", "Vui lòng chờ trước khi thử lại.", wait);
+        if (!encoder.matches(password(currentPassword), current.get("mat_khau_hash").toString())) {
+            auth.recordPasswordWrong(accountEmail);
             throw new AuthFailure(401, "INVALID_CREDENTIALS", "Mật khẩu hiện tại không đúng.");
+        }
         if (email.equals(string(current, "email")))
             throw new AuthFailure(400, "EMAIL_UNCHANGED", "Email mới phải khác email hiện tại.");
         if (db.queryForObject("select exists(select 1 from thanh_viens where lower(email)=?)", Boolean.class, email))
@@ -312,7 +365,7 @@ public class ProfileService {
                     and created_at > current_timestamp - (? * interval '1 second') limit 1
                 """, userId, resendSeconds);
         if (!recent.isEmpty())
-            throw new AuthFailure(429, "RATE_LIMITED", "Vui lòng chờ trước khi yêu cầu mã mới.");
+            throw new AuthFailure(429, "RATE_LIMITED", "Vui lòng chờ trước khi yêu cầu mã mới.", (long) resendSeconds);
 
         UUID id = UUID.randomUUID();
         String code = String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
@@ -368,8 +421,22 @@ public class ProfileService {
         return Normalizer.normalize(value, Normalizer.Form.NFC);
     }
 
+    /** Bỏ ảnh chờ duyệt: xoá object sau commit để ảnh đang dùng không bị mất. */
+    private void discardPendingCard(UUID userId) {
+        String key = db.query("select object_key from the_sinh_viens_cho_duyet where user_id=? for update",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+        if (key == null) return;
+        db.update("delete from the_sinh_viens_cho_duyet where user_id=?", userId);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { discard(key); }
+        });
+    }
+
     private void pendingOrThrow(Map<String, Object> row) {
         if (row == null) throw new AuthFailure(404, "PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.");
+        // Tài khoản đã vô hiệu hoá không còn trong hàng đợi nên cũng không quyết định được.
+        if ("VO_HIEU_HOA".equals(row.get("trang_thai_tai_khoan")))
+            throw new AuthFailure(409, "ACCOUNT_DELETED", "Tài khoản đã bị vô hiệu hoá.");
         if (!Boolean.TRUE.equals(row.get("email_verified")))
             throw new AuthFailure(409, "EMAIL_NOT_VERIFIED", "Hồ sơ chưa xác minh email.");
         // Hồ sơ đã quyết định (duyệt xong, hoặc bị từ chối mà chưa gửi lại) không được quyết định lần nữa.

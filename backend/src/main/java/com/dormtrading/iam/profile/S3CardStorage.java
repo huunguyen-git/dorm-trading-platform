@@ -34,9 +34,13 @@ class S3CardStorage implements CardStorage {
         try {
             // Chỉ kiểm tra/tạo bucket một lần: tránh gọi CreateBucket mỗi lần ghi.
             if (!bucketReady) {
-                if (!client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build()))
-                    client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-                bucketReady = true;
+                synchronized (this) {
+                    if (!bucketReady) {
+                        if (!client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build()))
+                            client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+                        bucketReady = true;
+                    }
+                }
             }
             client.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
                     .stream(new ByteArrayInputStream(bytes), bytes.length, -1).contentType(mime).build());

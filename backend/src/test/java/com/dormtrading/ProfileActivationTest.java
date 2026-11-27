@@ -193,7 +193,8 @@ class ProfileActivationTest extends BaseIntegrationTest {
                 .then().statusCode(400).body("code",equalTo("INVALID_STUDENT_CARD"));
         given().auth().oauth2(token).multiPart("file","card.png",png,"image/jpeg")
                 .post("/api/v1/profile/me/student-card").then().statusCode(204);
-        assertThat(db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId)).isNotBlank();
+        // Ảnh mới nằm ở bảng chờ duyệt, chưa thay ảnh chính thức.
+        assertThat(db.queryForObject("select object_key from the_sinh_viens_cho_duyet where user_id=?",String.class,userId)).isNotBlank();
 
         given().auth().oauth2(token).get("/api/v1/profile/student-cards/" + userId)
                 .then().statusCode(200).header("Cache-Control","no-store").contentType("image/png");
@@ -361,6 +362,7 @@ class ProfileActivationTest extends BaseIntegrationTest {
         given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("currentPassword",PASSWORD,"newEmail",fresh))
                 .patch("/api/v1/profile/email").then().statusCode(403).body("code",equalTo("ACCOUNT_RESTRICTED"));
         assertThat(db.queryForObject("select count(*) from the_sinh_viens where user_id=?",Integer.class,id(email))).isZero();
+        assertThat(db.queryForObject("select count(*) from the_sinh_viens_cho_duyet where user_id=?",Integer.class,id(email))).isZero();
         assertThat(db.queryForObject("select count(*) from auth_challenge where user_id=? and purpose='CHANGE_EMAIL'",
                 Integer.class,id(email))).isZero();
 
@@ -369,7 +371,7 @@ class ProfileActivationTest extends BaseIntegrationTest {
                 .patch("/api/v1/profile/me").then().extract().statusCode()).isIn(401, 403);
     }
 
-    /** Ảnh thẻ mới thay thế ảnh cũ và object cũ bị xoá sau khi commit. */
+    /** Ảnh thẻ mới thay ảnh cũ và object cũ bị xoá sau khi commit. */
     @Test void replacingStudentCardKeepsOnlyLatestObject() {
         var challenge = register(email);
         auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
@@ -379,17 +381,94 @@ class ProfileActivationTest extends BaseIntegrationTest {
 
         given().auth().oauth2(token).multiPart("file","card.png",png,"image/png")
                 .post("/api/v1/profile/me/student-card").then().statusCode(204);
-        String first = db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId);
+        String first = db.queryForObject("select object_key from the_sinh_viens_cho_duyet where user_id=?",String.class,userId);
         given().auth().oauth2(token).multiPart("file","card.png",png,"image/png")
                 .post("/api/v1/profile/me/student-card").then().statusCode(204);
-        String second = db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId);
+        String second = db.queryForObject("select object_key from the_sinh_viens_cho_duyet where user_id=?",String.class,userId);
 
         assertThat(second).isNotEqualTo(first);
         assertThat(java.nio.file.Path.of(".local/student-cards", first)).doesNotExist();
         assertThat(java.nio.file.Path.of(".local/student-cards", second)).exists();
+        // Chưa duyệt: ảnh chính thức vẫn trống (M2).
+        assertThat(db.queryForObject("select count(*) from the_sinh_viens where user_id=?",Integer.class,userId)).isZero();
+
+        // Duyệt: ảnh chờ thành ảnh chính thức, bảng chờ rỗng, object vừa thăng cấp vẫn còn.
+        given().auth().oauth2(moderator()).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        assertThat(db.queryForObject("select object_key from the_sinh_viens where user_id=?",String.class,userId)).isEqualTo(second);
+        assertThat(db.queryForObject("select count(*) from the_sinh_viens_cho_duyet where user_id=?",Integer.class,userId)).isZero();
+        assertThat(java.nio.file.Path.of(".local/student-cards", second)).exists();
+    }
+
+    /** Mục 4 review vòng 2: xoá trắng trường định danh phải xoá thật, không lấp lại giá trị cũ. */
+    @Test void clearingIdentityFieldHidesOldValueInPendingProfile() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String admin = moderator();
+        UUID userId = id(email);
+
+        given().auth().oauth2(token).contentType(ContentType.JSON)
+                .body(Map.of("school","ĐH Bách khoa","major","CNTT")).patch("/api/v1/profile/me").then().statusCode(200);
+        given().auth().oauth2(admin).get("/api/v1/admin/profiles/" + userId).then().statusCode(200)
+                .body("school",equalTo("ĐH Bách khoa")).body("major",equalTo("CNTT"));
+
+        given().auth().oauth2(token).contentType(ContentType.JSON)
+                .body(Map.of("school","","major","")).patch("/api/v1/profile/me").then().statusCode(200)
+                .body("school",nullValue()).body("major",nullValue());
+        given().auth().oauth2(admin).get("/api/v1/admin/profiles/" + userId).then().statusCode(200)
+                .body("school",nullValue()).body("major",nullValue());
+
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        assertThat(db.queryForObject("select truong from thanh_viens where user_id=?",String.class,userId)).isNull();
+        assertThat(db.queryForObject("select nganh_hoc from thanh_viens where user_id=?",String.class,userId)).isNull();
+    }
+
+    /** Mục 6 review vòng 2: tài khoản vô hiệu hoá rời hàng đợi và không quyết định được. */
+    @Test void disabledAccountLeavesQueueAndCannotBeReviewed() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        String admin = moderator();
+        UUID userId = id(email);
+
+        assertThat(given().auth().oauth2(admin).get("/api/v1/admin/profiles/pending")
+                .then().statusCode(200).extract().jsonPath().getList("email",String.class)).contains(email);
+        db.update("update thanh_viens set trang_thai_tai_khoan='VO_HIEU_HOA' where user_id=?",userId);
+
+        assertThat(given().auth().oauth2(admin).get("/api/v1/admin/profiles/pending")
+                .then().statusCode(200).extract().jsonPath().getList("email",String.class)).doesNotContain(email);
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve")
+                .then().statusCode(409).body("code",equalTo("ACCOUNT_DELETED"));
+        given().auth().oauth2(admin).contentType(ContentType.JSON).body(Map.of("reason","Tài khoản đã xoá."))
+                .post("/api/v1/admin/profiles/" + userId + "/reject").then().statusCode(409).body("code",equalTo("ACCOUNT_DELETED"));
+        assertThat(db.queryForObject("select count(*) from kiem_duyet_ho_so where user_id=?",Integer.class,userId)).isZero();
+    }
+
+    /** Mục 5 review vòng 2: điểm khởi tạo đi qua sổ cái, đúng một bản ghi, duyệt lại không cộng thêm. */
+    @Test void approvalWritesActivationEntryOnceInLedger() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String admin = moderator();
+        UUID userId = id(email);
+
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        assertThat(db.queryForObject("select count(*) from lich_su_diem_uy_tin where user_id=? and loai_bien_dong='KHOI_TAO_KICH_HOAT'",
+                Integer.class,userId)).isEqualTo(1);
+
+        db.update("update thanh_viens set diem_uy_tin=64 where user_id=?",userId);
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("name","Tên Mới"))
+                .patch("/api/v1/profile/me").then().statusCode(200);
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+
+        assertThat(db.queryForObject("select diem_uy_tin from thanh_viens where user_id=?",Integer.class,userId)).isEqualTo(64);
+        assertThat(db.queryForObject("select count(*) from lich_su_diem_uy_tin where user_id=? and loai_bien_dong='KHOI_TAO_KICH_HOAT'",
+                Integer.class,userId)).isEqualTo(1);
     }
 
     private static org.hamcrest.Matcher<Object> equalTo(Object value) {
         return org.hamcrest.Matchers.equalTo(value);
+    }
+    private static org.hamcrest.Matcher<Object> nullValue() {
+        return org.hamcrest.Matchers.nullValue();
     }
 }
