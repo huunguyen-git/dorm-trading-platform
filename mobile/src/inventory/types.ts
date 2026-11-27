@@ -1,3 +1,5 @@
+import { resolveMediaUrl } from '../api/client';
+
 export type InventoryItemStatus = 'KHA_DUNG' | 'DANG_GIU' | 'DA_CHUYEN_GIAO';
 
 export interface LinkedListing {
@@ -48,7 +50,9 @@ export function normalizeInventoryItem(raw: any): InventoryItem {
   }
 
   const rawImages = raw.hinhAnh ?? raw.hinh_anh ?? raw.images ?? [];
-  const hinhAnh = Array.isArray(rawImages) ? rawImages.map(String) : [];
+  const hinhAnh = Array.isArray(rawImages)
+    ? rawImages.map((entry) => resolveMediaUrl(String(entry))).filter(Boolean)
+    : [];
   const trangThai = (raw.trangThai ?? raw.trang_thai ?? raw.status ?? 'KHA_DUNG') as InventoryItemStatus;
   const linkedListings = raw.linkedListings ?? raw.linked_listings ?? [];
   const linkedListingCount = Number(

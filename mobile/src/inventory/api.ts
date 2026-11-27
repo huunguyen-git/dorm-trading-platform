@@ -1,4 +1,4 @@
-import { api } from '../api/client';
+import { api, toPersistableMediaUrl } from '../api/client';
 import type { CreateInventoryItemInput, InventoryItem, UpdateInventoryItemInput } from './types';
 import { normalizeInventoryItem } from './types';
 
@@ -16,7 +16,7 @@ export async function createInventoryItem(input: CreateInventoryItemInput): Prom
   const payload = {
     ten: input.ten.trim(),
     tinhTrang: input.tinhTrang.trim(),
-    hinhAnh: input.hinhAnh,
+    hinhAnh: input.hinhAnh.map(toPersistableMediaUrl),
   };
   const data = await api<any>('/inventory', {
     method: 'POST',
@@ -29,7 +29,7 @@ export async function updateInventoryItem(id: string, input: UpdateInventoryItem
   const payload = {
     ten: input.ten?.trim(),
     tinhTrang: input.tinhTrang.trim(),
-    hinhAnh: input.hinhAnh,
+    hinhAnh: input.hinhAnh.map(toPersistableMediaUrl),
     version: input.version,
   };
   const data = await api<any>(`/inventory/${id}`, {

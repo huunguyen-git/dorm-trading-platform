@@ -1,33 +1,81 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
-  SafeAreaView,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
+import { buildMediaImageSource } from '../api/client';
+import { useSession } from '../auth/session';
 import { useInventory } from '../inventory/store';
 import type { InventoryItem, InventoryItemStatus } from '../inventory/types';
-import { Action, Notice, ui } from '../components/AuthUI';
-import { colors, radius, space, text } from '../theme';
+import { mapListingStatusLabel } from '../listings/types';
+import { Action } from '../components/AuthUI';
+import {
+  HairlineDivider,
+  Icon,
+  InlineBanner,
+  SectionHeading,
+  StatusIndicator,
+  type StatusTone,
+  type StatusVariant,
+} from '../components/ui';
+import { primitive, semantic } from '../theme';
 
 type RouteProps = RouteProp<RootStack, 'InventoryDetail'>;
+
+function sanitizeDetailError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  if (trimmed.startsWith('API ')) {
+    return 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+  }
+  return trimmed;
+}
+
+function getItemStatusMeta(status: InventoryItemStatus): {
+  label: string;
+  tone: StatusTone;
+  variant: StatusVariant;
+} {
+  if (status === 'DANG_GIU') {
+    return { label: 'Đang giữ', tone: 'warning', variant: 'urgent' };
+  }
+  if (status === 'DA_CHUYEN_GIAO') {
+    return { label: 'Đã chuyển giao', tone: 'neutral', variant: 'dot' };
+  }
+  return { label: 'Khả dụng', tone: 'success', variant: 'dot' };
+}
 
 export default function InventoryDetailScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProps>();
+  const insets = useContext(SafeAreaInsetsContext);
+  const { width: windowWidth } = useWindowDimensions();
   const { id } = route.params;
 
+  const token = useSession((state) => state.token);
+  const user = useSession((state) => state.user);
+  const isActiveMember = Boolean(
+    token && user?.roles.includes('MEMBER') && user?.accountStatus !== 'BI_KHOA',
+  );
   const { items, selectedItem, loadItem, deleteItem, clearError, loading, error } = useInventory();
   const [localItem, setLocalItem] = useState<InventoryItem | null>(() => {
-    return (selectedItem?.id === id ? selectedItem : null) || items.find((i) => i.id === id) || null;
+    return (
+      (selectedItem?.id === id ? selectedItem : null) ||
+      items.find((i) => i.id === id) ||
+      null
+    );
   });
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,13 +86,16 @@ export default function InventoryDetailScreen() {
       setActionError('');
       clearError();
       void loadItem(id)
-        .then((item) => setLocalItem(item))
-        .catch((err) => setActionError(err?.message || 'Không thể tải chi tiết đồ vật.'));
-    }, [id, loadItem, clearError])
+        .then((fetched) => setLocalItem(fetched))
+        .catch((err) => setActionError(sanitizeDetailError(err, 'Không thể tải chi tiết đồ vật.')));
+    }, [id, loadItem, clearError]),
   );
 
   useEffect(() => {
-    const matched = (selectedItem?.id === id ? selectedItem : null) || items.find((i) => i.id === id) || null;
+    const matched =
+      (selectedItem?.id === id ? selectedItem : null) ||
+      items.find((i) => i.id === id) ||
+      null;
     if (matched) {
       setLocalItem(matched);
     }
@@ -56,7 +107,9 @@ export default function InventoryDetailScreen() {
     if (!item) return;
     setActionError('');
     if (!item.canDelete || item.trangThai !== 'KHA_DUNG' || item.linkedListingCount > 0) {
-      setActionError('Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể xóa.');
+      setActionError(
+        'Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể xóa.',
+      );
       return;
     }
 
@@ -81,65 +134,59 @@ export default function InventoryDetailScreen() {
     try {
       await deleteItem(item.id, item.version);
       navigation.goBack();
-    } catch (err: any) {
-      setActionError(err?.message || 'Không thể xóa đồ vật.');
+    } catch (err: unknown) {
+      setActionError(sanitizeDetailError(err, 'Không thể xóa đồ vật.'));
     } finally {
       setBusy(false);
     }
   };
 
-  const renderStatusBadge = (status: InventoryItemStatus) => {
-    let label = 'Khả dụng';
-    let bg = '#e6f4ea';
-    let fg = '#137333';
-
-    if (status === 'DANG_GIU') {
-      label = 'Đang giữ';
-      bg = '#fef7e0';
-      fg = '#b06000';
-    } else if (status === 'DA_CHUYEN_GIAO') {
-      label = 'Đã chuyển giao';
-      bg = '#f1f3f4';
-      fg = '#5f6368';
-    }
-
-    return (
-      <View style={[styles.badge, { backgroundColor: bg }]}>
-        <Text style={[styles.badgeText, { color: fg }]}>{label}</Text>
-      </View>
-    );
-  };
-
   if (loading && !item) {
     return (
-      <SafeAreaView style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={colors.brand} />
-        <Text style={[ui.caption, { marginTop: space.sm }]}>Đang tải chi tiết đồ vật…</Text>
-      </SafeAreaView>
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color={semantic.color.accent} />
+        <Text style={styles.loadingText}>Đang tải chi tiết đồ vật…</Text>
+      </View>
     );
   }
 
   if (!item) {
     return (
-      <SafeAreaView style={styles.centerContainer}>
-        <Notice message={actionError || error || 'Không tìm thấy thông tin đồ vật.'} error />
-        <View style={{ marginTop: space.md }}>
-          <Action secondary title="Quay lại danh sách" onPress={() => navigation.goBack()} />
+      <View style={styles.centerContainer}>
+        <InlineBanner
+          tone="danger"
+          message={actionError || error || 'Không tìm thấy thông tin đồ vật.'}
+        />
+        <View style={styles.notFoundAction}>
+          <Action
+            variant="secondary"
+            title="Quay lại danh sách"
+            onPress={() => navigation.goBack()}
+          />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
-  const isEditable = item.canEdit && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
-  const isDeletable = item.canDelete && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
+  const isEditable =
+    item.canEdit && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
+  const isDeletable =
+    item.canDelete && item.trangThai === 'KHA_DUNG' && item.linkedListingCount === 0;
+  const canCreateListing = isActiveMember && item.trangThai === 'KHA_DUNG';
   const images = item.hinhAnh && item.hinhAnh.length > 0 ? item.hinhAnh : [];
-  const screenWidth = Dimensions.get('window').width;
+  const carouselWidth = Math.max(windowWidth, 320);
+  const carouselHeight = Math.min(Math.round(carouselWidth * 0.72), 320);
+  const statusMeta = getItemStatusMeta(item.trangThai);
+  const linkedListings = item.linkedListings ?? [];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Image Carousel / Gallery */}
-        <View style={styles.galleryContainer}>
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Full-bleed Edge-to-Edge Photo Carousel */}
+        <View style={[styles.galleryContainer, { height: carouselHeight }]}>
           {images.length > 0 ? (
             <>
               <ScrollView
@@ -148,22 +195,25 @@ export default function InventoryDetailScreen() {
                 showsHorizontalScrollIndicator={false}
                 onScroll={(e) => {
                   const offset = e.nativeEvent.contentOffset.x;
-                  const idx = Math.round(offset / (screenWidth - space.xl * 2));
+                  const idx = Math.max(
+                    0,
+                    Math.min(images.length - 1, Math.round(offset / carouselWidth)),
+                  );
                   setActiveImageIndex(idx);
                 }}
                 scrollEventThrottle={16}
               >
                 {images.map((imgUri, index) => (
                   <Image
-                    key={index}
-                    source={{ uri: imgUri }}
-                    style={[styles.carouselImage, { width: screenWidth - space.xl * 2 }]}
+                    key={`${imgUri}-${index}`}
+                    source={buildMediaImageSource(imgUri, token)}
+                    style={{ width: carouselWidth, height: carouselHeight }}
                     resizeMode="cover"
                     accessibilityLabel={`${item.ten} - ảnh ${index + 1}`}
                   />
                 ))}
               </ScrollView>
-              <View style={styles.counterBadge}>
+              <View style={styles.counterPill}>
                 <Text style={styles.counterText}>
                   {activeImageIndex + 1} / {images.length}
                 </Text>
@@ -171,76 +221,139 @@ export default function InventoryDetailScreen() {
             </>
           ) : (
             <View style={styles.noImageBanner}>
-              <Text style={ui.caption}>Đồ vật này chưa có ảnh đính kèm.</Text>
+              <Icon name="image" size={32} color={semantic.color.textSecondary} />
+              <Text style={styles.noImageText}>Đồ vật này chưa có ảnh đính kèm.</Text>
             </View>
           )}
         </View>
 
-        {/* Notices */}
-        {(actionError || error) ? (
-          <Notice message={actionError || error || ''} error />
+        {actionError || error ? (
+          <View style={styles.bannerWrap}>
+            <InlineBanner tone="danger" message={actionError || error || ''} />
+          </View>
         ) : null}
 
-        {/* Info Card */}
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>{item.ten}</Text>
-            {renderStatusBadge(item.trangThai)}
-          </View>
+        {/* Flush Title & Status Section */}
+        <View style={styles.section}>
+          <Text style={styles.title}>{item.ten}</Text>
+          <StatusIndicator
+            variant={statusMeta.variant}
+            tone={statusMeta.tone}
+            icon={item.trangThai === 'DANG_GIU' ? 'clock' : undefined}
+            label={statusMeta.label}
+          />
+        </View>
 
-          <View style={styles.fieldSection}>
-            <Text style={ui.label}>Mô tả tình trạng</Text>
-            <Text style={styles.description}>{item.tinhTrang}</Text>
-          </View>
+        <HairlineDivider />
 
-          <View style={styles.fieldSection}>
-            <Text style={ui.label}>Trạng thái lưu trữ</Text>
-            <Text style={ui.caption}>
-              {item.linkedListingCount > 0
+        {/* Flush Condition Section */}
+        <View style={styles.section}>
+          <SectionHeading title="Mô tả tình trạng" />
+          <Text style={styles.description}>{item.tinhTrang}</Text>
+        </View>
+
+        <HairlineDivider />
+
+        {/* Flush Linked Listings Section */}
+        <View style={styles.section}>
+          <SectionHeading
+            title="Tin đăng liên kết"
+            subtitle={
+              item.linkedListingCount > 0
                 ? `Đồ vật đang được liên kết trong ${item.linkedListingCount} tin đăng.`
-                : 'Đồ vật chưa gắn vào bất kỳ tin đăng nào.'}
-            </Text>
-          </View>
+                : 'Đồ vật chưa gắn vào tin đăng nào.'
+            }
+          />
 
-          {/* Linked Listings */}
-          <View style={styles.fieldSection}>
-            <Text style={ui.label}>Tin đăng liên kết</Text>
-            {item.linkedListings && item.linkedListings.length > 0 ? (
-              <View style={{ gap: space.sm, marginTop: space.xs }}>
-                {item.linkedListings.map((listing) => (
-                  <View key={listing.id} style={styles.listingCard}>
-                    <Text style={{ fontWeight: '600', color: colors.ink }}>
-                      {listing.tieuDe || listing.title || `Tin đăng #${listing.id}`}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: colors.muted }}>
-                      Trạng thái: {listing.trangThai || listing.status || 'Đang mở'}
-                    </Text>
+          {linkedListings.length > 0 ? (
+            <View style={styles.linkedList}>
+              {linkedListings.map((listing, idx) => {
+                const rawStatus = listing.trangThai || listing.status || 'CONG_KHAI';
+                const statusLabel = mapListingStatusLabel(rawStatus);
+                const listingTitle = listing.tieuDe || listing.title || 'Tin đăng liên kết';
+                const hasListingId = Boolean(listing.id && listing.id.trim());
+
+                return (
+                  <View key={listing.id || String(idx)}>
+                    {idx > 0 ? <HairlineDivider /> : null}
+                    <Pressable
+                      testID={hasListingId ? `linked-listing-${listing.id}` : undefined}
+                      disabled={!hasListingId}
+                      accessibilityRole={hasListingId ? 'button' : undefined}
+                      accessibilityLabel={`Xem tin đăng ${listingTitle}`}
+                      onPress={() => {
+                        if (hasListingId) {
+                          navigation.navigate('Listing', { id: listing.id });
+                        }
+                      }}
+                      style={({ pressed }) => [
+                        styles.linkedRow,
+                        pressed && hasListingId && styles.linkedRowPressed,
+                      ]}
+                    >
+                      <View style={styles.linkedIcon}>
+                        <Icon name="tag" size={16} color={semantic.color.textSecondary} />
+                      </View>
+                      <View style={styles.linkedMeta}>
+                        <Text style={styles.linkedTitle} numberOfLines={2}>
+                          {listingTitle}
+                        </Text>
+                        <Text style={styles.linkedStatus}>Trạng thái: {statusLabel}</Text>
+                      </View>
+                      {hasListingId ? (
+                        <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
+                      ) : null}
+                    </Pressable>
                   </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={ui.caption}>Chưa có tin đăng liên kết.</Text>
-            )}
-          </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      </ScrollView>
 
-          {/* Actions */}
-          <View style={styles.actionsContainer}>
+      {/* Sticky Editorial Action Bar */}
+      <View
+        style={[
+          styles.stickyFooterWrap,
+          { paddingBottom: Math.max(insets?.bottom ?? 0, primitive.space[3]) },
+        ]}
+      >
+        {canCreateListing ? (
+          <Action
+            title="Đăng tin từ đồ vật này"
+            icon="plus"
+            testID="detail-create-listing-button"
+            disabled={busy}
+            onPress={() =>
+              navigation.navigate('CreateListing', { preselectedItemId: item.id })
+            }
+          />
+        ) : null}
+        <View style={styles.stickyFooterRow}>
+          <View style={styles.footerBtnSlot}>
             <Action
               title="Sửa đồ vật"
-              secondary
+              variant="secondary"
+              icon="edit-2"
               testID="detail-edit-button"
               disabled={!isEditable || busy}
               onPress={() => {
                 if (!isEditable) {
-                  setActionError('Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.');
+                  setActionError(
+                    'Đồ vật đang gắn với tin đăng hoặc không ở trạng thái khả dụng, không thể chỉnh sửa.',
+                  );
                   return;
                 }
                 navigation.navigate('InventoryForm', { mode: 'edit', id: item.id, item });
               }}
             />
+          </View>
+          <View style={styles.footerBtnSlot}>
             <Action
               title="Xóa đồ vật"
-              secondary
+              variant="destructive"
+              icon="trash-2"
               testID="detail-delete-button"
               disabled={!isDeletable || busy}
               busy={busy}
@@ -248,107 +361,124 @@ export default function InventoryDetailScreen() {
             />
           </View>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    backgroundColor: '#f5f4ef',
+    backgroundColor: semantic.color.bgPage,
   },
-  content: {
-    padding: space.xl,
-    gap: space.lg,
+  scrollContent: {
+    paddingBottom: primitive.space[8],
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: space.xl,
-    backgroundColor: '#f5f4ef',
+    padding: primitive.space[6],
+    backgroundColor: semantic.color.bgPage,
+    gap: primitive.space[3],
+  },
+  loadingText: {
+    ...semantic.type.caption,
+  },
+  notFoundAction: {
+    width: '100%',
+    maxWidth: 240,
   },
   galleryContainer: {
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    backgroundColor: '#000',
+    width: '100%',
+    backgroundColor: semantic.color.bgSubtle,
     position: 'relative',
   },
-  carouselImage: {
-    height: 240,
-  },
-  counterBadge: {
+  counterPill: {
     position: 'absolute',
-    bottom: space.sm,
-    right: space.sm,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: 12,
+    bottom: primitive.space[3],
+    right: primitive.space[4],
+    backgroundColor: semantic.color.overlayDark,
+    paddingHorizontal: primitive.space[2.5],
+    paddingVertical: primitive.space[1],
+    borderRadius: primitive.radius.full,
   },
   counterText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    ...semantic.type.micro,
+    color: semantic.color.textInverse,
+    fontWeight: primitive.fontWeight.semibold,
   },
   noImageBanner: {
-    height: 180,
-    backgroundColor: '#ecebe4',
+    flex: 1,
+    backgroundColor: semantic.color.bgSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[2],
+    paddingHorizontal: semantic.spacing.pageX,
+  },
+  noImageText: {
+    ...semantic.type.caption,
+  },
+  bannerWrap: {
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+  },
+  section: {
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[5],
+    gap: primitive.space[3],
+  },
+  title: {
+    ...semantic.type.screenTitle,
+  },
+  description: {
+    ...semantic.type.body,
+  },
+  linkedList: {
+    marginTop: primitive.space[1],
+  },
+  linkedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+    paddingVertical: primitive.space[3],
+  },
+  linkedRowPressed: {
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+  },
+  linkedIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  card: {
-    backgroundColor: colors.surface,
-    padding: space.xl,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: space.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: space.sm,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.ink,
+  linkedMeta: {
     flex: 1,
-  },
-  fieldSection: {
-    gap: space.xs,
-  },
-  description: {
-    fontSize: 15,
-    color: colors.ink,
-    lineHeight: 22,
-  },
-  listingCard: {
-    padding: space.md,
-    backgroundColor: '#f9f8f5',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
     gap: 2,
   },
-  actionsContainer: {
-    flexDirection: 'row',
-    gap: space.sm,
-    marginTop: space.sm,
+  linkedTitle: {
+    ...semantic.type.cardTitle,
+  },
+  linkedStatus: {
+    ...semantic.type.micro,
+  },
+  stickyFooterWrap: {
+    gap: primitive.space[2.5],
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingTop: primitive.space[3],
+    backgroundColor: semantic.color.bgSurface,
     borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: space.md,
+    borderTopColor: semantic.color.borderHairline,
   },
-  badge: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: 12,
+  stickyFooterRow: {
+    flexDirection: 'row',
+    gap: primitive.space[2.5],
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '600',
+  footerBtnSlot: {
+    flex: 1,
   },
 });

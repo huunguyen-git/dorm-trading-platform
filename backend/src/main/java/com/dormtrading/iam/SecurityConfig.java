@@ -48,16 +48,19 @@ class SecurityConfig {
     @Bean
     JwtDecoder jwtDecoder(@Value("${app.jwt.secret}") String encodedKey) {
         byte[] key = Base64.getDecoder().decode(encodedKey);
-        if (key.length < 32) throw new IllegalArgumentException("JWT_SECRET requires at least 32 Base64-encoded key bytes");
+        if (key.length < 32)
+            throw new IllegalArgumentException("JWT_SECRET requires at least 32 Base64-encoded key bytes");
         var decoder = NimbusJwtDecoder.withSecretKey(new SecretKeySpec(key, "HmacSHA256")).build();
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer("dorm-trading"),
-                new JwtTimestampValidator(java.time.Duration.ZERO),
-                new JwtClaimValidator<>(JwtClaimNames.EXP, java.util.Objects::nonNull)));
+        decoder.setJwtValidator(
+                new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer("dorm-trading"),
+                        new JwtTimestampValidator(java.time.Duration.ZERO),
+                        new JwtClaimValidator<>(JwtClaimNames.EXP, java.util.Objects::nonNull)));
         return decoder;
     }
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, AuthService authService, ObjectMapper objectMapper) throws Exception {
+    SecurityFilterChain apiSecurity(HttpSecurity http, AuthService authService, ObjectMapper objectMapper)
+            throws Exception {
         var defaultEntryPoint = new BearerTokenAuthenticationEntryPoint();
         var defaultAccessDenied = new BearerTokenAccessDeniedHandler();
 
@@ -97,13 +100,28 @@ class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // /error là forward nội bộ: chặn nó biến mọi 4xx/5xx thật thành 403.
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/listings").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
-                                "/api/v1/auth/otp/resend", "/api/v1/auth/otp/verify", "/api/v1/auth/password/reset").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login",
+                                "/api/v1/auth/refresh",
+                                "/api/v1/auth/otp/resend", "/api/v1/auth/otp/verify", "/api/v1/auth/password/reset")
+                        .permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/admin/senior/**").hasRole("SENIOR_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("MODERATOR")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/listings/mine", "/api/v1/listings/quota")
+                        .hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/media/images").hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/listings", "/api/v1/listings/**").hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/listings/**").hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/listings/**").hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/categories",
+                                "/api/v1/locations",
+                                "/api/v1/media/{id}",
+                                "/api/v1/listings",
+                                "/api/v1/listings/{id:[0-9a-fA-F-]{36}}")
+                        .permitAll()
                         .requestMatchers("/api/v1/**").hasRole("MEMBER")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(server -> server
@@ -112,7 +130,8 @@ class SecurityConfig {
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(token -> {
                             try {
                                 var user = authService.me(token);
-                                var roles = user.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
+                                var roles = user.roles().stream()
+                                        .map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
                                 return new JwtAuthenticationToken(token, roles);
                             } catch (AccountRestrictedFailure e) {
                                 throw new RestrictedBearerTokenException(e);

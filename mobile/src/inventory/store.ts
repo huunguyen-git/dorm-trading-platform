@@ -3,6 +3,15 @@ import { useSession } from '../auth/session';
 import * as inventoryApi from './api';
 import type { CreateInventoryItemInput, InventoryItem, UpdateInventoryItemInput } from './types';
 
+const GENERIC_SERVER_ERROR = 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+
+function sanitizeInventoryError(rawMessage: unknown, fallback: string): string {
+  const trimmed = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+  if (!trimmed) return fallback;
+  if (trimmed.startsWith('API ')) return GENERIC_SERVER_ERROR;
+  return trimmed;
+}
+
 export interface InventoryState {
   items: InventoryItem[];
   selectedItem: InventoryItem | null;
@@ -32,9 +41,9 @@ export const useInventory = create<InventoryState>((set, get) => ({
       const items = await inventoryApi.fetchInventoryItems();
       set({ items });
     } catch (err: any) {
-      const message = err?.message || 'Không thể tải danh sách kho đồ.';
+      const message = sanitizeInventoryError(err?.message, 'Không thể tải danh sách kho đồ.');
       set({ error: message });
-      throw err;
+      throw new Error(message);
     } finally {
       set({ loading: false });
     }
@@ -50,9 +59,9 @@ export const useInventory = create<InventoryState>((set, get) => ({
       });
       return item;
     } catch (err: any) {
-      const message = err?.message || 'Không thể tải chi tiết đồ vật.';
+      const message = sanitizeInventoryError(err?.message, 'Không thể tải chi tiết đồ vật.');
       set({ error: message });
-      throw err;
+      throw new Error(message);
     } finally {
       set({ loading: false });
     }
@@ -65,9 +74,9 @@ export const useInventory = create<InventoryState>((set, get) => ({
       set({ items: [created, ...get().items] });
       return created;
     } catch (err: any) {
-      const message = err?.message || 'Không thể tạo đồ vật mới.';
+      const message = sanitizeInventoryError(err?.message, 'Không thể tạo đồ vật mới.');
       set({ error: message });
-      throw err;
+      throw new Error(message);
     } finally {
       set({ loading: false });
     }
@@ -99,7 +108,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
       const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || err?.code === 'ITEM_LINKED_TO_LISTING' || err?.code === 'ITEM_STATUS_CONFLICT' || rawMessage.includes('409');
       const message = isConflict
         ? 'Xung đột dữ liệu hoặc đồ vật đã gắn vào tin đăng khác.'
-        : (rawMessage || 'Không thể cập nhật đồ vật.');
+        : sanitizeInventoryError(rawMessage, 'Không thể cập nhật đồ vật.');
       set({ error: message });
       throw new Error(message);
     } finally {
@@ -130,7 +139,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
       const isConflict = err?.status === 409 || err?.code === 'VERSION_CONFLICT' || err?.code === 'ITEM_LINKED_TO_LISTING' || err?.code === 'ITEM_STATUS_CONFLICT' || rawMessage.includes('409');
       const message = isConflict
         ? 'Không thể xóa đồ vật đang gắn với tin đăng hoặc đang xử lý giao dịch.'
-        : (rawMessage || 'Không thể xóa đồ vật.');
+        : sanitizeInventoryError(rawMessage, 'Không thể xóa đồ vật.');
       set({ error: message });
       throw new Error(message);
     } finally {

@@ -1,12 +1,22 @@
 import { useState } from 'react';
-import { View, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { Nav } from '../navigation';
 import { RestrictedAccountError } from '../api/client';
 import { login } from '../auth/login';
 import { useSession } from '../auth/session';
-import { AuthScreen, Field, PasswordField, Action, Notice, ui } from '../components/AuthUI';
+import { Action, AuthScreen, Field, Notice, PasswordField, ui } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
+import { primitive } from '../theme';
+
+function sanitizeAuthError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.startsWith('API ')) {
+    return 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+  }
+  return trimmed;
+}
 
 export default function LoginScreen() {
   const nav = useNavigation<Nav>();
@@ -27,7 +37,11 @@ export default function LoginScreen() {
     try {
       await login(email.trim(), password);
       setPassword('');
-      nav.replace('Listings');
+      if (typeof nav.reset === 'function') {
+        nav.reset({ index: 0, routes: [{ name: 'Listings' }] });
+      } else {
+        nav.replace('Listings');
+      }
     } catch (e) {
       if (typeof RestrictedAccountError === 'function' && e instanceof RestrictedAccountError) {
         if (!useSession.getState().restriction) {
@@ -35,7 +49,7 @@ export default function LoginScreen() {
         }
         setError('');
       } else {
-        setError((e as Error).message);
+        setError(sanitizeAuthError(e));
       }
     } finally {
       setBusy(false);
@@ -44,6 +58,7 @@ export default function LoginScreen() {
 
   return (
     <AuthScreen
+      showBrand
       title="Chào mừng trở lại"
       subtitle="Đăng nhập để quản lý hồ sơ và trao đổi đồ dùng với cộng đồng sinh viên."
     >
@@ -71,41 +86,60 @@ export default function LoginScreen() {
           if (!busy) void submit();
         }}
       />
+
       {restriction ? <RestrictedAccountNotice /> : null}
       <Notice message={error} error />
-      <Action
-        title={busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
-        testID="login-submit"
-        busy={busy}
-        onPress={() => void submit()}
-      />
-      <Action
-        title="Quên mật khẩu"
-        secondary
-        disabled={busy}
-        onPress={() => nav.navigate('AuthFlow', { mode: 'reset' })}
-      />
+
+      <View style={styles.primaryGroup}>
+        <Action
+          title={busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
+          testID="login-submit"
+          busy={busy}
+          onPress={() => void submit()}
+        />
+        <Action
+          title="Quên mật khẩu"
+          variant="ghost"
+          compact
+          disabled={busy}
+          onPress={() => nav.navigate('AuthFlow', { mode: 'reset' })}
+        />
+      </View>
+
       <View style={ui.divider}>
-        <Text style={ui.caption}>Bạn mới tham gia Dorm Trading?</Text>
+        <Text style={ui.caption}>Chưa có tài khoản?</Text>
         <Action
           title="Đăng ký"
-          secondary
+          variant="secondary"
           disabled={busy}
           onPress={() => nav.navigate('AuthFlow', { mode: 'register' })}
         />
-        <Action
-          title="Gửi lại xác minh email"
-          secondary
-          disabled={busy}
-          onPress={() => nav.navigate('AuthFlow', { mode: 'verify' })}
-        />
-        <Action
-          title="Tiếp tục xem mặt hàng"
-          secondary
-          disabled={busy}
-          onPress={() => nav.navigate('Listings')}
-        />
+        <View style={styles.utilityLinks}>
+          <Action
+            title="Gửi lại xác minh email"
+            variant="ghost"
+            compact
+            disabled={busy}
+            onPress={() => nav.navigate('AuthFlow', { mode: 'verify' })}
+          />
+          <Action
+            title="Tiếp tục xem mặt hàng"
+            variant="ghost"
+            compact
+            disabled={busy}
+            onPress={() => nav.navigate('Listings')}
+          />
+        </View>
       </View>
     </AuthScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  primaryGroup: {
+    gap: primitive.space[2],
+  },
+  utilityLinks: {
+    gap: primitive.space[1],
+  },
+});

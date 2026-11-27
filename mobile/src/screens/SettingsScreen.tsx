@@ -77,7 +77,7 @@ export default function SettingsScreen() {
     <View style={ui.divider}>
       <Text style={ui.label}>Bảo mật khác</Text>
       <Action title="Đổi mật khẩu" secondary disabled={busy || readOnly} onPress={() => nav.navigate('AuthFlow', { mode: 'change' })} />
-      <Action title="Đăng xuất thiết bị này" secondary disabled={busy} onPress={() => void run(async () => { await useSession.getState().logout(); nav.replace('Listings'); })} />
+      <Action title="Đăng xuất thiết bị này" variant="destructive" disabled={busy} onPress={() => void run(async () => { await useSession.getState().logout(); if (typeof nav.reset === 'function') { nav.reset({ index: 0, routes: [{ name: 'Listings' }] }); } else { nav.replace('Listings'); } })} />
       <Action title="Về hồ sơ" secondary disabled={busy} onPress={() => nav.navigate('Profile')} />
     </View>
   </AuthScreen>;

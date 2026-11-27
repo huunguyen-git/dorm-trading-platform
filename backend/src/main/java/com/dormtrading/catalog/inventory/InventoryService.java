@@ -1,6 +1,5 @@
 package com.dormtrading.catalog.inventory;
 
-import java.net.URI;
 import java.sql.Array;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -13,7 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import com.dormtrading.catalog.ListingLifecycleHelper;
+import com.dormtrading.catalog.ListingValidation;
 import com.dormtrading.iam.auth.AuthFailure;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -21,15 +23,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@Transactional(noRollbackFor = AuthFailure.class)
+@Transactional
 public class InventoryService {
 
     private final JdbcTemplate db;
     private final Clock clock;
+    private final ListingLifecycleHelper lifecycleHelper;
 
     public InventoryService(JdbcTemplate db, Clock clock) {
+        this(db, clock, null);
+    }
+
+    @Autowired
+    public InventoryService(JdbcTemplate db, Clock clock, ListingLifecycleHelper lifecycleHelper) {
         this.db = db;
         this.clock = clock != null ? clock : Clock.systemUTC();
+        this.lifecycleHelper = lifecycleHelper;
     }
 
     private Instant now() {
@@ -65,6 +74,19 @@ public class InventoryService {
         }
         var rows = db.queryForList("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class,
                 userId);
+        verifyUserStatusRows(rows);
+    }
+
+    private void lockUserActive(UUID userId) {
+        if (userId == null) {
+            throw new AuthFailure(401, "UNAUTHENTICATED", "Yêu cầu đăng nhập.");
+        }
+        var rows = db.queryForList("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ? FOR UPDATE",
+                String.class, userId);
+        verifyUserStatusRows(rows);
+    }
+
+    private void verifyUserStatusRows(List<String> rows) {
         if (rows.isEmpty()) {
             throw new AuthFailure(401, "USER_NOT_FOUND", "Người dùng không tồn tại.");
         }
@@ -77,14 +99,22 @@ public class InventoryService {
         }
     }
 
-    @Transactional(readOnly = true)
     public List<InventoryItemDto> listItems(UUID userId) {
         checkUserActive(userId);
+        if (lifecycleHelper != null) {
+            lifecycleHelper.reconcileExpiredListingsForSeller(userId);
+        }
+        Timestamp nowTs = Timestamp.from(now());
         String sql = """
                 SELECT v.ma_vat, v.user_id, v.ten, v.tinh_trang, v.hinh_anh, v.trang_thai, v.version, v.created_at, v.updated_at,
-                       COUNT(td.ma_tin) AS linked_count
+                       COUNT(t.ma_tin) AS linked_count
                 FROM do_vats v
                 LEFT JOIN tin_dang_do_vat td ON v.ma_vat = td.ma_vat
+                LEFT JOIN tin_dangs t ON td.ma_tin = t.ma_tin
+                    AND (
+                        t.trang_thai IN ('NHAP', 'CHO_DUYET', 'GIU_CHO', 'AN')
+                        OR (t.trang_thai = 'CONG_KHAI' AND (t.expires_at IS NULL OR t.expires_at > ?))
+                    )
                 WHERE v.user_id = ?
                 GROUP BY v.ma_vat, v.user_id, v.ten, v.tinh_trang, v.hinh_anh, v.trang_thai, v.version, v.created_at, v.updated_at
                 ORDER BY v.created_at DESC
@@ -94,14 +124,16 @@ public class InventoryService {
             InventoryItem item = itemRowMapper.mapRow(rs, rowNum);
             int linkedCount = rs.getInt("linked_count");
             return InventoryItemDto.from(Objects.requireNonNull(item), linkedCount);
-        }, userId);
+        }, nowTs, userId);
     }
 
-    @Transactional(readOnly = true)
     public InventoryDetailDto getItemDetail(UUID userId, UUID itemId) {
         checkUserActive(userId);
         if (itemId == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mã đồ vật không hợp lệ.");
+        }
+        if (lifecycleHelper != null) {
+            lifecycleHelper.reconcileExpiredListingsForSeller(userId);
         }
 
         List<InventoryItem> items = db.query(
@@ -113,17 +145,21 @@ public class InventoryService {
         }
 
         InventoryItem item = items.getFirst();
-        List<LinkedListingDto> linkedListings = getLinkedListings(itemId);
+        List<LinkedListingDto> linkedListings = getLinkedListings(itemId, Timestamp.from(now()));
 
         return InventoryDetailDto.from(item, linkedListings);
     }
 
-    private List<LinkedListingDto> getLinkedListings(UUID itemId) {
+    private List<LinkedListingDto> getLinkedListings(UUID itemId, Timestamp nowTs) {
         String sql = """
                 SELECT t.ma_tin, t.tieu_de, t.trang_thai, t.gia_vnd
                 FROM tin_dang_do_vat td
                 JOIN tin_dangs t ON td.ma_tin = t.ma_tin
                 WHERE td.ma_vat = ?
+                  AND (
+                      t.trang_thai IN ('NHAP', 'CHO_DUYET', 'GIU_CHO', 'AN')
+                      OR (t.trang_thai = 'CONG_KHAI' AND (t.expires_at IS NULL OR t.expires_at > ?))
+                  )
                 ORDER BY t.created_at DESC
                 """;
 
@@ -131,28 +167,11 @@ public class InventoryService {
                 rs.getObject("ma_tin", UUID.class),
                 rs.getString("tieu_de"),
                 rs.getString("trang_thai"),
-                rs.getInt("gia_vnd")), itemId);
+                rs.getInt("gia_vnd")), itemId, nowTs);
     }
 
-    private void validateImageUrl(String img) {
-        if (img == null || img.isBlank()) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được để trống.");
-        }
-        String trimmed = img.strip();
-        if (trimmed.length() > 1000) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh không được vượt quá 1000 ký tự.");
-        }
-        try {
-            URI uri = URI.create(trimmed);
-            String scheme = uri.getScheme();
-            String authority = uri.getRawAuthority();
-            if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
-                    || authority == null || authority.isBlank()) {
-                throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
-            }
-        } catch (IllegalArgumentException e) {
-            throw new AuthFailure(400, "INVALID_INPUT", "Đường dẫn hình ảnh phải là URL http:// hoặc https:// hợp lệ.");
-        }
+    private String validateImageUrl(String img) {
+        return ListingValidation.validateImageUrl(img);
     }
 
     public InventoryDetailDto createItem(UUID userId, CreateInventoryItemRequest req) {
@@ -215,9 +234,25 @@ public class InventoryService {
     }
 
     public InventoryDetailDto updateItem(UUID userId, UUID itemId, UpdateInventoryItemRequest req) {
-        checkUserActive(userId);
         if (itemId == null || req == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Dữ liệu yêu cầu không hợp lệ.");
+        }
+        // Lock order (1): thanh_viens FOR UPDATE
+        lockUserActive(userId);
+
+        Instant currentNow = now();
+        if (lifecycleHelper != null) {
+            // Lock order (2) -> (3): expire overdue tin_dangs first, then lock union(expiredItems, itemId) ascending.
+            // Exclude itemId from the pre-check version bump so direct PUT with caller's current version succeeds
+            // (and bumps version via the UPDATE below) instead of tripping a self-inflicted 409 VERSION_CONFLICT loop.
+            List<UUID> expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(userId, currentNow);
+            if (!expiredListingIds.isEmpty()) {
+                List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
+                List<UUID> otherExpiredItemIds = expiredItemIds.stream()
+                        .filter(id -> !id.equals(itemId))
+                        .toList();
+                lifecycleHelper.lockAndBumpItemsVersion(otherExpiredItemIds, List.of(itemId), currentNow);
+            }
         }
 
         // Lock row for optimistic / concurrency verification
@@ -236,11 +271,19 @@ public class InventoryService {
                     "Đồ vật không ở trạng thái khả dụng để chỉnh sửa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
-                itemId);
+        Integer linkedCount = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat td " +
+                        "JOIN tin_dangs t ON td.ma_tin = t.ma_tin " +
+                        "WHERE td.ma_vat = ? AND (" +
+                        "t.trang_thai IN ('NHAP', 'CHO_DUYET', 'GIU_CHO', 'AN') " +
+                        "OR (t.trang_thai = 'CONG_KHAI' AND (t.expires_at IS NULL OR t.expires_at > ?))" +
+                        ")",
+                Integer.class,
+                itemId,
+                Timestamp.from(currentNow));
         if (linkedCount != null && linkedCount > 0) {
             throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
-                    "Đồ vật đã được liên kết với tin đăng, không thể chỉnh sửa.");
+                    "Đồ vật đã được liên kết với tin đăng hoặc tin bị ẩn kiểm duyệt, không thể chỉnh sửa.");
         }
 
         if (req.version() == null) {
@@ -313,9 +356,36 @@ public class InventoryService {
     }
 
     public void deleteItem(UUID userId, UUID itemId, Long expectedVersion) {
-        checkUserActive(userId);
         if (itemId == null) {
             throw new AuthFailure(400, "INVALID_INPUT", "Mã đồ vật không hợp lệ.");
+        }
+        // Lock order (1): thanh_viens FOR UPDATE
+        lockUserActive(userId);
+
+        Instant currentNow = now();
+        List<UUID> expiredListingIds = List.of();
+        if (lifecycleHelper != null) {
+            // Lock order (2a): expire overdue tin_dangs first
+            expiredListingIds = lifecycleHelper.expireOverdueListingsForSeller(userId, currentNow);
+        }
+        // Lock order (2b): lock closed DA_RUT/HET_HAN listings referencing itemId so hinh_thuc and version stay consistent
+        List<UUID> closedListingIds = db.queryForList(
+                "SELECT t.ma_tin FROM tin_dangs t " +
+                        "JOIN tin_dang_do_vat td ON td.ma_tin = t.ma_tin " +
+                        "WHERE td.ma_vat = ? AND t.nguoi_dang_id = ? " +
+                        "AND t.trang_thai IN ('DA_RUT', 'HET_HAN') " +
+                        "ORDER BY t.ma_tin ASC FOR UPDATE OF t",
+                UUID.class,
+                itemId,
+                userId);
+        if (lifecycleHelper != null && !expiredListingIds.isEmpty()) {
+            // Lock order (3): lock union(expiredItems, itemId) ascending, excluding itemId from the pre-check bump
+            // so direct DELETE with caller's current version succeeds without self-inflicted 409 VERSION_CONFLICT.
+            List<UUID> expiredItemIds = lifecycleHelper.findLinkedItemIdsSorted(expiredListingIds);
+            List<UUID> otherExpiredItemIds = expiredItemIds.stream()
+                    .filter(id -> !id.equals(itemId))
+                    .toList();
+            lifecycleHelper.lockAndBumpItemsVersion(otherExpiredItemIds, List.of(itemId), currentNow);
         }
 
         // Lock row for optimistic / concurrency verification
@@ -334,11 +404,19 @@ public class InventoryService {
                     "Đồ vật không ở trạng thái khả dụng để xóa (trạng thái: " + current.trangThai() + ").");
         }
 
-        Integer linkedCount = db.queryForObject("SELECT COUNT(*) FROM tin_dang_do_vat WHERE ma_vat = ?", Integer.class,
-                itemId);
+        Integer linkedCount = db.queryForObject(
+                "SELECT COUNT(*) FROM tin_dang_do_vat td " +
+                        "JOIN tin_dangs t ON td.ma_tin = t.ma_tin " +
+                        "WHERE td.ma_vat = ? AND (" +
+                        "t.trang_thai IN ('NHAP', 'CHO_DUYET', 'GIU_CHO', 'AN') " +
+                        "OR (t.trang_thai = 'CONG_KHAI' AND (t.expires_at IS NULL OR t.expires_at > ?))" +
+                        ")",
+                Integer.class,
+                itemId,
+                Timestamp.from(currentNow));
         if (linkedCount != null && linkedCount > 0) {
             throw new AuthFailure(409, "ITEM_LINKED_TO_LISTING",
-                    "Đồ vật đã được liên kết với tin đăng, không thể xóa.");
+                    "Đồ vật đã được liên kết với tin đăng hoặc tin bị ẩn kiểm duyệt, không thể xóa.");
         }
 
         if (expectedVersion != null && !expectedVersion.equals(current.version())) {
@@ -346,6 +424,29 @@ public class InventoryService {
         }
 
         try {
+            // Only remove links for naturally closed listings (preserve moderation evidence on AN listings)
+            db.update(
+                    "DELETE FROM tin_dang_do_vat td USING tin_dangs t " +
+                            "WHERE td.ma_tin = t.ma_tin AND td.ma_vat = ? " +
+                            "AND t.trang_thai IN ('DA_RUT', 'HET_HAN', 'KET_THUC')",
+                    itemId);
+            if (!closedListingIds.isEmpty()) {
+                UUID[] affectedListings = closedListingIds.toArray(new UUID[0]);
+                db.update(con -> {
+                    PreparedStatement ps = con.prepareStatement(
+                            "UPDATE tin_dangs t " +
+                                    "SET hinh_thuc = CASE " +
+                                    "    WHEN (SELECT COUNT(*) FROM tin_dang_do_vat td WHERE td.ma_tin = t.ma_tin) >= 2 THEN 'BAN_COMBO' " +
+                                    "    WHEN t.gia_vnd = 0 THEN 'CHO_TANG' " +
+                                    "    ELSE 'BAN_LE' END, " +
+                                    "    version = version + 1, " +
+                                    "    updated_at = ? " +
+                                    "WHERE t.ma_tin = ANY(?) AND t.trang_thai IN ('DA_RUT', 'HET_HAN')");
+                    ps.setTimestamp(1, Timestamp.from(currentNow));
+                    ps.setArray(2, con.createArrayOf("uuid", affectedListings));
+                    return ps;
+                });
+            }
             int deleted = db.update("DELETE FROM do_vats WHERE ma_vat = ? AND user_id = ? AND version = ?", itemId,
                     userId, current.version());
             if (deleted == 0) {

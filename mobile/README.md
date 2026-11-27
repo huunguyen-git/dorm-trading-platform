@@ -1,17 +1,26 @@
 # mobile
 
-App Expo SDK 53 cho người dùng (React Native 0.79.5 + React 19).
+App Expo SDK 58 cho người dùng (React Native 0.88.1 + React 19.3).
 
 ## Chạy
 
+> **Lưu ý:** Luôn `cd mobile` trước khi chạy lệnh `npm` / `npx expo` (thư mục gốc monorepo không có `package.json`). Trên Windows PowerShell nếu bị chặn `npx.ps1`, dùng `npm.cmd` hoặc `cmd /c npx ...`.
+
 ```bash
+cd mobile
 npm ci
 cp .env.example .env   # PowerShell: Copy-Item .env.example .env
-npm start              # Expo dev server
-npm run android        # hoặc npm run ios
+npx expo login         # Đăng nhập cùng tài khoản Expo với app Expo Go trên điện thoại (PowerShell: cmd /c npx expo login)
+npm run start:lan      # Mở QR cho thiết bị thật iOS / Android qua LAN
+npm run android        # hoặc npm run ios (macOS Xcode Simulator)
 ```
 
-`EXPO_PUBLIC_API_URL` phải là gốc API của backend. Android Emulator chuẩn dùng `http://10.0.2.2:8082/api/v1`. LDPlayer và máy thật dùng IP LAN của máy chạy backend, ví dụ `http://192.168.1.73:8082/api/v1`.
+`EXPO_PUBLIC_API_URL` phải là gốc API của backend:
+- **Thiết bị thật iOS / Android (Expo Go chung Wi-Fi/LAN) & LDPlayer:** `http://<IP_LAN>:8082/api/v1` (ví dụ `http://192.168.100.181:8082/api/v1`).
+- **Android Studio Emulator chuẩn:** `http://10.0.2.2:8082/api/v1`.
+- **iOS Simulator (macOS):** `http://localhost:8082/api/v1`.
+
+Xem hướng dẫn đầy đủ cho cả nhóm tại [`docs/huong-dan-trai-nghiem-mobile-ios-android.md`](../docs/huong-dan-trai-nghiem-mobile-ios-android.md).
 
 Kiểm tra đường mạng từ trong giả lập trước khi mở app:
 

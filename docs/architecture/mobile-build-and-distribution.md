@@ -1,6 +1,6 @@
 # Quy trình đóng gói và phân phối bản mobile
 
-Trạng thái: khởi tạo Phase 0 (P0-05), đồng bộ P0-06 ngày 08/11/2026. P0-02 đã chốt Expo SDK 53; tài khoản ký và đóng gói phát hành thuộc P4-01. Các mục đánh dấu **[chờ chốt]** chưa phải quyết định.
+Trạng thái: khởi tạo Phase 0 (P0-05), đồng bộ P0-06 ngày 08/11/2026; nâng cấp lên **Expo SDK 58** ngày 25/11/2026 ([quyết định kỹ thuật](../decisions/P2-mobile-expo-sdk-58.md)) để tương thích trực tiếp với Expo Go trên iOS App Store và Google Play. Tài khoản ký và đóng gói phát hành thuộc P4-01. Các mục đánh dấu **[chờ chốt]** chưa phải quyết định.
 
 ## 1. Mục tiêu
 

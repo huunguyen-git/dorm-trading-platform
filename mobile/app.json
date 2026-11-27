@@ -5,8 +5,20 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "plugins": ["expo-secure-store"],
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ứng dụng cần quyền truy cập thư viện ảnh để chọn ảnh cho tin đăng.",
+          "cameraPermission": "Ứng dụng cần quyền truy cập camera để chụp ảnh sản phẩm cho tin đăng."
+        }
+      ]
+    ],
     "ios": { "supportsTablet": true },
-    "android": { "package": "com.dormtrading.app" }
+    "android": {
+      "package": "com.dormtrading.app",
+      "softwareKeyboardLayoutMode": "resize"
+    }
   }
 }

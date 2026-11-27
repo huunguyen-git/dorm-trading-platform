@@ -177,7 +177,7 @@ test('changes email after verifying the OTP and reports a wrong code', async () 
   expect(await screen.findByText('Đã đổi email. Lần đăng nhập sau dùng email mới.')).toBeTruthy();
 });
 
-test('requires title, description and positive price before creating listing', async () => {
+test('requires inventory item, title, description, price and photo before publishing listing', async () => {
   useSession.setState({
     token: 'token',
     user: {
@@ -195,9 +195,13 @@ test('requires title, description and positive price before creating listing', a
   });
   render(<App />);
   fireEvent.press(screen.getByRole('button', { name: 'Đăng tin' }));
-  await waitFor(() => expect(screen.getByPlaceholderText('Tiêu đề')).toBeTruthy());
-  fireEvent.press(screen.getAllByRole('button', { name: 'Đăng tin' }).at(-1)!);
-  expect(await screen.findByText('Nhập tiêu đề, mô tả và giá hợp lệ.')).toBeTruthy();
+  await waitFor(() => expect(screen.getByTestId('listing-title-input')).toBeTruthy());
+  await waitFor(() => expect(screen.getByTestId('inventory-picker-empty')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('submit-publish-listing'));
+  expect(
+    await screen.findByText('Vui lòng chọn ít nhất 1 đồ vật khả dụng từ Kho đồ cá nhân.'),
+  ).toBeTruthy();
+  expect(screen.getByText('Vui lòng nhập tiêu đề tin đăng.')).toBeTruthy();
 });
 
 test('signup blocks mismatched passwords then verifies OTP with an explicit success screen', async () => {
@@ -450,8 +454,11 @@ test('mid-flow 401 during password change switches back action to Login instead 
   mockedApi.mockImplementation((async (path: string) => {
     if (path === '/profile/me') return { ...profile, profileApproved: true, profileStatus: 'DA_DUYET', accountStatus: 'HOAT_DONG' };
     if (path === '/auth/me') return useSession.getState().user;
-    useSession.setState({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
-    throw new Error('Phiên đã hết hạn.');
+    if (path === '/auth/password/change') {
+      useSession.setState({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+      throw new Error('Phiên đã hết hạn.');
+    }
+    return [];
   }) as never);
 
   render(<App />);

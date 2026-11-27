@@ -8,6 +8,7 @@ import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
 import * as inventoryApi from './api';
+import * as imagePicker from '../media/imagePicker';
 import type { InventoryItem } from './types';
 import { normalizeInventoryItem } from './types';
 
@@ -39,6 +40,16 @@ jest.mock('@react-navigation/native', () => {
 // Mock inventory API
 jest.mock('./api');
 const mockedApi = jest.mocked(inventoryApi);
+jest.mock('../media/imagePicker', () => {
+  const actual = jest.requireActual<typeof import('../media/imagePicker')>('../media/imagePicker');
+  return {
+    ...actual,
+    pickImagesFromLibrary: jest.fn(),
+    takePhotoWithCamera: jest.fn(),
+    uploadListingImages: jest.fn(),
+  };
+});
+const mockedImagePicker = jest.mocked(imagePicker);
 
 const sampleItems: InventoryItem[] = [
   {
@@ -170,7 +181,7 @@ describe('Screen: InventoryListScreen', () => {
       screen.getByText('Bạn chưa có món đồ nào trong kho cá nhân. Hãy thêm đồ vật để sẵn sàng đăng tin thanh lý!'),
     ).toBeTruthy();
 
-    const addNowBtn = screen.getByText('+ Thêm đồ vật ngay');
+    const addNowBtn = screen.getByText('Thêm đồ vật ngay');
     fireEvent.press(addNowBtn);
     expect(mockNavigate).toHaveBeenCalledWith('InventoryForm', { mode: 'create' });
   });
@@ -287,7 +298,7 @@ describe('Screen: InventoryDetailScreen', () => {
     expect(screen.getByText('Hoạt động tốt 3 chế độ sáng')).toBeTruthy();
     expect(screen.getByText('Đang giữ')).toBeTruthy();
     expect(screen.getByText('Thanh lý đèn bàn')).toBeTruthy();
-    expect(screen.getByText('Trạng thái: DANG_GIU')).toBeTruthy();
+    expect(screen.getByText('Trạng thái: Đang giữ chỗ')).toBeTruthy();
   });
 
   test('blocks edit and delete button for item with status DANG_GIU', async () => {
@@ -301,6 +312,28 @@ describe('Screen: InventoryDetailScreen', () => {
 
     expect(editBtn.props.accessibilityState.disabled).toBe(true);
     expect(deleteBtn.props.accessibilityState.disabled).toBe(true);
+  });
+
+  test('navigates directly to CreateListing with preselectedItemId for available item and opens linked listing detail', async () => {
+    mockRouteParams.id = 'item-1';
+    mockedApi.fetchInventoryItem.mockResolvedValue(sampleItems[0]);
+
+    const { unmount } = render(<InventoryDetailScreen />);
+
+    const createBtn = await screen.findByTestId('detail-create-listing-button');
+    fireEvent.press(createBtn);
+    expect(mockNavigate).toHaveBeenCalledWith('CreateListing', { preselectedItemId: 'item-1' });
+    unmount();
+
+    mockNavigate.mockClear();
+    mockRouteParams.id = 'item-2';
+    mockedApi.fetchInventoryItem.mockResolvedValue(sampleItems[1]);
+    render(<InventoryDetailScreen />);
+
+    expect(await screen.findByText('Thanh lý đèn bàn')).toBeTruthy();
+    expect(screen.queryByTestId('detail-create-listing-button')).toBeNull();
+    fireEvent.press(screen.getByTestId('linked-listing-tin-2'));
+    expect(mockNavigate).toHaveBeenCalledWith('Listing', { id: 'tin-2' });
   });
 
   test('deletes item passing current version and navigates back', async () => {
@@ -436,6 +469,84 @@ describe('Screen: InventoryFormScreen (Add & Edit)', () => {
     expect(
       await screen.findByText('Xung đột dữ liệu hoặc đồ vật đã gắn vào tin đăng khác.'),
     ).toBeTruthy();
+  });
+
+  test('uploads photos from gallery and camera and rejects invalid image URLs in InventoryFormScreen', async () => {
+    mockRouteParams.mode = 'create';
+    mockedImagePicker.pickImagesFromLibrary.mockResolvedValueOnce([
+      { uri: 'file:///desk-gallery.jpg', fileName: 'desk-gallery.jpg', mimeType: 'image/jpeg', fileSize: 12000 },
+    ]);
+    mockedImagePicker.uploadListingImages
+      .mockResolvedValueOnce([
+        {
+          id: 'm-1',
+          url: 'http://127.0.0.1:8082/api/v1/media/m-1',
+          contentType: 'image/jpeg',
+          sizeBytes: 12000,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'm-2',
+          url: 'http://127.0.0.1:8082/api/v1/media/m-2',
+          contentType: 'image/jpeg',
+          sizeBytes: 14000,
+        },
+      ]);
+    mockedImagePicker.takePhotoWithCamera.mockResolvedValueOnce({
+      uri: 'file:///desk-cam.jpg',
+      fileName: 'desk-cam.jpg',
+      mimeType: 'image/jpeg',
+      fileSize: 14000,
+    });
+
+    render(<InventoryFormScreen />);
+
+    fireEvent.press(screen.getByTestId('inventory-pick-library-btn'));
+    expect(await screen.findByText('Ảnh thực tế (1/5)')).toBeTruthy();
+    expect(mockedImagePicker.pickImagesFromLibrary).toHaveBeenCalledWith(5);
+
+    fireEvent.press(screen.getByTestId('inventory-take-photo-btn'));
+    expect(await screen.findByText('Ảnh thực tế (2/5)')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByTestId('input-image-url'), 'javascript:alert(1)');
+    fireEvent.press(screen.getByTestId('add-image-url-button'));
+    expect(await screen.findByText('Đường dẫn ảnh phải bắt đầu bằng http:// hoặc https://.')).toBeTruthy();
+    expect(screen.getByText('Ảnh thực tế (2/5)')).toBeTruthy();
+  });
+
+  test('prevents duplicate concurrent picker launches on rapid double-tap in InventoryFormScreen', async () => {
+    mockRouteParams.mode = 'create';
+    let resolvePicker: ((value: imagePicker.PickableImageAsset[]) => void) | undefined;
+    mockedImagePicker.pickImagesFromLibrary.mockImplementationOnce(
+      () =>
+        new Promise<imagePicker.PickableImageAsset[]>((resolve) => {
+          resolvePicker = resolve;
+        }),
+    );
+    mockedImagePicker.uploadListingImages.mockResolvedValueOnce([
+      {
+        id: 'm-double',
+        url: 'http://127.0.0.1:8082/api/v1/media/m-double',
+        contentType: 'image/jpeg',
+        sizeBytes: 9000,
+      },
+    ]);
+
+    render(<InventoryFormScreen />);
+
+    const pickBtn = screen.getByTestId('inventory-pick-library-btn');
+    fireEvent.press(pickBtn);
+    fireEvent.press(pickBtn);
+
+    expect(mockedImagePicker.pickImagesFromLibrary).toHaveBeenCalledTimes(1);
+
+    if (resolvePicker) {
+      resolvePicker([
+        { uri: 'file:///once.jpg', fileName: 'once.jpg', mimeType: 'image/jpeg', fileSize: 9000 },
+      ]);
+    }
+    expect(await screen.findByText('Ảnh thực tế (1/5)')).toBeTruthy();
   });
 
   test('clears shared store error when cancelling form after an error', async () => {
