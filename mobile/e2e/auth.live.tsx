@@ -29,18 +29,20 @@ function network(url: string, init: RequestInit = {}): Promise<Response> {
   });
 }
 
-test('mobile registration → real SMTP OTP → login → pending profile → logout', async () => {
+test('mobile registration → real SMTP OTP → login → pending profile → change password → login with new password → logout', async () => {
   if (!process.env.EXPO_PUBLIC_API_URL || !process.env.P1_MAILDEV_URL) throw new Error('Set isolated API and Maildev URLs before running this test.');
   global.fetch = network as typeof fetch;
   const email = `mobile${Date.now()}@student.edu.vn`;
+  const oldPassword = 'violet island brass telescope 7629';
+  const newPassword = 'copper lantern mild river 4821';
   render(<App />);
   fireEvent.press(await screen.findByRole('button', { name: 'Đăng nhập' }));
   fireEvent.press(await screen.findByRole('button', { name: 'Đăng ký' }));
   fireEvent.changeText(await screen.findByLabelText('Email'), email);
   fireEvent.changeText(screen.getByLabelText('Họ tên'), 'Mobile Integration');
   fireEvent.changeText(screen.getByLabelText('MSSV'), `M${Date.now()}`);
-  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), 'violet island brass telescope 7629');
-  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), 'violet island brass telescope 7629');
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), oldPassword);
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), oldPassword);
   fireEvent.press(screen.getByRole('button', { name: 'Tiếp tục' }));
   await screen.findByLabelText('Mã OTP', {}, { timeout: 15000 });
   let message: { id: string } | undefined;
@@ -56,7 +58,7 @@ test('mobile registration → real SMTP OTP → login → pending profile → lo
   fireEvent.press(await screen.findByTestId('auth-success-continue'));
   const loginPassword = await screen.findByLabelText('Mật khẩu');
   fireEvent.changeText(screen.getByLabelText('Email'), email);
-  fireEvent.changeText(loginPassword, 'violet island brass telescope 7629');
+  fireEvent.changeText(loginPassword, oldPassword);
   fireEvent.press(screen.getByRole('button', { name: 'Đăng nhập' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Đăng tin' }).props.accessibilityState.disabled).toBe(true), { timeout: 10000 });
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
@@ -66,6 +68,20 @@ test('mobile registration → real SMTP OTP → login → pending profile → lo
   fireEvent.press(screen.getByRole('button', { name: 'Lưu' }));
   expect(await screen.findByText('Đã lưu. Thông tin định danh đang chờ kiểm duyệt.')).toBeTruthy();
   fireEvent.press(screen.getByRole('button', { name: 'Cài đặt tài khoản' }));
+  // Đổi mật khẩu: server thu hồi phiên nên app phải tự đưa về màn đăng nhập, không giữ token cũ.
+  fireEvent.press(await screen.findByRole('button', { name: 'Đổi mật khẩu' }));
+  fireEvent.changeText(await screen.findByLabelText('Mật khẩu hiện tại'), oldPassword);
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu mới'), newPassword);
+  fireEvent.changeText(screen.getByLabelText('Xác nhận mật khẩu mới'), newPassword);
+  fireEvent.press(screen.getByTestId('auth-submit'));
+  expect(await screen.findByText('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('auth-success-continue'));
+  // Đăng nhập lại bằng mật khẩu mới: chứng minh mật khẩu cũ đã hết hiệu lực.
+  fireEvent.changeText(await screen.findByLabelText('Email'), email);
+  fireEvent.changeText(screen.getByLabelText('Mật khẩu'), newPassword);
+  fireEvent.press(screen.getByRole('button', { name: 'Đăng nhập' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Hồ sơ' }, { timeout: 10000 }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Cài đặt tài khoản' }));
   fireEvent.press(await screen.findByRole('button', { name: 'Đăng xuất thiết bị này' }));
   expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeTruthy();
 }, 60000);
