@@ -1,0 +1,220 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_latest:
+        description: "Also tag and push :latest alongside :sha-<short> (recommended for live demos)"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request')
+    outputs:
+      target_sha: ${{ steps.meta.outputs.target_sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      source_branch: ${{ steps.meta.outputs.source_branch }}
+      publish_latest: ${{ steps.meta.outputs.publish_latest }}
+    steps:
+      - name: Validate Docker Hub secrets and resolve release metadata
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA_DEFAULT: ${{ github.sha }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          DISPATCH_PUBLISH_LATEST: ${{ inputs.publish_latest }}
+          REF_NAME: ${{ github.ref_name }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Missing required GitHub Secrets DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN. See infra/demo/README.md for setup steps."
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ -n "$WORKFLOW_RUN_SHA" ]; then
+            target_sha="$WORKFLOW_RUN_SHA"
+            source_branch="${WORKFLOW_RUN_BRANCH:-main}"
+            publish_latest="true"
+          else
+            target_sha="$GITHUB_SHA_DEFAULT"
+            source_branch="$REF_NAME"
+            if [ "$DISPATCH_PUBLISH_LATEST" = "false" ]; then
+              publish_latest="false"
+            else
+              publish_latest="true"
+            fi
+          fi
+
+          short_sha="${target_sha:0:7}"
+
+          {
+            echo "target_sha=$target_sha"
+            echo "short_sha=$short_sha"
+            echo "source_branch=$source_branch"
+            echo "publish_latest=$publish_latest"
+          } >> "$GITHUB_OUTPUT"
+
+  build-backend:
+    name: build-backend
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    timeout-minutes: 20
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate Docker image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/dorm-trading-backend
+          tags: |
+            type=raw,value=sha-${{ needs.prepare.outputs.short_sha }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.publish_latest == 'true' }}
+
+      - name: Build and push backend image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  build-admin-web:
+    name: build-admin-web
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    timeout-minutes: 15
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate Docker image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/dorm-trading-admin-web
+          tags: |
+            type=raw,value=sha-${{ needs.prepare.outputs.short_sha }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.publish_latest == 'true' }}
+
+      - name: Build and push admin-web image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: admin-web
+          file: admin-web/Dockerfile
+          push: true
+          build-args: |
+            VITE_API_URL=/api/v1
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=admin-web
+          cache-to: type=gha,mode=max,scope=admin-web
+
+  summary:
+    name: summary
+    runs-on: ubuntu-latest
+    needs: [prepare, build-backend, build-admin-web]
+    timeout-minutes: 5
+    steps:
+      - name: Publish CD summary
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          SHORT_SHA: ${{ needs.prepare.outputs.short_sha }}
+          SOURCE_BRANCH: ${{ needs.prepare.outputs.source_branch }}
+          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
+          BACKEND_DIGEST: ${{ needs.build-backend.outputs.digest }}
+          ADMIN_WEB_DIGEST: ${{ needs.build-admin-web.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if [ "$PUBLISH_LATEST" = "true" ]; then
+            published_tags="\`latest\`, \`sha-${SHORT_SHA}\`"
+          else
+            published_tags="\`sha-${SHORT_SHA}\`"
+          fi
+
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Dorm Trading Platform — CD Release Summary
+
+          - **Branch:** \`${SOURCE_BRANCH}\`
+          - **Commit:** \`${TARGET_SHA}\` (short tag: \`sha-${SHORT_SHA}\`)
+
+          | Service | Docker Hub Repository | Published Tags | Digest |
+          | --- | --- | --- | --- |
+          | \`backend\` | \`<DOCKERHUB_USERNAME>/dorm-trading-backend\` | ${published_tags} | \`${BACKEND_DIGEST}\` |
+          | \`admin-web\` | \`<DOCKERHUB_USERNAME>/dorm-trading-admin-web\` | ${published_tags} | \`${ADMIN_WEB_DIGEST}\` |
+
+          ### Deploy / Update on Demo Host (\`infra/demo/\`)
+
+          \`\`\`bash
+          docker compose -f docker-compose.demo.yml pull
+          docker compose -f docker-compose.demo.yml up -d
+          \`\`\`
+
+          ### Instant Rollback to This Commit
+
+          \`\`\`bash
+          IMAGE_TAG=sha-${SHORT_SHA} docker compose -f docker-compose.demo.yml pull
+          IMAGE_TAG=sha-${SHORT_SHA} docker compose -f docker-compose.demo.yml up -d
+          \`\`\`
+          EOF

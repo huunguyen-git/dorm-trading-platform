@@ -12,7 +12,7 @@ Trạng thái task: **Chờ review**. Nhánh đã merge `upstream/main` (`0d8ec3
 | 3 | Critical | **Đúng** | `ProfileScreen.tsx:126` `Cài đặt tài khoản` bị `disabled={busy \|\| readOnly}`; `readOnly` gồm `sessionUser?.accountStatus === 'BI_KHOA'` (dòng 92). `Đăng xuất thiết bị này` chỉ còn ở `SettingsScreen.tsx:77` → `BI_KHOA` không có đường đăng xuất. Đây là hồi quy P1-05 (hợp đồng UC-03 §3.2: mobile cho `BI_KHOA` đăng nhập với quyền hạn chế) |
 | 4 | High | **Đúng** | `ProfileService.pick()` dòng 109 `value != null ? value : string(row, column)`; `optional()` trả `null` khi chuỗi rỗng (dòng 395-401) → `ho_so_cap_nhat` lưu `NULL`, `view()` lấp lại giá trị cũ từ `thanh_viens` |
 | 5 | High | **Đúng** | `approve()` (dòng 264-273) tự `diem_uy_tin = case when diem_khoi_tao then diem_uy_tin else 100 end` + `diem_khoi_tao=true`, không gọi `ReputationLedgerService.initializeActivationScore(UUID, UUID)` (tồn tại, `ReputationLedgerService.java:177`, idempotency key `ACTIVATION:<id>`) → `lich_su_diem_uy_tin` trống |
-| 6 | High | **Đúng** | `pending()` (dòng 230-240), `pendingOrThrow()` (dòng 371), `approve()`/`reject()` không lọc `trang_thai_tai_khoan = 'VO_HIEU_HOA'`. Partial index `V8` cũng không có vị từ này |
+| 6 | High | **Đúng** | `pending()` (dòng 230-240), `pendingOrThrow()` (dòng 371), `approve()`/`reject()` không lọc `trang_thai_tai_khoan = 'VO_HIEU_HOA'`. Partial index `V9` cũng không có vị từ này |
 | 7 | High | **Đúng** | `ProfileScreen.load()` dòng 39 `useSession.setState({ user: ... })` — thiếu `restriction: resolveUserRestriction(fresh)` và `restrictionDismissed: false`; `RestrictedAccountNotice` đọc `sessionRestriction` trước nên banner kẹt |
 | 8 | Medium | **Đúng** | `ProfileDetailPage.tsx:56` `if (status === 409)` gộp mọi 409 thành "Hồ sơ đã được người khác xử lý". `approve()` còn trả `409 STUDENT_ID_IN_USE` và `409 EMAIL_NOT_VERIFIED` |
 | M1 | Medium | **Đúng** | `changeEmail()` không có đếm `PASSWORD_WRONG`; `AuthService.changePassword()` dùng `limitWait(email,"PASSWORD_WRONG",3600,5)` (`AuthService.java:375`). `429` tại `ProfileService.java:315` không truyền `retryAfter` nên `AuthErrors` không đặt header `Retry-After` |
@@ -34,13 +34,13 @@ Không có mục nào sai; mục 1 chỉ còn phần client contract.
 
 4. **Mục 4** · `pick()` → `return pending != null ? string(pending, column) : string(row, column);` (vì `ho_so_cap_nhat` luôn là snapshot đủ 6 cột). Kiểm `view()` cho cả `GET /profile/me` và `GET /admin/profiles/{id}`.
 5. **Mục 5** · `approve()`: bỏ `diem_uy_tin=case ...` khỏi `UPDATE`, gọi `reputationLedger.initializeActivationScore(userId, moderator)` sau khi set `profile_approved=diem_khoi_tao=true` (idempotent nên duyệt lại bản cập nhật không cộng điểm lần hai). Cần inject `ReputationLedgerService` (kiểm vòng phụ thuộc bean).
-6. **Mục 6** · thêm `and v.trang_thai_tai_khoan <> 'VO_HIEU_HOA'` vào `pending()`; `pendingOrThrow()` trả `409 ACCOUNT_DELETED` khi `VO_HIEU_HOA`; migration **V9** thay partial index `idx_thanh_viens_cho_duyet` thêm vị từ `trang_thai_tai_khoan <> 'VO_HIEU_HOA'`.
+6. **Mục 6** · thêm `and v.trang_thai_tai_khoan <> 'VO_HIEU_HOA'` vào `pending()`; `pendingOrThrow()` trả `409 ACCOUNT_DELETED` khi `VO_HIEU_HOA`; migration **V10** thay partial index `idx_thanh_viens_cho_duyet` thêm vị từ `trang_thai_tai_khoan <> 'VO_HIEU_HOA'`.
 
 **Đợt C — Medium + admin-web (1 commit)**
 
 7. **Mục 8** · `ProfileDetailPage.decide()`: `if (status === 409 && cause.code === 'PROFILE_ALREADY_HANDLED') setStale(...)` else `setReasonError/ setError((cause as Error).message)`. Test: `409 STUDENT_ID_IN_USE` hiện đúng thông báo MSSV.
 8. **M1** · `changeEmail()`: đếm `PASSWORD_WRONG` theo `limitWait(email,"PASSWORD_WRONG",3600,5)` + `event(email,"PASSWORD_WRONG")` khi sai, và truyền `retryAfter` cho `429 RATE_LIMITED` (chờ `resendSeconds`).
-9. **M2** · `uploadCard()`: giữ ảnh cũ tới khi hồ sơ được duyệt — chỉ xoá object cũ trong `approve()` (sau khi ảnh mới đã thành ảnh chính thức) hoặc chuyển object cũ vào `afterCommit` của lần duyệt. Chọn cách rẻ nhất: ghi `previous` vào bảng tạm/`object_key_cho_duyet` rồi `approve()` xoá. **Cần chốt với reviewer** vì đụng V7.
+9. **M2** · `uploadCard()`: giữ ảnh cũ tới khi hồ sơ được duyệt — chỉ xoá object cũ trong `approve()` (sau khi ảnh mới đã thành ảnh chính thức) hoặc chuyển object cũ vào `afterCommit` của lần duyệt. Chọn cách rẻ nhất: ghi `previous` vào bảng tạm/`object_key_cho_duyet` rồi `approve()` xoá. **Cần chốt với reviewer** vì đụng V8.
 10. **M3** · `S3CardStorage.put()`: `synchronized (this)` quanh khối `bucketReady` (hoặc `private final Object bucketLock`).
 11. **M4** · `AuthErrors`: thêm `MaxUploadSizeExceededException` → `413 PAYLOAD_TOO_LARGE`, `MissingServletRequestPartException` → `400 INVALID_INPUT`.
 12. **Mục 1 phần còn lại** · `mobile/src/api/client.ts` `upload()`/`attachment()` và `admin-web/src/api/client.ts` `attachment()`: dùng `ApiError(status, message, code)`, `hasBearerChallenge` cho 401, xử lý `403 ACCOUNT_RESTRICTED` và reset `restriction`.
@@ -53,7 +53,7 @@ Không có mục nào sai; mục 1 chỉ còn phần client contract.
 
 ## 4. Quyết định đã chốt và kết quả
 
-- **M2** chốt hướng **tách bảng** (`the_sinh_viens_cho_duyet`, V9) thay vì thêm cột vào V7: ảnh chờ duyệt không đụng ảnh đang dùng, `approve()` thăng cấp rồi mới xoá object cũ sau commit, `reject()` xoá ảnh chờ.
+- **M2** chốt hướng **tách bảng** (`the_sinh_viens_cho_duyet`, V10) thay vì thêm cột vào V8: ảnh chờ duyệt không đụng ảnh đang dùng, `approve()` thăng cấp rồi mới xoá object cũ sau commit, `reject()` xoá ảnh chờ.
 - **Mục 2** chốt **bỏ danh sách miễn trừ theo đường dẫn**, chỉ xoá phiên khi `401` có `WWW-Authenticate: Bearer`; làm đúng như vậy ở cả `api()`, `upload()`, `attachment()` của hai client.
 - **Mục 5** không phát sinh vòng phụ thuộc bean: `ReputationLedgerService` chỉ dùng `AuthFailure`, `AuthService` đã inject sẵn nên `ProfileService → ReputationLedgerService` là DAG hợp lệ; không cần `ApplicationEventPublisher`.
-- **Kiểm chứng:** backend 95/95 (P1-02 17 test), mobile 52/52 + `tsc` sạch, admin-web 52/52 + `tsc` sạch. Testcontainers chạy được trong phiên này nên không cần chờ CI để xác nhận.
+- **Kiểm chứng:** backend 111/111 (P1-02 17 test), mobile 52/52 + `tsc` sạch, admin-web 61/61 + `tsc` sạch. Testcontainers chạy được trong phiên này nên không cần chờ CI để xác nhận.

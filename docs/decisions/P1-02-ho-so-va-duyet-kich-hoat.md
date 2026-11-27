@@ -34,7 +34,7 @@
 
 Key do server sinh dạng `<userId>/<uuid>.<ext>`; `LocalCardStorage` kiểm tra lại key bằng regex để chặn path traversal nếu dữ liệu DB bị sửa.
 
-**Hệ quả.** Migration `V7__student_card_object_storage.sql` tạo lại `the_sinh_viens(object_key, mime, kich_thuoc, uploaded_at)` và bỏ `noi_dung` (không chuyển được BYTEA sang object storage bằng SQL, chưa có dữ liệu thật). Hợp đồng `GET /api/v1/profile/student-cards/{ownerId}` và `GET /api/v1/admin/profiles/{userId}/student-card` giữ nguyên bytes + MIME + `Cache-Control: no-store` nên `mobile/` và `admin-web/` không phải sửa.
+**Hệ quả.** Migration `V8__student_card_object_storage.sql` tạo lại `the_sinh_viens(object_key, mime, kich_thuoc, uploaded_at)` và bỏ `noi_dung` (không chuyển được BYTEA sang object storage bằng SQL, chưa có dữ liệu thật). Hợp đồng `GET /api/v1/profile/student-cards/{ownerId}` và `GET /api/v1/admin/profiles/{userId}/student-card` giữ nguyên bytes + MIME + `Cache-Control: no-store` nên `mobile/` và `admin-web/` không phải sửa.
 
 **ponytail:** nhánh `s3` chưa có test tự động (chỉ smoke tay khi bật `STORAGE_BACKEND=s3`); thêm Testcontainers MinIO khi CI cần kiểm chứng đường object storage.
 
@@ -64,10 +64,10 @@ Kế hoạch ban đầu ghi `{version}` cho `approve`/`reject`. Thực tế khó
 
 **Lựa chọn.** Khi nhận 409, `await load()` rồi mới đặt thông báo "Trạng thái hồ sơ đã thay đổi, đang tải lại thông tin mới nhất." Người dùng thấy dữ liệu mới và lời giải thích cùng lúc. Test `reports a stale profile on approve 409 and reloads it` giữ hành vi này.
 
-## 8. Chỉnh index hàng đợi duyệt bằng migration V8, không sửa V6/V7
+## 8. Chỉnh index hàng đợi duyệt bằng migration V9, không sửa V7/V8
 
-**Bối cảnh.** Review PR #25 chỉ ra partial index `idx_thanh_viens_cho_duyet` của V6 không khớp vị từ thật của `ProfileService.pending()` (thiếu `cho_duyet_lai`), và `auth_challenge` thiếu index theo `user_id` cho truy vấn đổi email. Sửa thẳng V6/V7 là sai: hai migration đó đã áp dụng ở môi trường dev/CI và checksum Flyway sẽ lệch; PR #33/#34 cũng đang giữ V6/V7 ở nhánh của họ.
+**Bối cảnh.** Review PR #25 chỉ ra partial index `idx_thanh_viens_cho_duyet` của V7 không khớp vị từ thật của `ProfileService.pending()` (thiếu `cho_duyet_lai`), và `auth_challenge` thiếu index theo `user_id` cho truy vấn đổi email. Sửa thẳng V7/V8 là sai: hai migration đó đã áp dụng ở môi trường dev/CI và checksum Flyway sẽ lệch; PR #33/#34 cũng đang giữ V7/V8 ở nhánh của họ.
 
-**Lựa chọn.** Thêm `V8__profile_review_queue_indexes.sql`: `DROP INDEX IF EXISTS` index cũ rồi tạo lại đúng vị từ (`email_verified AND ly_do_tu_choi IS NULL AND (NOT profile_approved OR cho_duyet_lai)`), kèm `CREATE INDEX IF NOT EXISTS idx_auth_challenge_user ON auth_challenge(user_id)`. V6/V7 giữ nguyên byte-for-byte.
+**Lựa chọn.** Thêm `V9__profile_review_queue_indexes.sql`: `DROP INDEX IF EXISTS` index cũ rồi tạo lại đúng vị từ (`email_verified AND ly_do_tu_choi IS NULL AND (NOT profile_approved OR cho_duyet_lai)`), kèm `CREATE INDEX IF NOT EXISTS idx_auth_challenge_user ON auth_challenge(user_id)`. V7/V8 giữ nguyên byte-for-byte.
 
-**Hệ quả.** PR #25 không còn phụ thuộc thứ tự merge với #33/#34 ở V6/V7; nếu #33/#34 lên trước thì chúng nhận V9/V10. Index bán phần chỉ chứa hàng đợi thật nên giữ nhỏ khi `thanh_viens` lớn dần.
+**Hệ quả.** PR #25 không còn phụ thuộc thứ tự merge với #33/#34 ở V7/V8; nếu #33/#34 lên trước thì chúng nhận V10/V11. Index bán phần chỉ chứa hàng đợi thật nên giữ nhỏ khi `thanh_viens` lớn dần.

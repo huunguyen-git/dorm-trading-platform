@@ -1,9 +1,11 @@
 package com.dormtrading;
 
 import com.dormtrading.common.BaseIntegrationTest;
+import com.dormtrading.common.ActivePenaltyFixtures;
 import com.dormtrading.iam.auth.AuthFailure;
 import com.dormtrading.review.reputation.ReputationLedgerService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,12 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
     void setUpClock() {
         currentTime.set(Instant.parse("2026-11-18T08:00:00Z"));
         when(clock.instant()).thenAnswer(inv -> currentTime.get());
+        ActivePenaltyFixtures.seed(db);
+    }
+
+    @AfterEach
+    void clearPenaltyFixtures() {
+        ActivePenaltyFixtures.clear(db);
     }
 
     private UUID createActiveMember(int initialScore) {
@@ -99,7 +107,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         assertThat(((Number) afterInitRow.get("version")).longValue()).isEqualTo(1L);
 
         // Deduct 15 points via active penalty scale, then call initializeActivationScore again
-        ledger.applyPenaltyScale(newUserId, "TP_BO_HEN_TAI_PHAM", "Bỏ hẹn lần 2", "PEN:" + newUserId, actorId);
+        ledger.applyPenaltyScale(newUserId, ActivePenaltyFixtures.PENALTY_15, "Bỏ hẹn lần 2", "PEN:" + newUserId, actorId);
         var afterPenaltyRow = fetchUser(newUserId);
         assertThat(((Number) afterPenaltyRow.get("diem_uy_tin")).intValue()).isEqualTo(85);
         assertThat(((Number) afterPenaltyRow.get("version")).longValue()).isEqualTo(2L);
@@ -139,7 +147,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         // 2) Boundary 50 (30 < diem <= 50): temporary lock 14 days, appealable = false, session revoked
         UUID u50 = createActiveMember(100);
         UUID s50 = createActiveSession(u50);
-        var e50 = ledger.applyPenaltyScale(u50, "TP_GIA_MAO_THONG_TIN", "Chạm ngưỡng 50", "KEY-50:" + u50, null);
+        var e50 = ledger.applyPenaltyScale(u50, ActivePenaltyFixtures.PENALTY_50, "Chạm ngưỡng 50", "KEY-50:" + u50, null);
         assertThat(e50.scoreAfter()).isEqualTo(50);
         assertThat(e50.triggeredLockType()).isEqualTo("KHOA_TAM_THOI");
         var row50 = fetchUser(u50);
@@ -157,7 +165,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
 
         // 3) Boundary 31 (30 < diem <= 50): still temporary lock 14 days
         UUID u31 = createActiveMember(51);
-        var e31 = ledger.applyPenaltyScale(u31, "TP_NGON_TU_XUC_PHAM", "Chạm ngưỡng 31", "KEY-31:" + u31, null);
+        var e31 = ledger.applyPenaltyScale(u31, ActivePenaltyFixtures.PENALTY_20, "Chạm ngưỡng 31", "KEY-31:" + u31, null);
         assertThat(e31.scoreAfter()).isEqualTo(31);
         var row31 = fetchUser(u31);
         assertThat(row31.get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
@@ -167,7 +175,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         // 4) Boundary 30 (exact 30 is permanent per FR-12!): permanent lock, lockedUntil = null, appealable = true
         UUID u30 = createActiveMember(60);
         UUID s30 = createActiveSession(u30);
-        var e30 = ledger.applyPenaltyScale(u30, "TP_KHONG_BAN_GIAO", "Chạm đúng ngưỡng 30", "KEY-30:" + u30, null);
+        var e30 = ledger.applyPenaltyScale(u30, ActivePenaltyFixtures.PENALTY_30, "Chạm đúng ngưỡng 30", "KEY-30:" + u30, null);
         assertThat(e30.scoreAfter()).isEqualTo(30);
         assertThat(e30.triggeredLockType()).isEqualTo("KHOA_VINH_VIEN");
         var row30 = fetchUser(u30);
@@ -182,7 +190,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
 
         // 5) Boundary 0 (clamped at 0 when penalty exceeds remaining score)
         UUID u0 = createActiveMember(15);
-        var e0 = ledger.applyPenaltyScale(u0, "TP_KHONG_BAN_GIAO", "Trừ vượt 0", "KEY-0:" + u0, null);
+        var e0 = ledger.applyPenaltyScale(u0, ActivePenaltyFixtures.PENALTY_30, "Trừ vượt 0", "KEY-0:" + u0, null);
         assertThat(e0.scoreBefore()).isEqualTo(15);
         assertThat(e0.scoreAfter()).isEqualTo(0);
         assertThat(e0.delta()).isEqualTo(-15);
@@ -198,8 +206,8 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         UUID userId = createActiveMember(100);
         String key = "PENALTY-ONCE:" + userId;
 
-        var first = ledger.applyPenaltyScale(userId, "TP_HANG_KHONG_DUNG_MO_TA", "Sai mô tả", key, null);
-        var second = ledger.applyPenaltyScale(userId, "TP_HANG_KHONG_DUNG_MO_TA", "Sai mô tả (gửi lại)", key, null);
+        var first = ledger.applyPenaltyScale(userId, ActivePenaltyFixtures.PENALTY_10, "Sai mô tả", key, null);
+        var second = ledger.applyPenaltyScale(userId, ActivePenaltyFixtures.PENALTY_10, "Sai mô tả (gửi lại)", key, null);
 
         assertThat(first.idempotentReplay()).isFalse();
         assertThat(second.idempotentReplay()).isTrue();
@@ -207,12 +215,19 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         assertThat(((Number) fetchUser(userId).get("diem_uy_tin")).intValue()).isEqualTo(90);
 
         UUID otherUser = createActiveMember(100);
-        assertThatThrownBy(() -> ledger.applyPenaltyScale(otherUser, "TP_BO_HEN_LAN_1", "Khác user", key, null))
+        assertThatThrownBy(() -> ledger.applyPenaltyScale(otherUser, ActivePenaltyFixtures.PENALTY_5, "Khác user", key, null))
                 .isInstanceOf(AuthFailure.class)
                 .extracting("code")
                 .isEqualTo("IDEMPOTENCY_CONFLICT");
 
         assertThatThrownBy(() -> ledger.applyPenaltyScale(userId, "TP_KHONG_TON_TAI", "Mã lạ", "UNKNOWN:" + userId, null))
+                .isInstanceOf(AuthFailure.class)
+                .extracting("code")
+                .isEqualTo("INVALID_PENALTY_CODE");
+
+        assertThatThrownBy(() -> ledger.applyPenaltyScale(
+                userId, "TP_BO_HEN_LAN_1", "Mã seed đã ngừng", "INACTIVE:" + userId, null
+        ))
                 .isInstanceOf(AuthFailure.class)
                 .extracting("code")
                 .isEqualTo("INVALID_PENALTY_CODE");
@@ -224,7 +239,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         UUID userId = createActiveMember(60);
 
         // Violation 1 drops 60 -> 45: triggers 14-day temporary lock
-        ledger.applyPenaltyScale(userId, "TP_BO_HEN_TAI_PHAM", "Bỏ hẹn tái phạm", "V1:" + userId, null);
+        ledger.applyPenaltyScale(userId, ActivePenaltyFixtures.PENALTY_15, "Bỏ hẹn tái phạm", "V1:" + userId, null);
         assertThat(fetchUser(userId).get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
         assertThat(fetchUser(userId).get("loai_han_che")).isEqualTo("KHOA_TAM_THOI");
         assertThat(((Number) fetchUser(userId).get("diem_uy_tin")).intValue()).isEqualTo(45);
@@ -254,14 +269,14 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         assertThat(((Number) fetchUser(userId).get("diem_uy_tin")).intValue()).isEqualTo(47);
 
         // A NEW violation (-5 -> 42) re-evaluates threshold and locks temporarily again for 14 days
-        ledger.applyPenaltyScale(userId, "TP_BO_HEN_LAN_1", "Vi phạm mới bỏ hẹn", "V2:" + userId, null);
+        ledger.applyPenaltyScale(userId, ActivePenaltyFixtures.PENALTY_5, "Vi phạm mới bỏ hẹn", "V2:" + userId, null);
         var relocked = fetchUser(userId);
         assertThat(relocked.get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
         assertThat(relocked.get("loai_han_che")).isEqualTo("KHOA_TAM_THOI");
         assertThat(((Number) relocked.get("diem_uy_tin")).intValue()).isEqualTo(42);
 
         // Another violation (-15 -> 27 <= 30) escalates to permanent lock with appeal right
-        ledger.applyPenaltyScale(userId, "TP_BO_HEN_TAI_PHAM", "Tái phạm chạm <= 30", "V3:" + userId, null);
+        ledger.applyPenaltyScale(userId, ActivePenaltyFixtures.PENALTY_15, "Tái phạm chạm <= 30", "V3:" + userId, null);
         var permanent = fetchUser(userId);
         assertThat(permanent.get("trang_thai_tai_khoan")).isEqualTo("BI_KHOA");
         assertThat(permanent.get("loai_han_che")).isEqualTo("KHOA_VINH_VIEN");
@@ -278,7 +293,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
 
         // 1) Late deduction into temporary-lock band (60 - 15 = 45)
         var tempBandEntry = ledger.applyPenaltyScale(
-                deletedUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm muộn sau khi xóa (45)", "DEL-45:" + deletedUser, null
+                deletedUser, ActivePenaltyFixtures.PENALTY_15, "Trừ điểm muộn sau khi xóa (45)", "DEL-45:" + deletedUser, null
         );
         assertThat(tempBandEntry.scoreAfter()).isEqualTo(45);
         assertThat(tempBandEntry.triggeredLockType()).isNull();
@@ -297,7 +312,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
 
         // 2) Late deduction into permanent-lock band (45 - 30 = 15 <= 30)
         var permBandEntry = ledger.applyPenaltyScale(
-                deletedUser, "TP_KHONG_BAN_GIAO", "Trừ điểm muộn sau khi xóa (15)", "DEL-15:" + deletedUser, null
+                deletedUser, ActivePenaltyFixtures.PENALTY_30, "Trừ điểm muộn sau khi xóa (15)", "DEL-15:" + deletedUser, null
         );
         assertThat(permBandEntry.scoreAfter()).isEqualTo(15);
         assertThat(permBandEntry.triggeredLockType()).isNull();
@@ -334,7 +349,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         );
 
         var longEntry = ledger.applyPenaltyScale(
-                longLockUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm khi đang khóa 60 ngày", "LONG-LOCK:" + longLockUser, null
+                longLockUser, ActivePenaltyFixtures.PENALTY_15, "Trừ điểm khi đang khóa 60 ngày", "LONG-LOCK:" + longLockUser, null
         );
         assertThat(longEntry.scoreAfter()).isEqualTo(45);
         assertThat(longEntry.triggeredLockType()).isEqualTo("KHOA_TAM_THOI");
@@ -360,7 +375,7 @@ class ReputationLedgerIntegrationTest extends BaseIntegrationTest {
         );
 
         var shortEntry = ledger.applyPenaltyScale(
-                shortLockUser, "TP_BO_HEN_TAI_PHAM", "Trừ điểm khi đang khóa 5 ngày", "SHORT-LOCK:" + shortLockUser, null
+                shortLockUser, ActivePenaltyFixtures.PENALTY_15, "Trừ điểm khi đang khóa 5 ngày", "SHORT-LOCK:" + shortLockUser, null
         );
         assertThat(shortEntry.scoreAfter()).isEqualTo(45);
         assertThat(shortEntry.triggeredLockType()).isEqualTo("KHOA_TAM_THOI");

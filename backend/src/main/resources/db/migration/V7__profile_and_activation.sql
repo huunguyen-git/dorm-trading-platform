@@ -1,4 +1,4 @@
--- P1-02: hồ sơ cá nhân, duyệt kích hoạt, đổi email. Không sửa V1–V4.
+-- P1-02: hồ sơ cá nhân, duyệt kích hoạt, đổi email. Không sửa V1–V6.
 -- UC-05: đổi định danh/học tập/ảnh thẻ phải chờ duyệt, nhưng tài khoản đã kích hoạt vẫn giữ
 -- quyền trong lúc chờ nên bản cập nhật lưu riêng ở ho_so_cap_nhat, chỉ áp dụng khi chấp thuận.
 ALTER TABLE thanh_viens ADD COLUMN ly_do_tu_choi TEXT;

@@ -42,3 +42,14 @@ Giao diện xác thực đã có nhãn, trạng thái xử lý/lỗi/thành côn
 Mật khẩu mới cần 8–128 code point sau NFC. HTTP 429 hiển thị số giây chờ từ server. Tài khoản quản trị bị khóa (`BI_KHOA`) bị từ chối bằng `403 ACCOUNT_RESTRICTED` khi đăng nhập, làm mới phiên và gọi API bảo vệ (`/auth/me`, `/admin/**`); giao diện ẩn thao tác đổi mật khẩu và không gọi API quản trị.
 
 Lượt 22/11 đã kiểm web/API/SMTP thật, gồm reset, change → đăng nhập lại, logout khi refresh offline/503 và tài khoản khóa. Dùng [bộ chạy live](../scripts/verify-p1-01-live.cjs) từ root theo [hướng dẫn chuẩn bị](../docs/specs/P1-01-gui-checklist.md#chạy-lại-bộ-live--22112026); bộ chạy tự mở/đóng API và Vite trên cổng thử riêng.
+
+## Quản trị P1-06
+
+Đăng nhập bằng tài khoản đang hoạt động, đã xác minh/duyệt hồ sơ và có vai trò `QUAN_TRI_VIEN_CAP_CAO` hiệu lực:
+
+- **Kiểm duyệt viên** (`/moderators`): tìm theo họ tên/MSSV/email, xác nhận bổ nhiệm hoặc thu hồi, xem lịch sử. Thu hồi trả báo cáo đang xử lý về hàng chờ; không đổi báo cáo đã có kết quả.
+- **Thang phạt** (`/penalties`): tìm theo tên/mô tả, lọc trạng thái, thêm/sửa/ngừng mức phạt và xem giá trị trước/sau. Số điểm trừ phải là số nguyên dương. Khi có xung đột phiên bản, dữ liệu nhập vẫn được giữ; tải lại để lấy bản mới trước khi sửa.
+
+Hai trang chỉ có trong menu cấp cao; API cũng kiểm tra quyền độc lập. Không có tài khoản cấp cao mặc định, API tự nâng quyền, xóa mức phạt hoặc kích hoạt lại mức đã ngừng. Sáu mức mẫu V2 được V5 chuyển ngừng sử dụng, không phải chính sách được duyệt.
+
+Kết quả build/test và các bước thử với API thật: [spec P1-06](../docs/specs/P1-06.md).
