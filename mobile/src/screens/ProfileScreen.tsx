@@ -6,7 +6,7 @@ import type { Nav } from '../navigation';
 import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import { useSession, resolveUserRestriction, type User } from '../auth/session';
-import { api } from '../api/client';
+import { api, RestrictedAccountError } from '../api/client';
 import { colors, space } from '../theme';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 
@@ -68,6 +68,8 @@ export default function ProfileScreen() {
       // Gửi chuỗi rỗng cho trường tuỳ chọn để xoá được giá trị cũ (server hiểu null là "giữ nguyên").
       const body = Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as ProfileUpdate;
       const updated = await profileApi.update(body);
+      // Phần chữ đã lưu trên server: cập nhật ngay để lỗi tải ảnh (413/mạng) không làm UI hiện sai.
+      setProfile(updated); setDraft(toDraft(updated));
       if (pick) { await profileApi.uploadCard(pick); setPick(null); }
       const fresh = pick ? await profileApi.me() : updated;
       setProfile(fresh); setDraft(toDraft(fresh));
@@ -77,7 +79,14 @@ export default function ProfileScreen() {
       useSession.setState({ user: sessionFresh, restriction: resolveUserRestriction(sessionFresh) });
       setEditing(false);
       setMessage(fresh.profileStatus === 'CHO_DUYET' ? 'Đã lưu. Thông tin định danh đang chờ kiểm duyệt.' : 'Đã lưu hồ sơ.');
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      // Hạn chế tài khoản đã có banner riêng; báo thêm lỗi đỏ ở đây là trùng.
+      if (e instanceof RestrictedAccountError) {
+        if (!useSession.getState().restriction) useSession.setState({ restriction: e.restriction, restrictionDismissed: false });
+        return;
+      }
+      setError((e as Error).message);
+    } finally { setBusy(false); }
   }
 
   function cancel() { setDraft(profile ? toDraft(profile) : empty); setPick(null); setEditing(false); setError(''); setMessage(''); }
@@ -93,7 +102,9 @@ export default function ProfileScreen() {
   const status = statusLabel(profile);
   const readOnly = locked(profile) || sessionUser?.accountStatus === 'BI_KHOA';
   const rows: [string, string | null][] = [
-    ['Họ tên', profile.name], ['MSSV', profile.studentId], ['Email', profile.email], ['Số điện thoại', profile.phone],
+    ['Họ tên', profile.name], ['MSSV', profile.studentId],
+    // Đổi email ở Cài đặt thì phiên đã mới nhưng hồ sơ vừa tải còn cũ: lấy theo phiên.
+    ['Email', sessionUser?.email ?? profile.email], ['Số điện thoại', profile.phone],
     ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
     ['Tình trạng học tập', studyLabel(profile.studyStatus)],
   ];

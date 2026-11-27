@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { api, RestrictedAccountError, upload } from './client';
+import { api, attachment, RestrictedAccountError, upload } from './client';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -468,4 +468,29 @@ test('keeps the mobile session when the upload refresh fails with 503', async ()
   await expect(upload('/profile/me/student-card', { uri: 'file://card.jpg', name: 'card.jpg', type: 'image/jpeg' }))
     .rejects.toMatchObject({ status: 503 });
   expect(store.clear).not.toHaveBeenCalled();
+});
+
+test('refreshes then retries a protected attachment download, clears the session on a real 401 and returns null on 404', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('refresh-ok');
+  store.save.mockImplementation(async (value) => { access = value; });
+  const expired = () => ({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' });
+  const refreshed = { status: 200, ok: true, json: async () => ({ token: 'fresh', refreshToken: 'refresh-new', user: null }) };
+  const blob = { status: 200, ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => new ArrayBuffer(4) };
+
+  fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(refreshed).mockResolvedValueOnce(blob);
+  await expect(attachment('/profile/me/student-card')).resolves.toMatchObject({ type: 'image/png' });
+  const retry = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect((retry[1].headers as Record<string, string>).Authorization).toBe('Bearer fresh');
+
+  fetchMock.mockResolvedValueOnce({ status: 404, ok: false, headers: { get: () => null } });
+  await expect(attachment('/profile/me/student-card')).resolves.toBeNull();
+
+  // Retry vẫn 401: phiên chết thật thì xoá token, không trả ảnh cũ.
+  access = 'expired';
+  fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired());
+  await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
+  expect(store.clear).toHaveBeenCalled();
 });
