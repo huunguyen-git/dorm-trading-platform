@@ -10,7 +10,7 @@ const profile = {
   id: 'u1', name: 'Trần Minh', studentId: 'SE123456', email: 'minh@uni.edu.vn', phone: null,
   school: null, campus: null, major: null, cohort: null, studyStatus: null, reputation: 100,
   emailVerified: true, profileApproved: false, profileStatus: 'CHO_DUYET', rejectReason: null,
-  pendingUpdate: false, hasStudentCard: false, accountStatus: 'CHO_KICH_HOAT',
+  pendingUpdate: false, hasStudentCard: false, accountStatus: 'CHO_KICH_HOAT', version: 7,
 };
 
 function renderPage() {
@@ -54,6 +54,27 @@ it('shows the real message for a non-stale 409 instead of the stale hint', async
   fireEvent.click(await screen.findByTestId('approve'));
   expect(await screen.findByRole('alert')).toHaveTextContent('MSSV đã thuộc về tài khoản khác.');
   expect(screen.queryByText('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.')).toBeNull();
+});
+
+it('sends the reviewed snapshot version so a concurrent edit cannot be approved blindly', async () => {
+  vi.mocked(api).mockResolvedValueOnce(profile).mockResolvedValueOnce(undefined);
+  renderPage();
+  fireEvent.click(await screen.findByTestId('approve'));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => String(path).endsWith('/approve?expectedVersion=7'))).toBe(true));
+    const call = vi.mocked(api).mock.calls.find(([path]) => String(path).endsWith('/approve?expectedVersion=7'));
+    expect(call?.[1]?.body).toBeUndefined();
+});
+
+it('reports a profile edited after load as changed, with different wording from an already handled one', async () => {
+  vi.mocked(api).mockResolvedValueOnce(profile)
+    .mockRejectedValueOnce(new ApiError(409, 'Hồ sơ đã thay đổi sau khi bạn xem.', 'PROFILE_CHANGED'))
+    .mockResolvedValueOnce({ ...profile, version: 8, name: 'Trần Minh Anh' });
+  renderPage();
+  fireEvent.click(await screen.findByTestId('approve'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Hồ sơ đã được người dùng cập nhật sau khi bạn mở trang.');
+  // Hồ sơ mới vẫn ở trạng thái chờ duyệt nên vẫn quyết định được, khác trường hợp đã bị xử lý.
+  expect(await screen.findByTestId('approve')).toBeEnabled();
+  expect(screen.getByRole('heading', { name: 'Trần Minh Anh' })).toBeInTheDocument();
 });
 
 it('shows the latest rejection reason for an approved profile', async () => {

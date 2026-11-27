@@ -42,19 +42,24 @@ export default function ProfileDetailPage() {
     if (!profile) return;
     setBusy(true); setError(''); setReasonError('');
     try {
-      if (action === 'approve') await adminProfiles.approve(id);
+      if (action === 'approve') await adminProfiles.approve(id, profile.version);
       else {
         const trimmed = reason.trim();
         if (trimmed.length < MIN_REASON || trimmed.length > MAX_REASON) { setReasonError(`Lý do từ chối cần ${MIN_REASON}–${MAX_REASON} ký tự.`); return; }
-        await adminProfiles.reject(id, trimmed);
+        await adminProfiles.reject(id, trimmed, profile.version);
       }
-      navigate('/profiles', { replace: true, state: { done: action === 'approve' ? 'Đã chấp thuận hồ sơ.' : 'Đã từ chối hồ sơ và gửi email thông báo.' } });
+      // UC-02 §3.3: hệ thống chỉ xếp email vào hàng đợi, chưa chắc SMTP đã gửi xong.
+      navigate('/profiles', { replace: true, state: { done: action === 'approve' ? 'Đã chấp thuận hồ sơ.' : 'Đã từ chối hồ sơ. Email thông báo đã được xếp hàng gửi.' } });
     } catch (cause) {
       const status = cause instanceof ApiError ? cause.status : 0;
-      // Chỉ 409 PROFILE_ALREADY_HANDLED mới là "người khác xử lý"; 409 khác (vd STUDENT_ID_IN_USE) phải hiện lý do thật.
-      if (status === 409 && cause instanceof ApiError && cause.code === 'PROFILE_ALREADY_HANDLED') {
+      const code = cause instanceof ApiError ? cause.code : undefined;
+      // 409 PROFILE_CHANGED: người dùng sửa hồ sơ sau khi trang này tải; PROFILE_ALREADY_HANDLED: đã có người quyết định.
+      // 409 khác (vd STUDENT_ID_IN_USE) phải hiện lý do thật.
+      if (status === 409 && (code === 'PROFILE_CHANGED' || code === 'PROFILE_ALREADY_HANDLED')) {
         setRejecting(false);
-        setStale('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
+        setStale(code === 'PROFILE_CHANGED'
+          ? 'Hồ sơ đã được người dùng cập nhật sau khi bạn mở trang. Thông tin vừa được làm mới, hãy xem lại trước khi quyết định.'
+          : 'Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
         setRefresh((value) => value + 1);
       } else if (status === 400) setReasonError((cause as Error).message);
       else setError((cause as Error).message);
@@ -70,6 +75,8 @@ export default function ProfileDetailPage() {
   const rows: [string, string | null][] = [
     ['Họ tên', profile.name], ['MSSV', profile.studentId], ['Email', profile.email], ['Số điện thoại', profile.phone],
     ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
+    // Tình trạng học tập nằm trong bản chờ duyệt nên kiểm duyệt viên phải thấy trước khi quyết định.
+    ['Tình trạng học tập', profile.studyStatus === 'DA_TOT_NGHIEP' ? 'Đã tốt nghiệp' : profile.studyStatus === 'DANG_HOC' ? 'Đang học' : null],
   ];
   // Hồ sơ đã xử lý (duyệt hoặc từ chối) không quyết định lại được, server sẽ trả 409.
   const decidable = profile.profileStatus === 'CHO_DUYET';

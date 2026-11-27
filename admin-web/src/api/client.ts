@@ -90,12 +90,21 @@ export async function attachment(path: string): Promise<Blob | null> {
   const sentToken = accessToken;
   let response = await send();
   if (response.status === 401 && hasBearerChallenge(response)) {
-    try { if (accessToken === sentToken) await refreshSession(); response = await send(); } catch (error) {
+    try {
+      if (accessToken === sentToken) await refreshSession();
+      // Lỗi 401 của security-filter xảy ra trước controller; không bao giờ phát lại lỗi khác.
+      response = await send();
+    } catch (error) {
       if (error instanceof ApiError && error.status === 403 && error.code === 'ACCOUNT_RESTRICTED') {
         setAccessToken(null);
         window.dispatchEvent(new Event('session-expired'));
         throw error;
       }
+      // Chỉ refresh trả 401 mới chứng minh phiên hỏng; lỗi mạng/5xx phải nổi lên để người dùng thử lại.
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      setAccessToken(null);
+      window.dispatchEvent(new Event('session-expired'));
+      throw error;
     }
   }
   if (response.status === 404) return null;
