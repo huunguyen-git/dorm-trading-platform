@@ -56,4 +56,4 @@ Không có mục nào sai; mục 1 chỉ còn phần client contract.
 - **M2** chốt hướng **tách bảng** (`the_sinh_viens_cho_duyet`, V9) thay vì thêm cột vào V7: ảnh chờ duyệt không đụng ảnh đang dùng, `approve()` thăng cấp rồi mới xoá object cũ sau commit, `reject()` xoá ảnh chờ.
 - **Mục 2** chốt **bỏ danh sách miễn trừ theo đường dẫn**, chỉ xoá phiên khi `401` có `WWW-Authenticate: Bearer`; làm đúng như vậy ở cả `api()`, `upload()`, `attachment()` của hai client.
 - **Mục 5** không phát sinh vòng phụ thuộc bean: `ReputationLedgerService` chỉ dùng `AuthFailure`, `AuthService` đã inject sẵn nên `ProfileService → ReputationLedgerService` là DAG hợp lệ; không cần `ApplicationEventPublisher`.
-- **Kiểm chứng:** backend 94/94 (P1-02 16 test), mobile 52/52 + `tsc` sạch, admin-web 52/52 + `tsc` sạch. Testcontainers chạy được trong phiên này nên không cần chờ CI để xác nhận.
+- **Kiểm chứng:** backend 95/95 (P1-02 17 test), mobile 52/52 + `tsc` sạch, admin-web 52/52 + `tsc` sạch. Testcontainers chạy được trong phiên này nên không cần chờ CI để xác nhận.

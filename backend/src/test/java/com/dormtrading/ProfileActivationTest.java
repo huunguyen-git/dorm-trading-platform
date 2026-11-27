@@ -399,6 +399,25 @@ class ProfileActivationTest extends BaseIntegrationTest {
         assertThat(java.nio.file.Path.of(".local/student-cards", second)).exists();
     }
 
+    /** Mục 6 review vòng 2: đang giữ mã đổi email mà tài khoản bị khóa thì không xác minh được. */
+    @Test void lockedAccountCannotVerifyEmailChange() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        activate();
+        var token = login(email,"mobile");
+        String fresh = "k" + UUID.randomUUID().toString().substring(0,10) + NEW_EMAIL_DOMAIN;
+        String challengeId = given().auth().oauth2(token).contentType(ContentType.JSON)
+                .body(Map.of("currentPassword",PASSWORD,"newEmail",fresh))
+                .patch("/api/v1/profile/email").then().statusCode(200).extract().jsonPath().getString("challengeId");
+        delivery.deliver();
+        String otp = codes.get(fresh);
+
+        db.update("update thanh_viens set trang_thai_tai_khoan='BI_KHOA' where email=?",email);
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("challengeId",challengeId,"code",otp))
+                .post("/api/v1/profile/email/verify").then().statusCode(403).body("code",equalTo("ACCOUNT_RESTRICTED"));
+        assertThat(db.queryForObject("select email from thanh_viens where user_id=?",String.class,id(email))).isEqualTo(email);
+    }
+
     /** Mục 4 review vòng 2: xoá trắng trường định danh phải xoá thật, không lấp lại giá trị cũ. */
     @Test void clearingIdentityFieldHidesOldValueInPendingProfile() {
         var challenge = register(email);
