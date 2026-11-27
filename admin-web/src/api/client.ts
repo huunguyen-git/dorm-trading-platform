@@ -107,6 +107,11 @@ export async function attachment(path: string): Promise<Blob | null> {
       throw error;
     }
   }
+  // Retry vẫn 401 có Bearer challenge: phiên đã chết, phải đưa về màn đăng nhập như api().
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    setAccessToken(null);
+    window.dispatchEvent(new Event('session-expired'));
+  }
   if (response.status === 404) return null;
   if (!response.ok) {
     let message = 'Không tải được tệp đính kèm.';
