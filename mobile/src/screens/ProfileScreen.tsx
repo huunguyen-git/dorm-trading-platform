@@ -11,8 +11,10 @@ import { colors, space } from '../theme';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 
 type Draft = { [K in keyof Required<ProfileUpdate>]: string };
-const empty: Draft = { name: '', studentId: '', phone: '', school: '', campus: '', major: '', cohort: '' };
-const toDraft = (p: Profile): Draft => ({ name: p.name ?? '', studentId: p.studentId ?? '', phone: p.phone ?? '', school: p.school ?? '', campus: p.campus ?? '', major: p.major ?? '', cohort: p.cohort ?? '' });
+const empty: Draft = { name: '', studentId: '', phone: '', school: '', campus: '', major: '', cohort: '', studyStatus: '' };
+const toDraft = (p: Profile): Draft => ({ name: p.name ?? '', studentId: p.studentId ?? '', phone: p.phone ?? '', school: p.school ?? '', campus: p.campus ?? '', major: p.major ?? '', cohort: p.cohort ?? '', studyStatus: p.studyStatus ?? '' });
+const STUDY = ['DANG_HOC', 'DA_TOT_NGHIEP'] as const;
+const studyLabel = (value: string | null) => (value === 'DA_TOT_NGHIEP' ? 'Đã tốt nghiệp' : 'Đang học');
 const MAX_CARD_BYTES = 5 * 1024 * 1024;
 const locked = (p: Profile) => p.accountStatus === 'BI_KHOA' || p.accountStatus === 'VO_HIEU_HOA';
 
@@ -70,6 +72,9 @@ export default function ProfileScreen() {
       const fresh = pick ? await profileApi.me() : updated;
       setProfile(fresh); setDraft(toDraft(fresh));
       setCardUri(fresh.hasStudentCard ? await profileApi.cardUri(fresh.id) : null);
+      // Tên hiệu lực chỉ đổi sau khi duyệt: đồng bộ lại phiên để header/nút giao dịch khớp trạng thái thật.
+      const sessionFresh = await api<User>('/auth/me');
+      useSession.setState({ user: sessionFresh, restriction: resolveUserRestriction(sessionFresh) });
       setEditing(false);
       setMessage(fresh.profileStatus === 'CHO_DUYET' ? 'Đã lưu. Thông tin định danh đang chờ kiểm duyệt.' : 'Đã lưu hồ sơ.');
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -90,6 +95,7 @@ export default function ProfileScreen() {
   const rows: [string, string | null][] = [
     ['Họ tên', profile.name], ['MSSV', profile.studentId], ['Email', profile.email], ['Số điện thoại', profile.phone],
     ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
+    ['Tình trạng học tập', studyLabel(profile.studyStatus)],
   ];
   return <AuthScreen title="Hồ sơ của bạn">
     <RestrictedAccountNotice />
@@ -112,6 +118,11 @@ export default function ProfileScreen() {
       <Field label="Cơ sở" maxLength={150} value={draft.campus} onChangeText={(campus) => setDraft({ ...draft, campus })} editable={!busy} />
       <Field label="Ngành học" maxLength={150} value={draft.major} onChangeText={(major) => setDraft({ ...draft, major })} editable={!busy} />
       <Field label="Niên khóa" maxLength={50} value={draft.cohort} onChangeText={(cohort) => setDraft({ ...draft, cohort })} editable={!busy} hint="Đổi định danh, học tập hoặc ảnh thẻ sẽ chuyển hồ sơ sang chờ duyệt." />
+      <View style={{ gap: space.xs }}>
+        <Text style={ui.label}>Tình trạng học tập</Text>
+        <View style={ui.row}>{STUDY.map((value) => <Action key={value} secondary={draft.studyStatus !== value}
+          title={studyLabel(value)} disabled={busy} onPress={() => setDraft({ ...draft, studyStatus: value })} />)}</View>
+      </View>
       <View style={{ gap: space.sm }}>
         <Text style={ui.label}>Ảnh thẻ sinh viên</Text>
         {cardUri ? <Image testID="profile-card-preview" source={{ uri: cardUri }} style={{ width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f2ede4' }} resizeMode="contain" accessibilityLabel="Ảnh thẻ sinh viên" /> : <Text style={ui.caption}>Chưa có ảnh thẻ.</Text>}

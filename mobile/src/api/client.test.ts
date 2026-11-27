@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { api, RestrictedAccountError } from './client';
+import { api, RestrictedAccountError, upload } from './client';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -434,4 +434,38 @@ test('preserves server error code on ApiError for 409 inventory conflicts', asyn
     code: 'VERSION_CONFLICT',
     message: 'Phiên bản dữ liệu đã cũ.',
   });
+});
+
+test('refreshes once and retries a multipart upload with a fresh form body', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('refresh-ok');
+  store.save.mockImplementation(async (value) => { access = value; });
+  const expired = { status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' };
+  const refreshed = { status: 200, ok: true, json: async () => ({ token: 'fresh', refreshToken: 'refresh-new', user: null }) };
+  fetchMock.mockResolvedValueOnce(expired).mockResolvedValueOnce(refreshed).mockResolvedValueOnce({ status: 204, ok: true });
+
+  await upload('/profile/me/student-card', { uri: 'file://card.jpg', name: 'card.jpg', type: 'image/jpeg' });
+
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const [firstUrl, firstInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+  expect(firstUrl).toContain('/auth/refresh');
+  const [retryUrl, retryInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect(retryUrl).toContain('/profile/me/student-card');
+  expect((retryInit.headers as Record<string, string>).Authorization).toBe('Bearer fresh');
+  expect(retryInit.body).toBeInstanceOf(FormData);
+  expect(retryInit.headers).not.toHaveProperty('Content-Type');
+});
+
+test('keeps the mobile session when the upload refresh fails with 503', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired');
+  store.getRefresh.mockResolvedValue('refresh-original');
+  fetchMock.mockResolvedValueOnce({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' })
+    .mockResolvedValueOnce({ status: 503, ok: false, text: async () => '' });
+
+  await expect(upload('/profile/me/student-card', { uri: 'file://card.jpg', name: 'card.jpg', type: 'image/jpeg' }))
+    .rejects.toMatchObject({ status: 503 });
+  expect(store.clear).not.toHaveBeenCalled();
 });

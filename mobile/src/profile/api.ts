@@ -8,7 +8,7 @@ export type Profile = {
   pendingUpdate: boolean; hasStudentCard: boolean; accountStatus: string;
 };
 
-export type ProfileUpdate = Partial<Pick<Profile, 'name' | 'studentId' | 'phone' | 'school' | 'campus' | 'major' | 'cohort'>>;
+export type ProfileUpdate = Partial<Pick<Profile, 'name' | 'studentId' | 'phone' | 'school' | 'campus' | 'major' | 'cohort' | 'studyStatus'>>;
 export type Challenge = { challengeId: string; expiresIn: number; resendAfter: number; message: string };
 
 export const profileApi = {
