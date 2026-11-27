@@ -572,6 +572,61 @@ class ProfileActivationTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("select truong from thanh_viens where user_id=?",String.class,userId)).isEqualTo("ĐH Bách khoa");
     }
 
+    /** Mục 1 review vòng 3: bộ đếm PASSWORD_WRONG không bị rollback, lần thứ 6 trả 429 kèm Retry-After. */
+    @Test void wrongCurrentPasswordOnChangeEmailIsRateLimited() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String fresh = "r" + UUID.randomUUID().toString().substring(0,10) + NEW_EMAIL_DOMAIN;
+
+        for (int i = 0; i < 5; i++)
+            given().auth().oauth2(token).contentType(ContentType.JSON)
+                    .body(Map.of("currentPassword","wrong one entirely","newEmail",fresh))
+                    .patch("/api/v1/profile/email").then().statusCode(401).body("code",equalTo("INVALID_CREDENTIALS"));
+        // Bản ghi PASSWORD_WRONG phải còn sau khi AuthFailure rollback transaction.
+        assertThat(db.queryForObject("select count(*) from auth_event where subject=? and kind='PASSWORD_WRONG'",
+                Integer.class,email)).isEqualTo(5);
+        // Đúng mật khẩu cũng bị chặn: ngưỡng kiểm trước khi so mật khẩu nên không thành đường dò.
+        var limited = given().auth().oauth2(token).contentType(ContentType.JSON)
+                .body(Map.of("currentPassword",PASSWORD,"newEmail",fresh))
+                .patch("/api/v1/profile/email").then().statusCode(429).body("code",equalTo("RATE_LIMITED"))
+                .extract();
+        assertThat(limited.header("Retry-After")).matches("[0-9]+");
+        assertThat(limited.jsonPath().getLong("retryAfter")).isPositive();
+    }
+
+    /** Mục 2 review vòng 3: PATCH từng phần giữ trường đang chờ, gửi ngược về giá trị hiệu lực thì rút bản chờ. */
+    @Test void partialUpdateKeepsPendingFieldAndRevertingWithdrawsPendingSnapshot() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        activate();
+        var token = login(email,"mobile");
+        UUID userId = id(email);
+
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("school","ĐH Bách khoa"))
+                .patch("/api/v1/profile/me").then().statusCode(200).body("profileStatus",equalTo("CHO_DUYET"));
+        // PATCH từng phần chỉ có major không được ghi đè mất school đang chờ.
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("major","CNTT"))
+                .patch("/api/v1/profile/me").then().statusCode(200)
+                .body("school",equalTo("ĐH Bách khoa")).body("major",equalTo("CNTT"))
+                .body("profileStatus",equalTo("CHO_DUYET"));
+        // Xoá school: vẫn còn major khác giá trị hiệu lực nên bản chờ giữ nguyên.
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("school","BK cơ sở 2"))
+                .patch("/api/v1/profile/me").then().statusCode(200)
+                .body("school",equalTo("BK cơ sở 2")).body("major",equalTo("CNTT")).body("profileStatus",equalTo("CHO_DUYET"));
+        // Gửi school về giá trị đang hiệu lực: major vẫn khác nên chưa rút bản chờ.
+        String effectiveSchool = db.queryForObject("select truong from thanh_viens where user_id=?",String.class,userId);
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("school",effectiveSchool))
+                .patch("/api/v1/profile/me").then().statusCode(200)
+                .body("school",equalTo(effectiveSchool)).body("major",equalTo("CNTT")).body("profileStatus",equalTo("CHO_DUYET"));
+        // Gửi nốt major về null (bằng giá trị hiệu lực): bản chờ trùng hệt nên bị rút và hồ sơ về DA_DUYET.
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("major",""))
+                .patch("/api/v1/profile/me").then().statusCode(200)
+                .body("major",nullValue()).body("profileStatus",equalTo("DA_DUYET"));
+        assertThat(db.queryForObject("select count(*) from ho_so_cap_nhat where user_id=?",Integer.class,userId)).isZero();
+        assertThat(db.queryForObject("select cho_duyet_lai from thanh_viens where user_id=?",Boolean.class,userId)).isFalse();
+    }
+
     private static org.hamcrest.Matcher<Object> equalTo(Object value) {
         return org.hamcrest.Matchers.equalTo(value);
     }
