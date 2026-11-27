@@ -32,15 +32,21 @@ public class AdminProfileController {
                 .header(org.springframework.http.HttpHeaders.CACHE_CONTROL, "no-store").body(card.bytes());
     }
 
+    /**
+     * expectedVersion là version của bản hồ sơ kiểm duyệt viên đã xem (UC-02 §3.3 bước 7).
+     * Để ở query để approve không bắt buộc body; thiếu thì bỏ kiểm tra (dùng cho test nội bộ).
+     */
     @PostMapping("/{userId}/approve")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void approve(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
-        profiles.approve(jwt, userId);
+    public void approve(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId,
+                        @RequestParam(required = false) Long expectedVersion) {
+        profiles.approve(jwt, userId, expectedVersion);
     }
 
     @PostMapping("/{userId}/reject")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void reject(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId, @RequestBody Decision body) {
-        profiles.reject(jwt, userId, body.reason());
+    public void reject(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId,
+                       @RequestBody Decision body, @RequestParam(required = false) Long expectedVersion) {
+        profiles.reject(jwt, userId, body.reason(), expectedVersion);
     }
 }

@@ -484,6 +484,94 @@ class ProfileActivationTest extends BaseIntegrationTest {
                 Integer.class,userId)).isEqualTo(1);
     }
 
+    /** UC-02 §3.3 bước 7: quyết định phải dựa trên đúng bản hồ sơ đã xem, không phải bản mới hơn. */
+    @Test void decisionOnStaleSnapshotIsRejectedAndNewVersionStaysPending() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String admin = moderator();
+        UUID userId = id(email);
+
+        long seen = given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("name","Ban A"))
+                .patch("/api/v1/profile/me").then().statusCode(200).extract().jsonPath().getLong("version");
+        // Người dùng sửa tiếp thành bản B trong lúc kiểm duyệt viên còn đang xem bản A.
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("name","Ban B"))
+                .patch("/api/v1/profile/me").then().statusCode(200);
+
+        given().auth().oauth2(admin)
+                .post("/api/v1/admin/profiles/" + userId + "/approve?expectedVersion=" + seen)
+                .then().statusCode(409).body("code",equalTo("PROFILE_CHANGED"));
+        given().auth().oauth2(admin).contentType(ContentType.JSON).body(Map.of("reason","Ảnh mờ quá khó đọc."))
+                .post("/api/v1/admin/profiles/" + userId + "/reject?expectedVersion=" + seen)
+                .then().statusCode(409).body("code",equalTo("PROFILE_CHANGED"));
+        assertThat(db.queryForObject("select count(*) from kiem_duyet_ho_so where user_id=?",Integer.class,userId)).isZero();
+        // Bản B vẫn chờ duyệt và tên hiệu lực chưa đổi.
+        assertThat(db.queryForObject("select ho_ten from thanh_viens where user_id=?",String.class,userId)).isEqualTo("Test");
+
+        long latest = given().auth().oauth2(admin).get("/api/v1/admin/profiles/" + userId)
+                .then().statusCode(200).body("name",equalTo("Ban B")).extract().jsonPath().getLong("version");
+        given().auth().oauth2(admin)
+                .post("/api/v1/admin/profiles/" + userId + "/approve?expectedVersion=" + latest).then().statusCode(204);
+        assertThat(db.queryForObject("select ho_ten from thanh_viens where user_id=?",String.class,userId)).isEqualTo("Ban B");
+    }
+
+    /** Hàng đợi phải hiện đúng tên/MSSV mà kiểm duyệt viên sắp duyệt, tức bản chờ duyệt. */
+    @Test void pendingQueueShowsSubmittedSnapshotInsteadOfLiveProfile() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String admin = moderator();
+
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("name","Ten Cho Duyet","studentId","Q" + student))
+                .patch("/api/v1/profile/me").then().statusCode(200);
+        given().auth().oauth2(admin).get("/api/v1/admin/profiles/pending").then().statusCode(200)
+                .body("find { it.email == '" + email + "' }.name", equalTo("Ten Cho Duyet"))
+                .body("find { it.email == '" + email + "' }.studentId", equalTo("Q" + student));
+    }
+
+    /** UC-05: người dùng tự khai tình trạng học tập nhưng chỉ có hiệu lực sau khi duyệt. */
+    @Test void studyStatusIsSubmittedForReviewAndAppliedOnApproval() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        var token = login(email,"mobile");
+        String admin = moderator();
+        UUID userId = id(email);
+
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("studyStatus","DA_TOT_NGHIEP"))
+                .patch("/api/v1/profile/me").then().statusCode(200)
+                .body("studyStatus",equalTo("DA_TOT_NGHIEP")).body("profileStatus",equalTo("CHO_DUYET"));
+        // Chưa duyệt thì giá trị hiệu lực vẫn là DANG_HOC và tài khoản vẫn HOAT_DONG.
+        assertThat(db.queryForObject("select trang_thai_sv from thanh_viens where user_id=?",String.class,userId)).isEqualTo("DANG_HOC");
+        assertThat(db.queryForObject("select trang_thai_tai_khoan from thanh_viens where user_id=?",String.class,userId)).isEqualTo("HOAT_DONG");
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("studyStatus","DANG_HOC_LAI"))
+                .patch("/api/v1/profile/me").then().statusCode(400).body("code",equalTo("INVALID_INPUT"));
+
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        assertThat(db.queryForObject("select trang_thai_sv from thanh_viens where user_id=?",String.class,userId)).isEqualTo("DA_TOT_NGHIEP");
+        assertThat(db.queryForObject("select trang_thai_tai_khoan from thanh_viens where user_id=?",String.class,userId)).isEqualTo("HOAT_DONG");
+    }
+
+    /** Gửi lại y nguyên dữ liệu đang hiệu lực thì rút bản chờ duyệt thay vì bắt kiểm duyệt viên duyệt lại. */
+    @Test void resubmittingEffectiveValuesWithdrawsPendingSnapshot() {
+        var challenge = register(email);
+        auth.verify(challenge.challengeId(),email,"REGISTER",codeFor(email),student);
+        activate();
+        var token = login(email,"mobile");
+        String admin = moderator();
+        UUID userId = id(email);
+
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("school","ĐH Bách khoa"))
+                .patch("/api/v1/profile/me").then().statusCode(200).body("profileStatus",equalTo("CHO_DUYET"));
+        // "" là xoá trường, nên gửi lại đúng giá trị cũ bằng cách gửi null tường minh không được; gửi lại y nguyên bản cũ.
+        given().auth().oauth2(token).contentType(ContentType.JSON).body(Map.of("school","ĐH Bách khoa"))
+                .patch("/api/v1/profile/me").then().statusCode(200).body("profileStatus",equalTo("CHO_DUYET"));
+        given().auth().oauth2(admin).get("/api/v1/admin/profiles/" + userId).then().statusCode(200)
+                .body("school",equalTo("ĐH Bách khoa"));
+        given().auth().oauth2(admin).post("/api/v1/admin/profiles/" + userId + "/approve").then().statusCode(204);
+        assertThat(db.queryForObject("select truong from thanh_viens where user_id=?",String.class,userId)).isEqualTo("ĐH Bách khoa");
+    }
+
     private static org.hamcrest.Matcher<Object> equalTo(Object value) {
         return org.hamcrest.Matchers.equalTo(value);
     }

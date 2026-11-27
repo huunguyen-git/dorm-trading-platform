@@ -55,10 +55,13 @@ public class ProfileService {
     public record Profile(UUID id, String name, String studentId, String email, String phone, String school,
                           String campus, String major, String cohort, String studyStatus, int reputation,
                           boolean emailVerified, boolean profileApproved, String profileStatus, String rejectReason,
-                          boolean pendingUpdate, boolean hasStudentCard, String accountStatus) {}
+                          boolean pendingUpdate, boolean hasStudentCard, String accountStatus, long version) {}
 
     public record Update(String name, String studentId, String phone, String school, String campus,
-                         String major, String cohort) {}
+                         String major, String cohort, String studyStatus) {}
+
+    /** UC-05: tình trạng học tập chỉ có hai giá trị đã chốt với P1-04. */
+    private static final Set<String> STUDY_STATUS = Set.of("DANG_HOC", "DA_TOT_NGHIEP");
 
     public record Pending(UUID id, String name, String studentId, String email, String kind,
                           Instant submittedAt, boolean hasStudentCard) {}
@@ -101,18 +104,32 @@ public class ProfileService {
                 : pendingUpdate ? "CHO_DUYET" : "DA_DUYET";
         return new Profile(id, pick(pending, row, "ho_ten"), pick(pending, row, "mssv"), string(row, "email"),
                 string(row, "so_dien_thoai"), pick(pending, row, "truong"), pick(pending, row, "co_so"),
-                pick(pending, row, "nganh_hoc"), pick(pending, row, "nien_khoa"), string(row, "trang_thai_sv"),
+                pick(pending, row, "nganh_hoc"), pick(pending, row, "nien_khoa"), pickStudy(pending, row),
                 ((Number) row.get("diem_uy_tin")).intValue(), Boolean.TRUE.equals(row.get("email_verified")),
                 approved, status, reject, pendingUpdate,
                 // Ảnh đang chờ duyệt cũng phải báo có ảnh, nếu không kiểm duyệt viên không biết cần xem gì.
                 hasRow(db, "the_sinh_viens", id) || hasRow(db, "the_sinh_viens_cho_duyet", id),
-                string(row, "trang_thai_tai_khoan"));
+                string(row, "trang_thai_tai_khoan"), ((Number) row.get("version")).longValue());
     }
 
     // Có hồ sơ chờ duyệt thì mọi trường định danh đọc theo hồ sơ đó, kể cả trường bị xoá (null).
     // Nếu lấy giá trị cũ của from thanh_viens thì trường vừa xoá vẫn hiện lại và kiểm duyệt viên duyệt nhầm dữ liệu.
     private static String pick(Map<String, Object> pending, Map<String, Object> row, String column) {
         return pending != null ? string(pending, column) : string(row, column);
+    }
+
+    /** trang_thai_sv là NOT NULL nên không cho xoá: bản chờ duyệt trống thì dùng giá trị đang hiệu lực. */
+    private static String pickStudy(Map<String, Object> pending, Map<String, Object> row) {
+        String value = pending == null ? null : string(pending, "trang_thai_sv");
+        return value != null ? value : string(row, "trang_thai_sv");
+    }
+
+    /** UC-02 §3.3 bước 7: chỉ quyết định trên đúng bản hồ sơ kiểm duyệt viên đã xem. */
+    private static void requireVersion(Map<String, Object> row, Long expectedVersion) {
+        if (expectedVersion == null) return;
+        if (((Number) row.get("version")).longValue() != expectedVersion)
+            throw new AuthFailure(409, "PROFILE_CHANGED",
+                    "Hồ sơ đã thay đổi sau khi bạn xem. Tải lại để xem nội dung mới nhất.");
     }
 
     private static boolean hasRow(JdbcTemplate db, String table, UUID userId) {
@@ -127,29 +144,48 @@ public class ProfileService {
         UUID userId = auth.me(jwt).id();
         var current = locked(userId);
         requireMutable(jwt, current);
-        String name = text(body.name(), string(current, "ho_ten"), 150, "Họ tên không hợp lệ.");
-        String studentId = text(body.studentId(), string(current, "mssv"), 20, "MSSV không hợp lệ.");
+        // Kiểm duyệt viên đang thấy bản chờ duyệt, nên so sánh với bản đó để gửi lại y nguyên không tạo bản mới.
+        var pending = pendingRow(userId);
+        String name = text(body.name(), pick(pending, current, "ho_ten"), 150, "Họ tên không hợp lệ.");
+        String studentId = text(body.studentId(), pick(pending, current, "mssv"), 20, "MSSV không hợp lệ.");
         String phone = optional(body.phone(), string(current, "so_dien_thoai"), 20);
         if (phone != null && !phone.matches("\\+?[0-9][0-9 -]{7,19}"))
             throw new AuthFailure(400, "INVALID_PHONE", "Số điện thoại không hợp lệ.");
-        String school = optional(body.school(), string(current, "truong"), 150);
-        String campus = optional(body.campus(), string(current, "co_so"), 150);
-        String major = optional(body.major(), string(current, "nganh_hoc"), 150);
-        String cohort = optional(body.cohort(), string(current, "nien_khoa"), 50);
+        String school = optional(body.school(), pick(pending, current, "truong"), 150);
+        String campus = optional(body.campus(), pick(pending, current, "co_so"), 150);
+        String major = optional(body.major(), pick(pending, current, "nganh_hoc"), 150);
+        String cohort = optional(body.cohort(), pick(pending, current, "nien_khoa"), 50);
+        String studyStatus = studyStatus(body.studyStatus(), pickStudy(pending, current));
 
         // UC-05: chỉ số điện thoại được lưu ngay; định danh/học tập phải chờ kiểm duyệt.
-        boolean identity = !Objects.equals(name, string(current, "ho_ten"))
-                || !Objects.equals(studentId, string(current, "mssv"))
-                || !Objects.equals(school, string(current, "truong"))
-                || !Objects.equals(campus, string(current, "co_so"))
-                || !Objects.equals(major, string(current, "nganh_hoc"))
-                || !Objects.equals(cohort, string(current, "nien_khoa"));
+        boolean identity = !Objects.equals(name, pick(pending, current, "ho_ten"))
+                || !Objects.equals(studentId, pick(pending, current, "mssv"))
+                || !Objects.equals(school, pick(pending, current, "truong"))
+                || !Objects.equals(campus, pick(pending, current, "co_so"))
+                || !Objects.equals(major, pick(pending, current, "nganh_hoc"))
+                || !Objects.equals(cohort, pick(pending, current, "nien_khoa"))
+                || !Objects.equals(studyStatus, pickStudy(pending, current));
+        // Gửi lại đúng dữ liệu đang hiệu lực: rút bản chờ duyệt thay vì để kiểm duyệt viên duyệt một bản rỗng.
+        boolean restored = pending != null
+                && Objects.equals(name, string(current, "ho_ten"))
+                && Objects.equals(studentId, string(current, "mssv"))
+                && Objects.equals(school, string(current, "truong"))
+                && Objects.equals(campus, string(current, "co_so"))
+                && Objects.equals(major, string(current, "nganh_hoc"))
+                && Objects.equals(cohort, string(current, "nien_khoa"))
+                && Objects.equals(studyStatus, string(current, "trang_thai_sv"));
 
         if (!Objects.equals(phone, string(current, "so_dien_thoai")))
             db.update("update thanh_viens set so_dien_thoai=?,updated_at=?,version=version+1 where user_id=?",
                     phone, at(), userId);
 
-        if (identity) {
+        if (restored) {
+            db.update("delete from ho_so_cap_nhat where user_id=?", userId);
+            db.update("""
+                    update thanh_viens set cho_duyet_lai=?,ly_do_tu_choi=null,updated_at=?,version=version+1
+                    where user_id=?
+                    """, hasRow(db, "the_sinh_viens_cho_duyet", userId), at(), userId);
+        } else if (identity) {
             if (db.queryForObject("""
                     select exists(select 1 from thanh_viens where mssv=? and user_id<>?)
                         or exists(select 1 from ho_so_cap_nhat where mssv=? and user_id<>?)
@@ -157,14 +193,15 @@ public class ProfileService {
                 throw new AuthFailure(409, "STUDENT_ID_IN_USE", "MSSV đã gắn với tài khoản khác.");
             try {
                 db.update("""
-                        insert into ho_so_cap_nhat(user_id,ho_ten,mssv,truong,co_so,nganh_hoc,nien_khoa,gui_luc)
-                        values (?,?,?,?,?,?,?,?)
+                        insert into ho_so_cap_nhat(user_id,ho_ten,mssv,truong,co_so,nganh_hoc,nien_khoa,trang_thai_sv,gui_luc)
+                        values (?,?,?,?,?,?,?,?,?)
                         on conflict (user_id) do update set ho_ten=excluded.ho_ten,mssv=excluded.mssv,
                             truong=excluded.truong,co_so=excluded.co_so,nganh_hoc=excluded.nganh_hoc,
-                            nien_khoa=excluded.nien_khoa,gui_luc=excluded.gui_luc
+                            nien_khoa=excluded.nien_khoa,trang_thai_sv=excluded.trang_thai_sv,gui_luc=excluded.gui_luc
                         """, ps -> {
                     ps.setObject(1, userId); ps.setString(2, name); ps.setString(3, studentId); ps.setString(4, school);
-                    ps.setString(5, campus); ps.setString(6, major); ps.setString(7, cohort); ps.setTimestamp(8, at());
+                    ps.setString(5, campus); ps.setString(6, major); ps.setString(7, cohort);
+                    ps.setString(8, studyStatus); ps.setTimestamp(9, at());
                 });
             } catch (DataIntegrityViolationException e) {
                 throw new AuthFailure(409, "STUDENT_ID_IN_USE", "MSSV đã có trong một hồ sơ chờ duyệt khác.");
@@ -241,12 +278,13 @@ public class ProfileService {
     }
 
     public List<Pending> pending(int offset, int limit) {
+        // Cùng quy tắc với view(): hàng đợi hiển thị tên/MSSV mà kiểm duyệt viên sẽ duyệt, tức bản chờ duyệt nếu có.
         return db.query("""
-                select v.user_id,v.ho_ten,v.mssv,v.email,v.updated_at,
+                select v.user_id,coalesce(p.ho_ten,v.ho_ten) as ho_ten,coalesce(p.mssv,v.mssv) as mssv,v.email,v.updated_at,
                        (exists(select 1 from the_sinh_viens t where t.user_id=v.user_id)
-                           or exists(select 1 from the_sinh_viens_cho_duyet p where p.user_id=v.user_id)) as co_anh,
+                           or exists(select 1 from the_sinh_viens_cho_duyet c where c.user_id=v.user_id)) as co_anh,
                        (v.profile_approved or v.diem_khoi_tao) as da_kich_hoat
-                from thanh_viens v
+                from thanh_viens v left join ho_so_cap_nhat p on p.user_id=v.user_id
                 where v.email_verified and v.ly_do_tu_choi is null
                     and v.trang_thai_tai_khoan <> 'VO_HIEU_HOA'
                     and (not v.profile_approved or v.cho_duyet_lai)
@@ -264,14 +302,16 @@ public class ProfileService {
     }
 
     @Transactional
-    public void approve(Jwt jwt, UUID userId) {
+    public void approve(Jwt jwt, UUID userId, Long expectedVersion) {
         UUID moderator = auth.me(jwt).id();
         var current = locked(userId);
         pendingOrThrow(current);
+        requireVersion(current, expectedVersion);
         try {
             db.update("""
                     update thanh_viens v set ho_ten=p.ho_ten,mssv=p.mssv,truong=p.truong,co_so=p.co_so,
-                        nganh_hoc=p.nganh_hoc,nien_khoa=p.nien_khoa
+                        nganh_hoc=p.nganh_hoc,nien_khoa=p.nien_khoa,
+                        trang_thai_sv=coalesce(p.trang_thai_sv,v.trang_thai_sv)
                     from ho_so_cap_nhat p where p.user_id=v.user_id and v.user_id=?
                     """, userId);
         } catch (DataIntegrityViolationException e) {
@@ -321,13 +361,14 @@ public class ProfileService {
     }
 
     @Transactional
-    public void reject(Jwt jwt, UUID userId, String reason) {
+    public void reject(Jwt jwt, UUID userId, String reason, Long expectedVersion) {
         UUID moderator = auth.me(jwt).id();
         String value = reason == null ? "" : reason.strip();
         if (value.length() < 3 || value.length() > 1000)
             throw new AuthFailure(400, "INVALID_REASON", "Nhập lý do từ chối từ 3 đến 1000 ký tự.");
         var row = locked(userId);
         pendingOrThrow(row);
+        requireVersion(row, expectedVersion);
         db.update("delete from ho_so_cap_nhat where user_id=?", userId);
         discardPendingCard(userId);
         // Tài khoản đã kích hoạt vẫn giữ quyền và dữ liệu cũ; lý do từ chối bản cập nhật vẫn được lưu.
@@ -341,13 +382,15 @@ public class ProfileService {
         db.update("insert into ho_so_thong_bao(email,ly_do) values (?,?)", row.get("email"), value);
     }
 
-    @Transactional
+    // UC-06: cùng khoá và cùng bộ đếm với đổi mật khẩu, nếu không hai request song song vượt được ngưỡng dò mật khẩu.
+    @Transactional(noRollbackFor = AuthFailure.class)
     public Challenge changeEmail(Jwt jwt, String currentPassword, String newEmail) {
         UUID userId = auth.me(jwt).id();
         String email = auth.email(newEmail);
+        // Khoá trước khi đọc lại: bộ đếm PASSWORD_WRONG phải thấy được lần sai vừa ghi, kể cả khi request sau đang chờ khoá.
+        auth.lockForEmailChange(string(row(userId), "email"));
         var current = row(userId);
         requireMutable(jwt, current);
-        // Chống dò mật khẩu qua endpoint đổi email: cùng ngưỡng và bộ đếm với đổi mật khẩu (P1-01).
         String accountEmail = string(current, "email");
         long wait = auth.passwordWrongWait(accountEmail);
         if (wait > 0)
@@ -356,14 +399,14 @@ public class ProfileService {
             auth.recordPasswordWrong(accountEmail);
             throw new AuthFailure(401, "INVALID_CREDENTIALS", "Mật khẩu hiện tại không đúng.");
         }
-        if (email.equals(string(current, "email")))
+        if (email.equals(accountEmail))
             throw new AuthFailure(400, "EMAIL_UNCHANGED", "Email mới phải khác email hiện tại.");
         if (db.queryForObject("select exists(select 1 from thanh_viens where lower(email)=?)", Boolean.class, email))
             throw new AuthFailure(409, "EMAIL_IN_USE", "Email đã gắn với tài khoản khác.");
+        // Cooldown dùng cùng Clock với OTP đã phát, không trộn giờ DB với giờ tiêm vào.
         var recent = db.queryForList("""
-                select 1 from auth_challenge where purpose='CHANGE_EMAIL' and user_id=?
-                    and created_at > current_timestamp - (? * interval '1 second') limit 1
-                """, userId, resendSeconds);
+                select 1 from auth_challenge where purpose='CHANGE_EMAIL' and user_id=? and created_at > ? limit 1
+                """, userId, java.sql.Timestamp.from(clock.instant().minusSeconds(resendSeconds)));
         if (!recent.isEmpty())
             throw new AuthFailure(429, "RATE_LIMITED", "Vui lòng chờ trước khi yêu cầu mã mới.", (long) resendSeconds);
 
@@ -464,6 +507,17 @@ public class ProfileService {
         String result = value.strip();
         if (result.isEmpty()) return null;
         if (result.length() > max) throw new AuthFailure(400, "INVALID_INPUT", "Thông tin không hợp lệ.");
+        return result;
+    }
+
+    /** Tình trạng học tập thuộc phạm vi kiểm duyệt; bỏ trống thì giữ giá trị đang hiệu lực. */
+    private String studyStatus(String value, String current) {
+        if (value == null) return current;
+        String result = value.strip().toUpperCase(Locale.ROOT);
+        // Cột đang hiệu lực là NOT NULL nên chuỗi rỗng chỉ có nghĩa "không đổi", không phải "xoá".
+        if (result.isEmpty()) return current;
+        if (!STUDY_STATUS.contains(result))
+            throw new AuthFailure(400, "INVALID_INPUT", "Tình trạng học tập chỉ nhận DANG_HOC hoặc DA_TOT_NGHIEP.");
         return result;
     }
 
