@@ -54,3 +54,14 @@ Backend có auth API chung cho mobile/web, PostgreSQL session/challenge/outbox �
 Mobile lưu access/refresh trong SecureStore; web access trong bộ nhớ và refresh cookie HttpOnly/Secure/SameSite=Strict. Môi trường triển khai cần HTTPS và web/API cùng site; localhost là môi trường thử, không giảm Secure cho production. CORS chỉ cho origin cụ thể, credentials=true và expose WWW-Authenticate. Health chuẩn /api/v1/health. SMTP OTP gửi qua outbox mã hóa, có retry trong hạn mã; không in OTP/token/mật khẩu vào log.
 
 Vai trò MEMBER/MODERATOR/SENIOR_ADMIN, scope client và trạng thái tài khoản kiểm tại API. Các API quản trị mới dùng /admin/** hoặc /admin/senior/** đúng quyền; prefix này thay quy tắc ADMIN nền. Điểm100 và kích hoạt hồ sơ còn do P1-02; quyền tài khoản khóa chi tiết còn P1-05.
+
+## Đóng gói Docker & luồng CD demo · 26/11/2026
+
+- **Đóng gói image:** [`backend/Dockerfile`](../backend/Dockerfile) (multi-stage Temurin JDK 21 → JRE 21 Alpine non-root, `/app/data/uploads`, healthcheck `/api/v1/health`) và [`admin-web/Dockerfile`](../admin-web/Dockerfile) + [`admin-web/nginx.conf`](../admin-web/nginx.conf) (Node 24 build với `VITE_API_URL=/api/v1` → Nginx 1.27 Alpine phục vụ SPA và reverse-proxy `/api/` tới `http://backend:8082` kèm `resolver 127.0.0.11`). `mobile/` là ứng dụng Expo client nên không đóng gói Docker server image.
+- **Workflow CD:** [`.github/workflows/cd.yml`](../.github/workflows/cd.yml) tự chạy sau khi workflow `CI` thành công trên `main` (hoặc kích hoạt tay qua `workflow_dispatch`), build song song 2 image với Buildx GHA cache và push `:latest` + `:sha-<7>` lên Docker Hub bằng `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`.
+- **Gói triển khai độc lập:** Thư mục [`infra/demo/`](../infra/demo/README.md) gồm `docker-compose.demo.yml` (5 dịch vụ `postgres`, `maildev`, `minio`, `backend`, `admin-web` cùng tùy chọn `--profile auto-cd` Watchtower), `.env.demo.example` và `init-db.sql`, có thể sao chép tách biệt khỏi mã nguồn để chạy `docker compose -f docker-compose.demo.yml pull && docker compose -f docker-compose.demo.yml up -d` và rollback qua `IMAGE_TAG`.
+
+
+### Cập nhật xác thực · 17/11/2026
+
+P1-01 dùng mật khẩu 8–128 code point NFC; change trả 204 và thu hồi mọi phiên. Sau ghép P1-05 ngày24/11, BI_KHOA có phiên hạn chế trên mobile, không được sửa hồ sơ/đổi mật khẩu; web từ chối đăng nhập. VO_HIEU_HOA bị từ chối. Reset kiểm email đã xác minh và tài khoản còn hiệu lực tại từng bước. HTTP 429 có retryAfter/Retry-After; CORS expose header thời gian chờ. P1-01 không thêm migration; giữ V5 của P1-04/P1-05 trên main. Xem [quyết định](decisions/P1-01-cap-nhat-constraint.md) và [spec](specs/P1-01.md).

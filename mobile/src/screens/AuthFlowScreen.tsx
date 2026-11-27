@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { api } from '../api/client';
-import { useSession, type User } from '../auth/session';
+import { useSession } from '../auth/session';
 import { tokenStore } from '../auth/tokenStore';
 import { Action, AuthScreen, Field, Notice, PasswordField, Steps, ui } from '../components/AuthUI';
 import { primitive } from '../theme';
@@ -62,8 +62,8 @@ export default function AuthFlowScreen() {
 
   function validatePassword() {
     const length = [...password.normalize('NFC')].length;
-    if (length < 15 || length > 128) {
-      throw new Error('Mật khẩu mới cần từ 15 đến 128 ký tự.');
+    if (length < 8 || length > 128) {
+      throw new Error('Mật khẩu mới cần từ 8 đến 128 ký tự.');
     }
     if (password !== confirmation) {
       throw new Error('Mật khẩu xác nhận chưa khớp.');
@@ -95,11 +95,11 @@ export default function AuthFlowScreen() {
     const response =
       mode === 'register' && !registered
         ? await post<Challenge>('/auth/register', {
-            name: name.trim(),
-            studentId: studentId.trim(),
-            email: email.trim(),
-            password,
-          })
+          name: name.trim(),
+          studentId: studentId.trim(),
+          email: email.trim(),
+          password,
+        })
         : await post<Challenge>('/auth/otp/resend', { email: email.trim(), purpose });
 
     if (mode === 'register') setRegistered(true);
@@ -118,17 +118,27 @@ export default function AuthFlowScreen() {
     if (mode === 'change' || grant) validatePassword();
     if (mode === 'change') {
       if (!currentPassword) throw new Error('Nhập mật khẩu hiện tại.');
-      const session = await post<{ token: string; refreshToken: string; user: User }>(
-        '/auth/password/change',
-        { currentPassword, password },
-      );
-      await useSession.getState().setSession(session.token, session.user, session.refreshToken);
-      setMessage('Đã đổi mật khẩu và đăng xuất các phiên khác.');
+      await post<void>('/auth/password/change', { currentPassword, password });
+      await tokenStore.clear();
+      useSession.setState({
+        token: null,
+        user: null,
+        loading: false,
+        restriction: null,
+        restrictionDismissed: false,
+      });
+      setMessage('Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.');
     } else if (grant) {
       if (!remaining) throw new Error('Quyền đặt lại mật khẩu đã hết hạn. Hãy yêu cầu mã mới.');
       await post('/auth/password/reset', { resetToken: grant, password });
       await tokenStore.clear();
-      useSession.setState({ token: null, user: null, loading: false });
+      useSession.setState({
+        token: null,
+        user: null,
+        loading: false,
+        restriction: null,
+        restrictionDismissed: false,
+      });
       setMessage('Đã đặt lại mật khẩu. Hãy đăng nhập bằng mật khẩu mới.');
     } else if (!challenge) {
       await send();
@@ -179,14 +189,20 @@ export default function AuthFlowScreen() {
           ? 'Xác minh email'
           : 'Khôi phục tài khoản';
 
+  const returnToProfile = ((mode === 'change' && !done) || mode === 'verify') && Boolean(user);
+
   const back = () => {
-    const target = mode === 'change' || (mode === 'verify' && user) ? 'Profile' : 'Login';
-    if (mode === 'reset' && typeof nav.reset === 'function') {
+    if (returnToProfile) {
+      nav.replace('Profile');
+      return;
+    }
+    if ((mode === 'change' || mode === 'reset') && typeof nav.reset === 'function') {
       nav.reset({ index: 1, routes: [{ name: 'Listings' }, { name: 'Login' }] });
       return;
     }
-    nav.replace(target);
+    nav.replace('Login');
   };
+
   const labels = mode === 'reset' ? ['Email', 'Xác minh', 'Mật khẩu mới'] : ['Thông tin', 'Xác minh'];
   const stage = grant ? 2 : challenge ? 1 : 0;
 
@@ -203,7 +219,7 @@ export default function AuthFlowScreen() {
         <View style={styles.doneGroup}>
           <Notice message={message} tone="success" />
           <Action
-            title={mode === 'change' || (mode === 'verify' && user) ? 'Về hồ sơ' : 'Đăng nhập'}
+            title={mode === 'verify' && user ? 'Về hồ sơ' : 'Đăng nhập'}
             onPress={back}
             testID="auth-success-continue"
           />
@@ -272,7 +288,7 @@ export default function AuthFlowScreen() {
                 textContentType="newPassword"
               />
               <Text style={ui.caption}>
-                15–128 ký tự. Có thể dùng cụm từ có khoảng trắng; tránh mật khẩu phổ biến.
+                8–128 ký tự. Có thể dùng cụm từ có khoảng trắng; tránh mật khẩu phổ biến.
               </Text>
             </>
           ) : null}
@@ -346,7 +362,7 @@ export default function AuthFlowScreen() {
 
           <View style={ui.divider}>
             <Action
-              title={mode === 'change' ? 'Về hồ sơ' : 'Về đăng nhập'}
+              title={returnToProfile ? 'Về hồ sơ' : 'Về đăng nhập'}
               variant="ghost"
               compact
               disabled={busy}

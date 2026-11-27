@@ -1,4 +1,4 @@
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { tokenStore } from './tokenStore';
 import { useSessionStore } from './sessionStore';
 import {
@@ -30,18 +30,17 @@ useSessionStore.setState({
   logout: async () => {
     try {
       await api<void>('/auth/logout', { method: 'POST' });
-    } catch {
-      // Best-effort server token revocation; always clear local session so the user is never trapped.
-    } finally {
-      await tokenStore.clear();
-      useSessionStore.setState({
-        token: null,
-        user: null,
-        loading: false,
-        restriction: null,
-        restrictionDismissed: false,
-      });
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 401) throw e;
     }
+    await tokenStore.clear();
+    useSessionStore.setState({
+      token: null,
+      user: null,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
   },
 });
 

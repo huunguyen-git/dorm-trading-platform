@@ -52,6 +52,7 @@ Thumbs.db
 **/target/
 .env.*
 !.env.example
+!.env.demo.example
 __pycache__/
 
 # AI agents
@@ -59,3 +60,4 @@ __pycache__/
 
 # Local personal / seminar notes
 docs/seminar/
+.temp/

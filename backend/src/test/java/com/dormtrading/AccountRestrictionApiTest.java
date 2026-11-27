@@ -1,10 +1,13 @@
 package com.dormtrading;
 
 import com.dormtrading.common.BaseIntegrationTest;
+import com.dormtrading.common.ActivePenaltyFixtures;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
 import com.dormtrading.review.reputation.ReputationLedgerService;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -84,6 +87,12 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
             }
             return null;
         }).when(mail).send(any(SimpleMailMessage.class));
+        ActivePenaltyFixtures.seed(db);
+    }
+
+    @AfterEach
+    void clearPenaltyFixtures() {
+        ActivePenaltyFixtures.clear(db);
     }
 
     private record TestAccount(UUID id, String email, String studentId) {
@@ -232,7 +241,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body(Map.of(
                         "lockType", "PERMANENT",
                         "reason", "Giả mạo thẻ sinh viên nghiêm trọng",
-                        "penaltyCode", "TP_GIA_MAO_THONG_TIN",
+                        "penaltyCode", ActivePenaltyFixtures.PENALTY_50,
                         "expectedVersion", v0 + 2
                 ))
                 .post("/api/v1/admin/users/" + member.id() + "/lock");
@@ -353,8 +362,8 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         var member = createAccount(true, null);
         String modToken = loginAdminWeb(moderator);
 
-        // Apply penalty TP_GIA_MAO_THONG_TIN (-50: 100 -> 50 -> triggers 14-day temporary lock)
-        reputationLedger.applyPenaltyScale(member.id(), "TP_GIA_MAO_THONG_TIN", "Vi phạm ngưỡng 50", "AUTO14:" + member.id(), moderator.id());
+        // Apply penalty of 50 points (100 -> 50: triggers 14-day temporary lock)
+        reputationLedger.applyPenaltyScale(member.id(), ActivePenaltyFixtures.PENALTY_50, "Vi phạm ngưỡng 50", "AUTO14:" + member.id(), moderator.id());
 
         given().auth().oauth2(modToken)
                 .get("/api/v1/admin/users/" + member.id())
@@ -384,7 +393,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
 
         // Direct unlock on an expired temporary lock WITHOUT prior GET must reconcile UNLOCK_EXPIRED_TEMP and reject 409 ACCOUNT_NOT_LOCKED
         var secondMember = createAccount(true, null);
-        reputationLedger.applyPenaltyScale(secondMember.id(), "TP_GIA_MAO_THONG_TIN", "Vi phạm ngưỡng 50 lần 2", "EXP2:" + secondMember.id(), moderator.id());
+        reputationLedger.applyPenaltyScale(secondMember.id(), ActivePenaltyFixtures.PENALTY_50, "Vi phạm ngưỡng 50 lần 2", "EXP2:" + secondMember.id(), moderator.id());
         currentTime.set(currentTime.get().plus(Duration.ofDays(14).plusSeconds(1)));
 
         given().auth().oauth2(modToken)
@@ -428,7 +437,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                         "durationDays", 7,
                         "reason", "Giả mạo thông tin gây tụt xuống ngưỡng vĩnh viễn",
                         "appealable", false,
-                        "penaltyCode", "TP_GIA_MAO_THONG_TIN",
+                        "penaltyCode", ActivePenaltyFixtures.PENALTY_50,
                         "expectedVersion", vEsc
                 ))
                 .post("/api/v1/admin/users/" + escalatedTarget.id() + "/lock");
@@ -457,7 +466,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                         "lockType", "TEMPORARY",
                         "durationDays", 7,
                         "reason", "Bỏ hẹn tái phạm kèm khóa tạm",
-                        "penaltyCode", "TP_BO_HEN_TAI_PHAM",
+                        "penaltyCode", ActivePenaltyFixtures.PENALTY_15,
                         "expectedVersion", vTemp
                 ))
                 .post("/api/v1/admin/users/" + tempBandTarget.id() + "/lock");
@@ -486,10 +495,10 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(activeMobile.user().restriction()).isNull();
         assertThat(activeMobile.user().roles()).containsExactly("MEMBER");
 
-        // Mid-session temporary lock via penalty (-50 -> score 50, 14-day KHOA_TAM_THOI)
+        // Mid-session temporary lock via 50-point penalty (100 -> 50, 14-day KHOA_TAM_THOI)
         reputationLedger.applyPenaltyScale(
                 member.id(),
-                "TP_GIA_MAO_THONG_TIN",
+                ActivePenaltyFixtures.PENALTY_50,
                 "Vi phạm dẫn tới khóa tạm 14 ngày",
                 "MIDLOCK:" + member.id(),
                 moderator.id()
@@ -505,11 +514,11 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(blockedWrite.jsonPath().getBoolean("restriction.appealable")).isFalse();
         assertThat(blockedWrite.jsonPath().getInt("restriction.reputationScore")).isEqualTo(50);
 
-        // 2) PATCH /api/v1/auth/profile also returns 403 ACCOUNT_RESTRICTED
+        // 2) PATCH /api/v1/profile/me also returns 403 ACCOUNT_RESTRICTED
         given().auth().oauth2(activeMobile.token())
                 .contentType("application/json")
                 .body(Map.of("name", "Tên Mới Khi Đang Khóa"))
-                .patch("/api/v1/auth/profile")
+                .patch("/api/v1/profile/me")
                 .then()
                 .statusCode(403)
                 .body("code", equalTo("ACCOUNT_RESTRICTED"))
@@ -562,7 +571,7 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
 
     @Test
     @DisplayName("UC-03 3.3 & Admin-web restriction: Admin-web trả 403 ACCOUNT_RESTRICTED khi BI_KHOA; tài khoản VO_HIEU_HOA trả 401 INVALID_CREDENTIALS")
-    void adminWebRestrictedAndDeletedAccountsFollowUc03Rules() {
+    void adminWebRestrictedAndDeletedAccountsFollowUc03Rules() throws Exception {
         var senior = createAccount(true, "QUAN_TRI_VIEN_CAP_CAO");
         var modTarget = createAccount(true, "KIEM_DUYET_VIEN");
         var deletedAccount = createAccount(true, null);
@@ -590,20 +599,46 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body(Map.of("email", modTarget.email(), "password", PASSWORD, "client", "admin-web"))
                 .post("/api/v1/auth/login");
         assertThat(modWebLogin.statusCode()).isEqualTo(200);
-        String staleGenToken = modWebLogin.jsonPath().getString("token");
-        String staleGenCookie = modWebLogin.getCookie("dorm_refresh");
+        String changedPasswordToken = modWebLogin.jsonPath().getString("token");
+        String changedPasswordCookie = modWebLogin.getCookie("dorm_refresh");
 
-        // Rotate session generation via password change, then keep the new active session
+        // UC-07 revokes every session; sign in again to obtain active sessions for the lock and stale-generation checks.
         String newPassword = "three mountains over clear valley";
         var rotated = given()
                 .header("Origin", ALLOWED_ORIGIN)
-                .auth().oauth2(staleGenToken)
+                .auth().oauth2(changedPasswordToken)
                 .contentType("application/json")
                 .body(Map.of("currentPassword", PASSWORD, "password", newPassword))
                 .post("/api/v1/auth/password/change");
-        assertThat(rotated.statusCode()).isEqualTo(200);
-        String modWebToken = rotated.jsonPath().getString("token");
-        String refreshCookie = rotated.getCookie("dorm_refresh");
+        assertThat(rotated.statusCode()).isEqualTo(204);
+        var signedInAgain = given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", newPassword, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(signedInAgain.statusCode()).isEqualTo(200);
+        String modWebToken = signedInAgain.jsonPath().getString("token");
+        String refreshCookie = signedInAgain.getCookie("dorm_refresh");
+        UUID modWebSid = UUID.fromString(SignedJWT.parse(modWebToken).getJWTClaimsSet().getStringClaim("sid"));
+
+        var staleGenLogin = given().header("Origin", ALLOWED_ORIGIN)
+                .contentType("application/json")
+                .body(Map.of("email", modTarget.email(), "password", newPassword, "client", "admin-web"))
+                .post("/api/v1/auth/login");
+        assertThat(staleGenLogin.statusCode()).isEqualTo(200);
+        String staleGenToken = staleGenLogin.jsonPath().getString("token");
+        String staleGenCookie = staleGenLogin.getCookie("dorm_refresh");
+        UUID staleGenSid = UUID.fromString(SignedJWT.parse(staleGenToken).getJWTClaimsSet().getStringClaim("sid"));
+
+        // Bump generation on an unrevoked session so the stale-generation branch is verified independently of revocation.
+        int updatedStale = db.update(
+                "UPDATE auth_session SET generation = generation + 1 WHERE id = ? AND revoked = FALSE",
+                staleGenSid
+        );
+        assertThat(updatedStale).isEqualTo(1);
+        given().auth().oauth2(staleGenToken)
+                .get("/api/v1/admin/users")
+                .then()
+                .statusCode(401);
 
         // Senior admin permanently locks modTarget (revokes all admin-web sessions immediately)
         given().auth().oauth2(seniorToken)
@@ -614,15 +649,15 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .then()
                 .statusCode(200);
 
-        // 1) Revoked, logged-out, and stale-generation admin-web tokens/refresh MUST fail with 401 (never leak restriction details)
-        for (String invalidatedToken : new String[]{loggedOutToken, staleGenToken, modWebToken}) {
+        // 1) Revoked, logged-out, password-changed, and stale-generation admin-web tokens/refresh MUST fail with 401 (never leak restriction details)
+        for (String invalidatedToken : new String[]{loggedOutToken, changedPasswordToken, staleGenToken, modWebToken}) {
             given().auth().oauth2(invalidatedToken)
                     .get("/api/v1/admin/users")
                     .then()
                     .statusCode(401);
         }
 
-        for (String invalidatedCookie : new String[]{staleGenCookie, refreshCookie}) {
+        for (String invalidatedCookie : new String[]{changedPasswordCookie, staleGenCookie, refreshCookie}) {
             given().header("Origin", ALLOWED_ORIGIN)
                     .cookie("dorm_refresh", invalidatedCookie)
                     .contentType("application/json")
@@ -644,8 +679,13 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
                 .body("restriction.appealable", equalTo(true));
 
         // 3) If an unrevoked admin-web session exists while DB row is BI_KHOA, it returns 403 ACCOUNT_RESTRICTED as defense-in-depth,
-        // while stale-generation tokens on that unrevoked session STILL reject with 401 before BI_KHOA check.
-        db.update("UPDATE auth_session SET revoked = FALSE WHERE user_id = ? AND client = 'admin-web'", modTarget.id());
+        // while stale-generation tokens on an unrevoked session STILL reject with 401 before BI_KHOA check.
+        int restoredSessions = db.update(
+                "UPDATE auth_session SET revoked = FALSE WHERE id IN (?, ?)",
+                modWebSid,
+                staleGenSid
+        );
+        assertThat(restoredSessions).isEqualTo(2);
         given().auth().oauth2(modWebToken)
                 .get("/api/v1/admin/users")
                 .then()

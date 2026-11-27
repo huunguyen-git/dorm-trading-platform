@@ -12,13 +12,17 @@ export class ApiError extends Error {
   }
 }
 const baseUrl = () => { const url = import.meta.env.VITE_API_URL; if (!url) throw new Error('VITE_API_URL is required'); return url; };
+function hasBearerChallenge(response: Response): boolean {
+  const header = response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
+  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+}
 export async function refreshSession() {
   if (!refreshFlight) {
     const generation = epoch;
     const rotate = async () => {
       const response = await fetch(`${baseUrl()}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'admin-web' }) });
       if (!response.ok) {
-        let message = 'Phiên đã hết hạn. Vui lòng đăng nhập lại.';
+        let message = response.status === 401 ? 'Phiên đã hết hạn. Vui lòng đăng nhập lại.' : 'Chưa thể làm mới phiên. Vui lòng thử lại.';
         let code: string | undefined;
         try {
           const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
@@ -42,22 +46,27 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const send = () => fetch(`${origin}${path}`, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(!publicCall && accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...init.headers } });
   const sentToken = accessToken;
   let response = await send();
-  if (response.status === 401 && !publicCall && response.headers?.get('WWW-Authenticate')?.startsWith('Bearer')) {
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     try {
       if (accessToken === sentToken) await refreshSession();
       // A security-filter 401 occurs before the controller; never replay other errors.
       response = await send();
     } catch (error) {
-      if (error instanceof ApiError && error.status === 403) {
+      if (error instanceof ApiError && error.status === 403 && error.code === 'ACCOUNT_RESTRICTED') {
         setAccessToken(null);
         window.dispatchEvent(new Event('session-expired'));
         throw error;
       }
-      /* handled below */
+      // Only an explicit refresh 401 proves the session is no longer usable.
+      // Network errors, 5xx and other rejections must leave credentials available for retry.
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
     }
   }
-  if (response.status === 401 && !publicCall && path !== '/auth/password/change') { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
+  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || hasBearerChallenge(response))) { setAccessToken(null); window.dispatchEvent(new Event('session-expired')); }
   if (!response.ok) {
+    if (refreshError) throw refreshError;
     const raw = await response.text();
     let message = raw || `API ${response.status}`;
     let code: string | undefined;
@@ -74,4 +83,49 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+/** Tải tệp nhị phân cần bearer token (ảnh thẻ). Trả null khi 404. */
+export async function attachment(path: string): Promise<Blob | null> {
+  const send = () => fetch(`${baseUrl()}${path}`, { credentials: 'include', headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
+  const sentToken = accessToken;
+  let response = await send();
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    try {
+      if (accessToken === sentToken) await refreshSession();
+      // Lỗi 401 của security-filter xảy ra trước controller; không bao giờ phát lại lỗi khác.
+      response = await send();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403 && error.code === 'ACCOUNT_RESTRICTED') {
+        setAccessToken(null);
+        window.dispatchEvent(new Event('session-expired'));
+        throw error;
+      }
+      // Chỉ refresh trả 401 mới chứng minh phiên hỏng; lỗi mạng/5xx phải nổi lên để người dùng thử lại.
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      setAccessToken(null);
+      window.dispatchEvent(new Event('session-expired'));
+      throw error;
+    }
+  }
+  // Retry vẫn 401 có Bearer challenge: phiên đã chết, phải đưa về màn đăng nhập như api().
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    setAccessToken(null);
+    window.dispatchEvent(new Event('session-expired'));
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    let message = 'Không tải được tệp đính kèm.';
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
+      code = parsed?.code;
+      message = parsed?.message ?? message;
+    } catch { /* plain response */ }
+    if (response.status === 403 && code === 'ACCOUNT_RESTRICTED') {
+      setAccessToken(null);
+      window.dispatchEvent(new Event('session-expired'));
+    }
+    throw new ApiError(response.status, message, code);
+  }
+  return response.blob();
 }

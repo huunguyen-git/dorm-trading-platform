@@ -26,6 +26,16 @@ type RawRestrictionResponse = {
   } | null;
 };
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
 let refreshFlight: Promise<void> | null = null;
 
 const baseUrl = () => {
@@ -33,6 +43,14 @@ const baseUrl = () => {
   if (!url) throw new Error('EXPO_PUBLIC_API_URL is required');
   return url;
 };
+
+export const apiUrl = (path: string) => `${baseUrl()}${path}`;
+
+function hasBearerChallenge(response: Response): boolean {
+  const header =
+    response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
+  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+}
 
 function isLocalOrPrivateHost(hostname: string): boolean {
   const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
@@ -280,10 +298,10 @@ async function handleRestrictedResponse(
         restrictionDismissed: false,
         user: currentUser
           ? {
-              ...currentUser,
-              accountStatus: restriction.accountStatus,
-              roles: [],
-            }
+            ...currentUser,
+            accountStatus: restriction.accountStatus,
+            roles: [],
+          }
           : null,
       });
     }
@@ -292,11 +310,48 @@ async function handleRestrictedResponse(
   throw new RestrictedAccountError(restriction.message, restriction);
 }
 
+async function errorOf(response: Response) {
+  const raw = await readResponseText(response);
+  await handleRestrictedResponse(response, raw, false);
+  let message = `API ${response.status}: ${raw}`;
+  let code: string | undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    message = parsed.message ?? message;
+    code = parsed.code;
+  } catch {
+    /* plain response */
+  }
+  return new ApiError(response.status, message, code);
+}
+
+/** Upload multipart; không tự đặt Content-Type để fetch sinh boundary. */
+export async function upload(path: string, file: { uri: string; name: string; type: string }) {
+  // FormData mới mỗi lần gọi để retry sau refresh không gửi lại body đã dùng.
+  const response = await authorizedSend(path, () => {
+    const form = new FormData();
+    form.append('file', file as unknown as Blob);
+    return { method: 'POST', body: form };
+  });
+  if (!response.ok) throw await errorOf(response);
+}
+
+/** Tải tệp nhị phân cần Authorization (ảnh thẻ). Trả null khi 404. */
+export async function attachment(path: string) {
+  const response = await authorizedSend(path, () => ({}));
+  if (response.status === 404) return null;
+  if (!response.ok) throw await errorOf(response);
+  return {
+    type: response.headers.get('Content-Type') ?? 'image/jpeg',
+    bytes: await response.arrayBuffer(),
+  };
+}
+
 async function refresh() {
   if (!refreshFlight) {
     refreshFlight = (async () => {
       const refreshToken = await tokenStore.getRefresh();
-      if (!refreshToken) throw new Error('Phiên đã hết hạn.');
+      if (!refreshToken) throw new ApiError(401, 'Phiên đã hết hạn.');
       const response = await fetch(`${baseUrl()}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,7 +360,12 @@ async function refresh() {
       if (!response.ok) {
         const raw = await readResponseText(response);
         await handleRestrictedResponse(response, raw, true);
-        throw new Error('Phiên đã hết hạn.');
+        throw new ApiError(
+          response.status,
+          response.status === 401
+            ? 'Phiên đã hết hạn.'
+            : 'Chưa thể làm mới phiên. Vui lòng thử lại.',
+        );
       }
       const session = await response.json();
       await useSessionStore.getState().setSession(session.token, session.user, session.refreshToken);
@@ -331,6 +391,44 @@ function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
   return headers as Record<string, string>;
 }
 
+/**
+ * Gửi request cần Bearer token với cùng state machine của api(): 401 + thử thách Bearer thì refresh một lần rồi thử lại.
+ * Chỉ refresh trả 401 mới xóa phiên; lỗi mạng/5xx giữ nguyên token để lần sau thử tiếp.
+ */
+async function authorizedSend(path: string, build: () => RequestInit): Promise<Response> {
+  const send = async () => {
+    const token = await tokenStore.get();
+    return fetch(apiUrl(path), {
+      ...build(),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  };
+  const sentToken = await tokenStore.get();
+  let response = await send();
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    try {
+      if ((await tokenStore.get()) === sentToken) await refresh();
+      response = await send();
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
+    }
+  }
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    await tokenStore.clear();
+    useSessionStore.setState({
+      token: null,
+      user: null,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
+  }
+  if (refreshError) throw refreshError;
+  return response;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const origin = baseUrl();
   const publicCall = [
@@ -354,22 +452,29 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   const sentToken = await tokenStore.get();
   let response = await send();
-  const authHeader =
-    response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
-  if (response.status === 401 && !publicCall && authHeader?.startsWith('Bearer')) {
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     try {
       if ((await tokenStore.get()) === sentToken) await refresh();
       response = await send();
     } catch (error) {
-      if (error instanceof RestrictedAccountError) throw error;
-      /* handled below */
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
     }
   }
-  if (response.status === 401 && !publicCall && path !== '/auth/password/change') {
+  // Chỉ 401 có thử thách Bearer mới chứng minh phiên hỏng. 401 sai mật khẩu (không có header) phải giữ phiên.
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     await tokenStore.clear();
-    useSessionStore.setState({ token: null, user: null, loading: false });
+    useSessionStore.setState({
+      token: null,
+      user: null,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
   }
   if (!response.ok) {
+    if (refreshError) throw refreshError;
     const raw = await readResponseText(response);
     await handleRestrictedResponse(response, raw, path === '/auth/login' || path === '/auth/refresh');
     let message = `API ${response.status}: ${raw}`;
@@ -381,10 +486,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* plain response */
     }
-    const error = new Error(message) as Error & { status?: number; code?: string };
-    error.status = response.status;
-    error.code = code;
-    throw error;
+    throw new ApiError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

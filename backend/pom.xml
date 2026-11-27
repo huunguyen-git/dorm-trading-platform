@@ -15,11 +15,18 @@
         <java.version>21</java.version>
         <testcontainers.version>1.21.3</testcontainers.version>
         <rest-assured.version>5.4.0</rest-assured.version>
+        <minio.version>8.5.17</minio.version>
     </properties>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+        <!-- P1-02: object storage cho ảnh thẻ sinh viên (chỉ dùng khi storage.backend=s3). -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>

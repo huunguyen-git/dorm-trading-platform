@@ -12,6 +12,7 @@ export type RootStack = {
   MyListings: undefined;
   EditListing: { id: string };
   Profile: undefined;
+  Settings: undefined;
   InventoryList: undefined;
   InventoryDetail: { id: string };
   InventoryForm: { mode: 'create' | 'edit'; id?: string; item?: InventoryItem };

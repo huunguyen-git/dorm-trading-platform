@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, setAccessToken } from './client';
+import { ApiError, api, attachment, setAccessToken } from './client';
+import { auth } from '../auth/session';
 
 const fetchMock = vi.fn();
 
@@ -15,6 +16,57 @@ afterEach(() => {
 });
 
 describe('api client', () => {
+  it.each(['offline', '503', '403', 'retry-offline'])('keeps logout retryable after refresh path failure: %s', async (failure) => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    const onExpire = vi.fn(); window.addEventListener('session-expired', onExpire);
+    const expired = () => new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    fetchMock.mockResolvedValueOnce(expired());
+    if (failure === 'offline') fetchMock.mockRejectedValueOnce(new TypeError('offline'));
+    else if (failure === 'retry-offline') {
+      fetchMock.mockResolvedValueOnce(Response.json({ token: 'fresh' }));
+      fetchMock.mockRejectedValueOnce(new TypeError('offline'));
+    } else fetchMock.mockResolvedValueOnce(new Response('', { status: Number(failure) }));
+    try {
+      await expect(auth.logout()).rejects.toThrow();
+      expect(onExpire).not.toHaveBeenCalled();
+      const retained = failure === 'retry-offline' ? 'fresh' : 'expired';
+      fetchMock.mockResolvedValueOnce(Response.json({ id: '1' }));
+      await api('/auth/me');
+      expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBe(`Bearer ${retained}`);
+      fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(Response.json({ token: 'retry-token' }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await expect(auth.logout()).resolves.toBeUndefined();
+      expect(fetchMock.mock.lastCall?.[0]).toContain('/auth/logout');
+      expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBe('Bearer retry-token');
+      fetchMock.mockResolvedValueOnce(Response.json({})); await api('/auth/me');
+      expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBeUndefined();
+    } finally { window.removeEventListener('session-expired', onExpire); }
+  });
+  it('finishes logout when refresh explicitly rejects the session with 401', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } }))
+      .mockResolvedValueOnce(new Response('', { status: 401 }));
+    await expect(auth.logout()).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('finishes logout when the session has expired but preserves network failures', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }));
+    await expect(auth.logout()).resolves.toBeUndefined();
+    setAccessToken('valid'); fetchMock.mockRejectedValueOnce(new TypeError('offline'));
+    await expect(auth.logout()).rejects.toThrow('offline');
+  });
+  it('clears the browser session after changing password with a 204 response', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('valid');
+    const expired = vi.fn(); window.addEventListener('session-expired', expired);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await auth.change('old password', 'River!82');
+    expect(expired).toHaveBeenCalledOnce();
+    fetchMock.mockResolvedValueOnce(Response.json({}));
+    await api('/auth/me');
+    expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBeUndefined();
+    window.removeEventListener('session-expired', expired);
+  });
   it('shares one refresh across concurrent protected calls and retries with new access token', async () => {
     vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
     let refreshes = 0;
@@ -32,6 +84,21 @@ describe('api client', () => {
     fetchMock.mockResolvedValue(Response.json({ message: 'Wrong password' }, { status: 401 }));
     await expect(api('/auth/password/change', { method: 'POST' })).rejects.toThrow('Wrong password');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('handles lowercase bearer challenge on password change and surfaces Vietnamese refresh 401 message', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    const onExpire = vi.fn(); window.addEventListener('session-expired', onExpire);
+    fetchMock
+      .mockResolvedValueOnce(new Response('', { status: 401, headers: { 'www-authenticate': 'bearer error="invalid_token"' } }))
+      .mockResolvedValueOnce(new Response('', { status: 401 }));
+    try {
+      await expect(api('/auth/password/change', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+        status: 401,
+        message: 'Phiên đã hết hạn. Vui lòng đăng nhập lại.',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(onExpire).toHaveBeenCalledOnce();
+    } finally { window.removeEventListener('session-expired', onExpire); }
   });
   it('rejects without calling fetch when VITE_API_URL is missing', async () => {
     vi.stubEnv('VITE_API_URL', '');
@@ -115,5 +182,34 @@ describe('api client', () => {
     });
 
     window.removeEventListener('session-expired', onExpire);
+  });
+
+  it('refreshes then retries an attachment download, and expires the session when refresh rejects', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    const onExpire = vi.fn(); window.addEventListener('session-expired', onExpire);
+    const expired = () => new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    try {
+      // 401 Bearer -> refresh OK -> retry 200
+      fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(Response.json({ token: 'fresh' }))
+        .mockResolvedValueOnce(new Response(new Blob(['png']), { status: 200 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).resolves.toBeInstanceOf(Blob);
+      expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBe('Bearer fresh');
+      expect(onExpire).not.toHaveBeenCalled();
+
+      // 404 stays null, no logout
+      fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).resolves.toBeNull();
+
+      // refresh returns 401 -> session expired
+      fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(new Response('', { status: 401 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).rejects.toMatchObject({ status: 401 });
+      expect(onExpire).toHaveBeenCalledOnce();
+
+      // network failure during refresh must surface, not be swallowed
+      setAccessToken('expired'); onExpire.mockClear();
+      fetchMock.mockResolvedValueOnce(expired()).mockRejectedValueOnce(new TypeError('offline'));
+      await expect(attachment('/admin/profiles/u-1/student-card')).rejects.toThrow('offline');
+      expect(onExpire).not.toHaveBeenCalled();
+    } finally { window.removeEventListener('session-expired', onExpire); }
   });
 });

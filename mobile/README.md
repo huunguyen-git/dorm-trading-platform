@@ -49,9 +49,13 @@ npm run build    # expo export --platform android, kết quả ở dist/
 
 ## Xác thực P1-01
 
-Màn đăng nhập có đăng ký, gửi lại xác minh email và quên mật khẩu. OTP email6 số/5 phút; mật khẩu15–128 ký tự. Người chờ duyệt xem tin công khai và sửa họ tên trong Hồ sơ; duyệt đầy đủ thuộc P1-02. Access/refresh token lưu SecureStore; đăng xuất chỉ thiết bị này. Đổi mật khẩu giữ phiên hiện tại, thu hồi các phiên khác; reset yêu cầu đăng nhập lại.
+Màn đăng nhập có đăng ký, gửi lại xác minh email và quên mật khẩu. OTP email6 số/5 phút; mật khẩu 8–128 ký tự. Người chờ duyệt xem tin công khai và sửa họ tên trong Hồ sơ; duyệt đầy đủ thuộc P1-02. Access/refresh token lưu SecureStore; đăng xuất chỉ thiết bị này. Đổi mật khẩu thu hồi tất cả phiên và yêu cầu đăng nhập lại; reset yêu cầu đăng nhập lại.
 
 [Live test](e2e/auth.live.tsx) chạy UI React Native test renderer với API/SMTP thật, nhưng SecureStore và transport được thay cho môi trường Node; không thay kiểm tra thiết bị. Xem [spec](../docs/specs/P1-01.md) để chạy với dịch vụ thử riêng. Không đưa khóa JWT vào EXPO_PUBLIC_*.
+
+Lượt 22/11 còn kiểm trực tiếp Android emulator API35/Expo Go2.33.22: đăng nhập, hồ sơ, SecureStore khôi phục sau force-stop và logout không tự khôi phục. [Ca native](../scripts/verify-p1-01-android.cjs) dùng tài khoản thử được tạo/xác minh qua API/SMTP; chưa chứng minh toàn bộ biểu mẫu native hoặc iOS.
+
+Từ root, [bộ chạy live](../scripts/verify-p1-01-live.cjs) với `--android` mở API/Vite/Metro và chạy ca native trên emulator thử riêng. Xem [chuẩn bị và giới hạn](../docs/specs/P1-01-gui-checklist.md#chạy-lại-bộ-live--22112026). Nếu Expo báo `Invalid character in header content ["X-React-Native-Project-Root"]` vì repo có dấu, dùng [helper Metro](../scripts/start-p1-01-mobile.cjs): giữ nguyên file nguồn và dùng đường dẫn Windows8.3, không sửa dependency.
 
 ## Kiểm thử GUI P1-01
 

@@ -114,7 +114,6 @@ export const ui = StyleSheet.create({
     overflow: 'hidden',
   },
 });
-
 export function AuthScreen({
   title,
   subtitle,

@@ -21,6 +21,7 @@ public class PostgresTestContainer extends PostgreSQLContainer<PostgresTestConta
             testContainer.withDatabaseName("dorm_trading_test");
             testContainer.withUsername("test_user");
             testContainer.withPassword("test_password");
+            testContainer.withCommand("postgres", "-c", "max_connections=300");
             testContainer.withReuse(true);
             testContainer.start();
             container = testContainer;

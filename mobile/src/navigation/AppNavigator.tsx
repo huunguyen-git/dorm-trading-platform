@@ -11,6 +11,7 @@ import CreateListingScreen from '../screens/CreateListingScreen';
 import MyListingsScreen from '../screens/MyListingsScreen';
 import EditListingScreen from '../screens/EditListingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
@@ -82,6 +83,11 @@ export default function AppNavigator() {
           name="Profile"
           component={ProfileScreen}
           options={{ title: 'Hồ sơ', headerShown: false }}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{ title: 'Cài đặt tài khoản' }}
         />
         <Stack.Screen
           name="InventoryList"

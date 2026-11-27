@@ -70,7 +70,8 @@ export type AppIconName =
   | 'headphones'
   | 'music'
   | 'sun'
-  | 'heart';
+  | 'heart'
+  | 'settings';
 
 export interface IconProps {
   name: AppIconName;

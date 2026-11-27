@@ -17,13 +17,13 @@ public class AuthController {
     public AuthController(AuthService auth,@Value("${app.cors.origins}") List<String> origins) {
         this.auth=auth; this.origins=Set.copyOf(origins);
     }
-    public record Register(String name,String studentId,String email,String password) {}
+    public record Register(String name,String studentId,String email,String password) { @Override public String toString() { return "Register[redacted]"; } }
     public record Otp(String email,String purpose) {}
-    public record Verify(UUID challengeId,String email,String purpose,String code) {}
-    public record Login(String email,String password,String client) {}
-    public record Refresh(String refreshToken,String client) {}
-    public record Change(String currentPassword,String password) {}
-    public record Reset(String resetToken,String password) {}
+    public record Verify(UUID challengeId,String email,String purpose,String code) { @Override public String toString() { return "Verify[redacted]"; } }
+    public record Login(String email,String password,String client) { @Override public String toString() { return "Login[redacted]"; } }
+    public record Refresh(String refreshToken,String client) { @Override public String toString() { return "Refresh[redacted]"; } }
+    public record Change(String currentPassword,String password) { @Override public String toString() { return "Change[redacted]"; } }
+    public record Reset(String resetToken,String password) { @Override public String toString() { return "Reset[redacted]"; } }
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
     public AuthService.Challenge register(@RequestBody Register body,HttpServletRequest req) {
@@ -51,11 +51,6 @@ public class AuthController {
     }
     @GetMapping("/me")
     public AuthService.User me(@AuthenticationPrincipal Jwt jwt) { return auth.me(jwt); }
-    @PatchMapping("/profile")
-    public AuthService.User profile(@AuthenticationPrincipal Jwt jwt,@RequestBody Map<String,String> body) {
-        if (!body.keySet().equals(Set.of("name"))) throw new AuthFailure(400,"INVALID_PROFILE_FIELDS","Chỉ cập nhật họ tên tại API này; đổi email cần xác minh riêng.");
-        return auth.updateProfile(jwt,body.get("name"));
-    }
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@AuthenticationPrincipal Jwt jwt,HttpServletRequest req) {
         if ("admin-web".equals(jwt.getClaimAsString("client"))) origin(req);
@@ -63,9 +58,10 @@ public class AuthController {
         return ResponseEntity.noContent().header(HttpHeaders.SET_COOKIE,cookie("",Duration.ZERO).toString()).build();
     }
     @PostMapping("/password/change")
-    public ResponseEntity<AuthService.Session> change(@AuthenticationPrincipal Jwt jwt,@RequestBody Change body,HttpServletRequest req) {
+    public ResponseEntity<Void> change(@AuthenticationPrincipal Jwt jwt,@RequestBody Change body,HttpServletRequest req) {
         String client=jwt.getClaimAsString("client"); if ("admin-web".equals(client)) origin(req);
-        return session(auth.changePassword(jwt,body.currentPassword(),body.password()),client);
+        auth.changePassword(jwt,body.currentPassword(),body.password());
+        return ResponseEntity.noContent().header(HttpHeaders.SET_COOKIE,cookie("",Duration.ZERO).toString()).build();
     }
     @PostMapping("/password/reset")
     @ResponseStatus(HttpStatus.NO_CONTENT)
