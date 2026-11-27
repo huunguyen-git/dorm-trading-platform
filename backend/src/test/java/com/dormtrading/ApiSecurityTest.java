@@ -121,8 +121,10 @@ class ApiSecurityTest extends BaseIntegrationTest {
         verify(c); assertThat(post(a.token(),"/api/v1/orders/probe")).isEqualTo(403);
         activate(); assertThat(post(a.token(),"/api/v1/orders/probe")).isEqualTo(200);
         assertThat(get(a.token(),"/api/v1/admin/probe")).isEqualTo(403);
-        given().auth().oauth2(a.token()).contentType("application/json").body(Map.of("email","other@student.edu.vn"))
-                .patch("/api/v1/auth/profile").then().statusCode(400);
+        // Đổi tên phải qua duyệt nên route đổi tên trực tiếp không còn tồn tại.
+        assertThat(given().auth().oauth2(a.token()).contentType("application/json").body(Map.of("name","Tên Không Duyệt"))
+                .patch("/api/v1/auth/profile").then().extract().statusCode()).isIn(404, 405);
+        assertThat(db.queryForObject("select ho_ten from thanh_viens where email=?",String.class,email)).isNotEqualTo("Tên Không Duyệt");
         assertThat(db.queryForObject("select mat_khau_hash from thanh_viens where email=?",String.class,email)).startsWith("$argon2id$");
         assertThatThrownBy(() -> auth.register("Test","newid",email,PASSWORD,student)).isInstanceOf(AuthFailure.class);
     }
