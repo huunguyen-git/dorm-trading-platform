@@ -18,18 +18,22 @@ Gói `infra/demo/` được thiết kế **độc lập hoàn toàn**: bạn có
 
 ### Bước 2 — Kích hoạt luồng CD trên GitHub Actions
 
-- **Tự động:** Khi PR được merge vào `main` và workflow **`CI`** chạy xanh toàn bộ, workflow **`CD`** (`.github/workflows/cd.yml`) sẽ tự động chạy, build multi-stage Docker images cho `backend` & `admin-web` song song với Buildx GHA cache và push 2 tag (`:latest` và `:sha-<7-ký-tự>`) lên Docker Hub.
-- **Kích hoạt thủ công khi quay demo:** Mở tab **Actions → CD → Run workflow**, chọn nhánh muốn demo và bấm **Run workflow** (giữ `publish_latest = true`).
+- **Tự động:** Khi PR được merge vào `main` và workflow **`CI`** chạy xanh toàn bộ, workflow **`CD`** (`.github/workflows/cd.yml`) sẽ tự động build multi-stage Docker images cho `backend` & `admin-web` song song với Buildx GHA cache để push tag `:sha-<7-ký-tự>`, sau đó job `promote-latest` (chỉ chạy khi cả 2 build đạt và có concurrency khóa toàn repo) mới gắn tag `:latest`.
+- **Kích hoạt thủ công khi quay demo:** Mở tab **Actions → CD → Run workflow**. Mặc định `publish_latest = false` (chỉ đẩy `:sha-<7-ký-tự>`). Nếu muốn đồng thời cập nhật `:latest` khi quay demo, chỉ chọn nhánh **`main`** đã có lượt **`CI`** xanh và tick `publish_latest = true`.
 - Khi chạy xong, mở **Summary** của lần chạy để xem bảng image, digest và lệnh deploy/rollback dựng sẵn.
 
 ### Bước 3 — Khởi chạy trên máy Demo (không cần mã nguồn)
 
-Sao chép thư mục `infra/demo/` sang máy demo, mở terminal tại thư mục đó:
+Sao chép thư mục `infra/demo/` sang máy demo, mở terminal tại thư mục đó (mọi cổng dịch vụ đều chỉ bind về `127.0.0.1`, không mở ra mạng LAN/Wi-Fi):
 
 ```bash
 cp .env.demo.example .env
-# Mở .env và sửa DOCKERHUB_USERNAME=<tên-dockerhub-của-bạn>
-# (Tùy chọn: tạo khóa mới bằng `openssl rand -base64 48` để thay JWT_SECRET)
+# Tạo JWT_SECRET ngẫu nhiên (BẮT BUỘC — >= 32 bytes Base64):
+openssl rand -base64 48
+# (Trên Windows PowerShell 5.1:
+#   $b = New-Object byte[] 48; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+# )
+# Mở .env và điền DOCKERHUB_USERNAME=<tên-dockerhub-của-bạn> cùng JWT_SECRET vừa tạo
 
 docker compose -f docker-compose.demo.yml pull
 docker compose -f docker-compose.demo.yml up -d

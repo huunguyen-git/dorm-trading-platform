@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       publish_latest:
-        description: "Also tag and push :latest alongside :sha-<short> (recommended for live demos)"
+        description: "Also promote :latest on main after green CI and both images succeed"
         type: boolean
         required: false
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +25,9 @@ jobs:
     name: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' &&
@@ -46,6 +49,8 @@ jobs:
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           DISPATCH_PUBLISH_LATEST: ${{ inputs.publish_latest }}
           REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
@@ -63,10 +68,44 @@ jobs:
           else
             target_sha="$GITHUB_SHA_DEFAULT"
             source_branch="$REF_NAME"
-            if [ "$DISPATCH_PUBLISH_LATEST" = "false" ]; then
-              publish_latest="false"
-            else
+            if [ "$DISPATCH_PUBLISH_LATEST" = "true" ]; then
+              if [ "$REF_NAME" != "main" ]; then
+                echo "::error::Publishing :latest is only permitted from main. Re-run with publish_latest=false to publish only :sha-<short>."
+                exit 1
+              fi
+
+              ci_passed="$(
+                python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA_DEFAULT"]
+          token = os.environ["GITHUB_TOKEN"]
+          url = f"https://api.github.com/repos/{repo}/actions/workflows/ci.yml/runs?head_sha={sha}&status=completed&per_page=20"
+          req = urllib.request.Request(
+              url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+              data = json.load(resp)
+          ok = any(run.get("conclusion") == "success" for run in data.get("workflow_runs", []))
+          print("true" if ok else "false")
+          PY
+              )"
+
+              if [ "$ci_passed" != "true" ]; then
+                echo "::error::Cannot promote :latest for commit ${target_sha}: no passing CI workflow run found. Wait for CI to pass or run with publish_latest=false."
+                exit 1
+              fi
               publish_latest="true"
+            else
+              publish_latest="false"
             fi
           fi
 
@@ -109,7 +148,6 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/dorm-trading-backend
           tags: |
             type=raw,value=sha-${{ needs.prepare.outputs.short_sha }}
-            type=raw,value=latest,enable=${{ needs.prepare.outputs.publish_latest == 'true' }}
 
       - name: Build and push backend image
         id: build
@@ -153,7 +191,6 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/dorm-trading-admin-web
           tags: |
             type=raw,value=sha-${{ needs.prepare.outputs.short_sha }}
-            type=raw,value=latest,enable=${{ needs.prepare.outputs.publish_latest == 'true' }}
 
       - name: Build and push admin-web image
         id: build
@@ -169,10 +206,45 @@ jobs:
           cache-from: type=gha,scope=admin-web
           cache-to: type=gha,mode=max,scope=admin-web
 
+  promote-latest:
+    name: promote-latest
+    runs-on: ubuntu-latest
+    needs: [prepare, build-backend, build-admin-web]
+    if: ${{ needs.prepare.outputs.publish_latest == 'true' }}
+    concurrency:
+      group: cd-promote-latest
+      cancel-in-progress: false
+    timeout-minutes: 5
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Promote :latest tags atomically
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          BACKEND_DIGEST: ${{ needs.build-backend.outputs.digest }}
+          ADMIN_WEB_DIGEST: ${{ needs.build-admin-web.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${DOCKERHUB_USERNAME}/dorm-trading-backend:latest" \
+            "${DOCKERHUB_USERNAME}/dorm-trading-backend@${BACKEND_DIGEST}"
+          docker buildx imagetools create \
+            --tag "${DOCKERHUB_USERNAME}/dorm-trading-admin-web:latest" \
+            "${DOCKERHUB_USERNAME}/dorm-trading-admin-web@${ADMIN_WEB_DIGEST}"
+
   summary:
     name: summary
     runs-on: ubuntu-latest
-    needs: [prepare, build-backend, build-admin-web]
+    needs: [prepare, build-backend, build-admin-web, promote-latest]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.build-backend.result == 'success' && needs.build-admin-web.result == 'success' && (needs.promote-latest.result == 'success' || needs.promote-latest.result == 'skipped') }}
     timeout-minutes: 5
     steps:
       - name: Publish CD summary
@@ -181,13 +253,13 @@ jobs:
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
           SHORT_SHA: ${{ needs.prepare.outputs.short_sha }}
           SOURCE_BRANCH: ${{ needs.prepare.outputs.source_branch }}
-          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
+          PROMOTE_RESULT: ${{ needs.promote-latest.result }}
           BACKEND_DIGEST: ${{ needs.build-backend.outputs.digest }}
           ADMIN_WEB_DIGEST: ${{ needs.build-admin-web.outputs.digest }}
         run: |
           set -euo pipefail
 
-          if [ "$PUBLISH_LATEST" = "true" ]; then
+          if [ "$PROMOTE_RESULT" = "success" ]; then
             published_tags="\`latest\`, \`sha-${SHORT_SHA}\`"
           else
             published_tags="\`sha-${SHORT_SHA}\`"
