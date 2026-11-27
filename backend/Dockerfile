@@ -42,6 +42,6 @@ ENV SERVER_PORT=8082 \
 EXPOSE 8082
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
-    CMD wget -qO- http://127.0.0.1:8082/api/v1/health || exit 1
+    CMD wget -qO- "http://127.0.0.1:${SERVER_PORT:-8082}/api/v1/health" | grep -q '"database":"CONNECTED"' || exit 1
 
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-Duser.timezone=Asia/Ho_Chi_Minh", "-jar", "/app/app.jar"]
