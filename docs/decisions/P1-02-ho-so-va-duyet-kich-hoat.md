@@ -46,9 +46,39 @@ Key do server sinh dạng `<userId>/<uuid>.<ext>`; `LocalCardStorage` kiểm tra
 
 **Hệ quả với P1-01.** Thay đổi nằm trong migration mới, không sửa code `AuthService`; `OtpDelivery` chỉ thêm nhánh subject `CHANGE_EMAIL`. Nguyễn Hữu Nguyên review phần này.
 
-## 5. Không dùng `version` từ client để chống duyệt đè
+## 5. `expectedVersion` từ client cho `approve`/`reject`
 
-Kế hoạch ban đầu ghi `{version}` cho `approve`/`reject`. Thực tế khóa dòng `thanh_viens` bằng `select ... for update` rồi kiểm lại trạng thái chờ trong cùng transaction; kiểm duyệt viên thua nhận 409. Bỏ tham số `version` khỏi hợp đồng để client không phải giữ trạng thái, hành vi chống đè vẫn đúng và đã có test đồng thời.
+**Bối cảnh.** Kế hoạch ban đầu bỏ `version` vì cho rằng khóa dòng `thanh_viens` bằng `select ... for update` là đủ. Không đủ: khóa chỉ chống hai kiểm duyệt viên duyệt cùng lúc, không chống trường hợp người dùng sửa hồ sơ **sau khi** kiểm duyệt viên đã đọc nội dung. Kiểm duyệt viên sẽ duyệt một bản chờ duyệt khác với bản mình đã xem trên màn hình.
+
+**Lựa chọn.** Thêm `version` vào DTO hồ sơ (lấy từ `thanh_viens.version`) và `expectedVersion` tuỳ chọn vào **query param** của `approve`/`reject`. Lệch phiên bản → 409 `PROFILE_CHANGED` với thông điệp "Hồ sơ đã thay đổi sau khi bạn xem…". `expectedVersion = null` giữ tương thích với client cũ và test hiện có. Mã lỗi tách khỏi `PROFILE_ALREADY_HANDLED` để web hiện hai lời giải thích khác nhau.
+
+**Vì sao query param, không phải body.** `approve` không cần body. Đặt `@RequestBody(required = false)` khiến client POST không body (RestAssured, curl, health-check) bị Spring ném `HttpMediaTypeNotSupportedException` vì Content-Type mặc định là `application/x-www-form-urlencoded`. Query param giữ `approve` là POST không body, còn `reject` vẫn nhận `{reason}` trong body.
+
+## 5a. `/error` phải `permitAll()`
+
+`anyRequest().denyAll()` chặn cả forward nội bộ sang `/error`, nên mọi lỗi 4xx/5xx thật (415, 400, 500) đều bị trả về **403** và che mất nguyên nhân. Thêm `requestMatchers("/error").permitAll()` trước các rule khác. Không có dòng này thì test nào assert 4xx cụ thể cũng có thể "đỏ" vì lý do sai.
+
+**Hệ quả.** Vẫn giữ `for update` cho trường hợp đồng thời. Admin-web gửi `profile.version` của bản đã render; 409 `PROFILE_CHANGED` thì tải lại và **vẫn cho quyết định** (hồ sơ còn `CHO_DUYET`), khác 409 `PROFILE_ALREADY_HANDLED` (đã xử lý, khoá nút).
+
+## 5b. Bỏ `PATCH /api/v1/auth/profile`
+
+**Bối cảnh.** Route cũ cho phép đổi `ho_ten` trực tiếp, bỏ qua bước duyệt, trong khi UC-05 yêu cầu mọi thay đổi định danh phải qua kiểm duyệt.
+
+**Lựa chọn.** Xoá route, `AuthService.updateProfile` và validate `INVALID_PROFILE_FIELDS`. Mọi thay đổi hồ sơ đi qua `PATCH /api/v1/profile/me`. Test `ApiSecurityTest` khẳng định route cũ trả 404/405 và `ho_ten` không đổi.
+
+## 5c. Bản chờ duyệt là nguồn sự thật khi đọc hàng đợi
+
+**Bối cảnh.** `pending()` đọc thẳng `thanh_viens` nên kiểm duyệt viên thấy giá trị **hiện tại** chứ không phải giá trị người dùng vừa gửi, và `view()` trộn bản chờ duyệt với cột NOT NULL của `thanh_viens`, làm mất giá trị `null` hợp lệ khi người dùng xoá trắng một trường.
+
+**Lựa chọn.** `pending()` dùng `left join ho_so_cap_nhat` + `coalesce` cho các trường định danh. `view()` đọc `trang_thai_sv` từ bản chờ duyệt, `null` thì rơi về cột live (vì cột live NOT NULL). Gửi lại đúng giá trị đang hiệu lực → xoá `ho_so_cap_nhat`, đưa hồ sơ về `DA_DUYET` thay vì để hàng đợi chứa bản trùng.
+
+## 5d. `trang_thai_sv` trong bản chờ duyệt bằng migration V11
+
+**Bối cảnh.** `thanh_viens.trang_thai_sv` là NOT NULL, nên không biểu diễn được "người dùng xoá trắng" và không lưu được giá trị chờ duyệt tách khỏi giá trị đang hiệu lực.
+
+**Lựa chọn.** `V11__pending_study_status.sql` thêm `ho_so_cap_nhat.trang_thai_sv VARCHAR(50)` với CHECK cho phép NULL hoặc `DANG_HOC`/`DA_TOT_NGHIEP`. Duyệt thì `coalesce(p.trang_thai_sv, v.trang_thai_sv)`. Giá trị lạ → 400 `INVALID_INPUT` tại service.
+
+**Hệ quả.** Giá trị đang hiệu lực không đổi cho tới khi duyệt, kể cả khi tài khoản đã `HOAT_DONG`.
 
 ## 6. Tải ảnh thẻ qua lớp client dùng chung, không `fetch` trong module nghiệp vụ
 
