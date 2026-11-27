@@ -63,4 +63,45 @@ describe('role-based session', () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith('/listings'));
     expect(screen.getByText('listings')).toBeInTheDocument();
   });
+
+  it('allows admins on governance routes and keeps moderator routes restricted', async () => {
+    request.mockImplementation(async (path) => {
+      if (path === '/auth/me') return { ...moderator, role: 'admin' } as never;
+      if (path.startsWith('/admin/senior/moderators?') || path.startsWith('/admin/senior/penalties?') || path.startsWith('/admin/senior/audit?'))
+        return { items: [], page: 0, size: 20, total: 0 } as never;
+      return {} as never;
+    });
+    const moderators = render(<MemoryRouter initialEntries={['/moderators']}><App /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Quản lý kiểm duyệt viên' })).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith(expect.stringMatching('/admin/senior/moderators'), expect.anything());
+    moderators.unmount();
+
+    request.mockReset();
+    request.mockImplementation(async (path) => {
+      if (path === '/auth/me') return { ...moderator, role: 'admin' } as never;
+      if (path.startsWith('/admin/senior/penalties?') || path.startsWith('/admin/senior/audit?'))
+        return { items: [], page: 0, size: 20, total: 0 } as never;
+      return {} as never;
+    });
+    const penalties = render(<MemoryRouter initialEntries={['/penalties']}><App /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Quản lý thang phạt' })).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith(expect.stringMatching('/admin/senior/penalties'), expect.anything());
+    penalties.unmount();
+
+    request.mockReset();
+    request.mockImplementation(async (path) => {
+      if (path === '/auth/me') return moderator as never;
+      return {} as never;
+    });
+    const moderatorRoute = render(<MemoryRouter initialEntries={['/moderators']}><App /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Tài khoản & bảo mật' })).toBeInTheDocument();
+    expect(request).not.toHaveBeenCalledWith(expect.stringMatching('/admin/senior/moderators'), expect.anything());
+    moderatorRoute.unmount();
+
+    request.mockReset();
+    request.mockResolvedValue({ ...moderator } as never);
+    render(<MemoryRouter initialEntries={['/penalties']}><App /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Tài khoản & bảo mật' })).toBeInTheDocument();
+    expect(request).not.toHaveBeenCalledWith(expect.stringMatching('/admin/senior/penalties'), expect.anything());
+  });
 });

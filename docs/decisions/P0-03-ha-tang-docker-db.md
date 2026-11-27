@@ -10,7 +10,7 @@ Dự án monorepo backend của Nhóm 14 cần một hạ tầng CSDL quan hệ 
 
 2. **Quản lý phiên bản CSDL với Flyway**:
    - `V1__init_schema.sql`: Khởi tạo 15 bảng thực thể miền chuẩn hóa theo OOAD (vai_tro_quan_tri, thanh_viens, danh_mucs, do_vats, tin_dangs, tin_dang_do_vat, hoi_thoais, tin_nhans, giao_dichs, ma_xac_nhan_otp, danh_gias, bao_caos, khieu_nais, quyet_dinhs, thang_phats) kèm khóa chính UUID/BIGSERIAL, khóa ngoại tham chiếu chặt chẽ và ràng buộc CHECK enum.
-   - `V2__seed_initial_data.sql`: Nạp trước 7 danh mục vật phẩm phòng trọ / KTX và các vai trò hệ thống mẫu phục vụ thử nghiệm.
+   - `V2__seed_initial_data.sql`: Nạp 7 danh mục vật phẩm phòng trọ / KTX và 6 mức phạt mẫu, không nạp vai trò hoặc tài khoản quản trị. [P1-06](P1-06-quan-tri-va-lich-su.md) giữ khóa mẫu nhưng chuyển ngừng dùng bằng V5; số điểm mẫu không phải chính sách đã được duyệt.
 
 3. **Chiến lược Kiểm thử Tích hợp Độc lập (Testcontainers & Spring Profiles)**:
    - Tích hợp `testcontainers-postgresql` qua `PostgresTestContainer.java` (Singleton pattern) kế thừa trong `BaseIntegrationTest.java`. Toàn bộ migration Flyway được áp dụng tự động trên container độc lập khi chạy test.

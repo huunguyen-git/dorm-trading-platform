@@ -5,12 +5,17 @@ import { useAuth } from '../auth/AuthProvider';
 import LoginPage from '../auth/LoginPage';
 import type { User } from '../auth/session';
 import { rolePages } from '../config/rolePages';
+import ModeratorsPage from '../gov/ModeratorsPage';
+import PenaltiesPage from '../gov/PenaltiesPage';
 import RolePage from '../pages/RolePage';
 import UsersManagementPage from '../users/UsersManagementPage';
 function ProtectedPage({ user, permission }: { user: User; permission: string }) {
   const allowed = rolePages[user.role].some((page) => page.path === permission);
   if (!allowed) return <Navigate to="/account" replace />;
-  return permission === 'users' ? <UsersManagementPage /> : <RolePage permission={permission} role={user.role} />;
+  if (permission === 'users') return <UsersManagementPage />;
+  if (permission === 'moderators') return <ModeratorsPage />;
+  if (permission === 'penalties') return <PenaltiesPage />;
+  return <RolePage permission={permission} role={user.role} />;
 }
 export default function AppLayout() {
   const [change, setChange] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
