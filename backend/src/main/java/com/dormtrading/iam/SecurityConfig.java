@@ -95,10 +95,13 @@ class SecurityConfig {
                         .authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(auth -> auth
+                        // /error là forward nội bộ: chặn nó biến mọi 4xx/5xx thật thành 403.
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/listings").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                                 "/api/v1/auth/otp/resend", "/api/v1/auth/otp/verify", "/api/v1/auth/password/reset").permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()
+                        .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/admin/senior/**").hasRole("SENIOR_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("MODERATOR")
                         .requestMatchers("/api/v1/**").hasRole("MEMBER")

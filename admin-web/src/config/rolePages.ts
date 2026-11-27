@@ -3,6 +3,7 @@ import type { Role } from '../auth/session';
 export const rolePages: Record<Role, { path: string; label: string }[]> = {
   admin: [
     { path: 'overview', label: 'Tổng quan' },
+    { path: 'profiles', label: 'Hồ sơ chờ duyệt' },
     { path: 'users', label: 'Người dùng' },
     { path: 'transactions', label: 'Giao dịch' },
     { path: 'categories', label: 'Danh mục' },
@@ -11,6 +12,7 @@ export const rolePages: Record<Role, { path: string; label: string }[]> = {
   ],
   moderator: [
     { path: 'overview', label: 'Tổng quan' },
+    { path: 'profiles', label: 'Hồ sơ chờ duyệt' },
     { path: 'users', label: 'Người dùng' },
     { path: 'listings', label: 'Tin đăng' },
     { path: 'reports', label: 'Báo cáo' },

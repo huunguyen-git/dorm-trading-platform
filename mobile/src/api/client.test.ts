@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { api, RestrictedAccountError } from './client';
+import { api, attachment, RestrictedAccountError, upload } from './client';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -80,15 +80,33 @@ test('rejects without calling fetch when EXPO_PUBLIC_API_URL is missing', async 
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-test('clears the stored token and resets the session on 401', async () => {
+test('clears the stored token and resets the session on 401 with a Bearer challenge', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
   store.get.mockResolvedValue('stale');
-  fetchMock.mockResolvedValue({ status: 401, ok: false, text: async () => '' });
+  fetchMock.mockResolvedValue({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' });
 
-  await expect(api('/auth/me')).rejects.toThrow('API 401');
+  await expect(api('/auth/me')).rejects.toMatchObject({ status: 401 });
 
   expect(store.clear).toHaveBeenCalled();
   expect(useSession.getState().token).toBeNull();
+});
+
+test('keeps the session on a 401 without a Bearer challenge (wrong current password)', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('valid-jwt');
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false });
+  fetchMock.mockResolvedValue({
+    status: 401,
+    ok: false,
+    text: async () => JSON.stringify({ code: 'INVALID_CREDENTIALS', message: 'Mật khẩu hiện tại không đúng.' }),
+  });
+
+  await expect(api('/profile/email', { method: 'PATCH', body: '{}' })).rejects.toMatchObject({
+    status: 401,
+    code: 'INVALID_CREDENTIALS',
+  });
+  expect(store.clear).not.toHaveBeenCalled();
+  expect(useSession.getState().token).toBe('valid-jwt');
 });
 
 test('sends the bearer token and returns parsed json', async () => {
@@ -416,4 +434,63 @@ test('preserves server error code on ApiError for 409 inventory conflicts', asyn
     code: 'VERSION_CONFLICT',
     message: 'Phiên bản dữ liệu đã cũ.',
   });
+});
+
+test('refreshes once and retries a multipart upload with a fresh form body', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('refresh-ok');
+  store.save.mockImplementation(async (value) => { access = value; });
+  const expired = { status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' };
+  const refreshed = { status: 200, ok: true, json: async () => ({ token: 'fresh', refreshToken: 'refresh-new', user: null }) };
+  fetchMock.mockResolvedValueOnce(expired).mockResolvedValueOnce(refreshed).mockResolvedValueOnce({ status: 204, ok: true });
+
+  await upload('/profile/me/student-card', { uri: 'file://card.jpg', name: 'card.jpg', type: 'image/jpeg' });
+
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const [firstUrl, firstInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+  expect(firstUrl).toContain('/auth/refresh');
+  const [retryUrl, retryInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect(retryUrl).toContain('/profile/me/student-card');
+  expect((retryInit.headers as Record<string, string>).Authorization).toBe('Bearer fresh');
+  expect(retryInit.body).toBeInstanceOf(FormData);
+  expect(retryInit.headers).not.toHaveProperty('Content-Type');
+});
+
+test('keeps the mobile session when the upload refresh fails with 503', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired');
+  store.getRefresh.mockResolvedValue('refresh-original');
+  fetchMock.mockResolvedValueOnce({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' })
+    .mockResolvedValueOnce({ status: 503, ok: false, text: async () => '' });
+
+  await expect(upload('/profile/me/student-card', { uri: 'file://card.jpg', name: 'card.jpg', type: 'image/jpeg' }))
+    .rejects.toMatchObject({ status: 503 });
+  expect(store.clear).not.toHaveBeenCalled();
+});
+
+test('refreshes then retries a protected attachment download, clears the session on a real 401 and returns null on 404', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('refresh-ok');
+  store.save.mockImplementation(async (value) => { access = value; });
+  const expired = () => ({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' });
+  const refreshed = { status: 200, ok: true, json: async () => ({ token: 'fresh', refreshToken: 'refresh-new', user: null }) };
+  const blob = { status: 200, ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => new ArrayBuffer(4) };
+
+  fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(refreshed).mockResolvedValueOnce(blob);
+  await expect(attachment('/profile/me/student-card')).resolves.toMatchObject({ type: 'image/png' });
+  const retry = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect((retry[1].headers as Record<string, string>).Authorization).toBe('Bearer fresh');
+
+  fetchMock.mockResolvedValueOnce({ status: 404, ok: false, headers: { get: () => null } });
+  await expect(attachment('/profile/me/student-card')).resolves.toBeNull();
+
+  // Retry vẫn 401: phiên chết thật thì xoá token, không trả ảnh cũ.
+  access = 'expired';
+  fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired());
+  await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
+  expect(store.clear).toHaveBeenCalled();
 });

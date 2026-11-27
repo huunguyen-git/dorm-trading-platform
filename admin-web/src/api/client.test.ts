@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, setAccessToken } from './client';
+import { ApiError, api, attachment, setAccessToken } from './client';
 import { auth } from '../auth/session';
 
 const fetchMock = vi.fn();
@@ -182,5 +182,34 @@ describe('api client', () => {
     });
 
     window.removeEventListener('session-expired', onExpire);
+  });
+
+  it('refreshes then retries an attachment download, and expires the session when refresh rejects', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1'); setAccessToken('expired');
+    const onExpire = vi.fn(); window.addEventListener('session-expired', onExpire);
+    const expired = () => new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    try {
+      // 401 Bearer -> refresh OK -> retry 200
+      fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(Response.json({ token: 'fresh' }))
+        .mockResolvedValueOnce(new Response(new Blob(['png']), { status: 200 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).resolves.toBeInstanceOf(Blob);
+      expect(fetchMock.mock.lastCall?.[1].headers.Authorization).toBe('Bearer fresh');
+      expect(onExpire).not.toHaveBeenCalled();
+
+      // 404 stays null, no logout
+      fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).resolves.toBeNull();
+
+      // refresh returns 401 -> session expired
+      fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(new Response('', { status: 401 }));
+      await expect(attachment('/admin/profiles/u-1/student-card')).rejects.toMatchObject({ status: 401 });
+      expect(onExpire).toHaveBeenCalledOnce();
+
+      // network failure during refresh must surface, not be swallowed
+      setAccessToken('expired'); onExpire.mockClear();
+      fetchMock.mockResolvedValueOnce(expired()).mockRejectedValueOnce(new TypeError('offline'));
+      await expect(attachment('/admin/profiles/u-1/student-card')).rejects.toThrow('offline');
+      expect(onExpire).not.toHaveBeenCalled();
+    } finally { window.removeEventListener('session-expired', onExpire); }
   });
 });

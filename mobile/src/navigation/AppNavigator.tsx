@@ -8,6 +8,7 @@ import LoginScreen from '../screens/LoginScreen';
 import ListingScreen from '../screens/ListingScreen';
 import CreateListingScreen from '../screens/CreateListingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
@@ -25,6 +26,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Listing" component={ListingScreen} options={{ title: 'Chi tiết tin' }} />
         <Stack.Screen name="CreateListing" component={CreateListingScreen} options={{ title: 'Đăng tin' }} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Cài đặt tài khoản' }} />
         <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: 'Kho đồ cá nhân' }} />
         <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: 'Chi tiết đồ vật' }} />
         <Stack.Screen

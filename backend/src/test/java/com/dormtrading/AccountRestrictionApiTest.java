@@ -514,11 +514,11 @@ class AccountRestrictionApiTest extends BaseIntegrationTest {
         assertThat(blockedWrite.jsonPath().getBoolean("restriction.appealable")).isFalse();
         assertThat(blockedWrite.jsonPath().getInt("restriction.reputationScore")).isEqualTo(50);
 
-        // 2) PATCH /api/v1/auth/profile also returns 403 ACCOUNT_RESTRICTED
+        // 2) PATCH /api/v1/profile/me also returns 403 ACCOUNT_RESTRICTED
         given().auth().oauth2(activeMobile.token())
                 .contentType("application/json")
                 .body(Map.of("name", "Tên Mới Khi Đang Khóa"))
-                .patch("/api/v1/auth/profile")
+                .patch("/api/v1/profile/me")
                 .then()
                 .statusCode(403)
                 .body("code", equalTo("ACCOUNT_RESTRICTED"))

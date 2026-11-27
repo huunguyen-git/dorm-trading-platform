@@ -67,6 +67,8 @@ public class AuthService {
     private void lock(String subject) {
         db.query("select pg_advisory_xact_lock(hashtextextended(?, 0))", rs -> { }, subject);
     }
+    /** Cho luồng đổi email/đổi mật khẩu trong module khác dùng chung khoá theo tài khoản. */
+    public void lockForEmailChange(String email) { lock(email); }
     private Map<String,Object> one(String sql, Object... args) {
         var rows = db.queryForList(sql, args);
         return rows.isEmpty() ? null : rows.getFirst();
@@ -101,6 +103,9 @@ public class AuthService {
                 subject, kind, at(now().minusSeconds(seconds)));
         return events.size() < limit ? 0 : secondsUntil(instant(events.get(limit - 1), "happened_at").plusSeconds(seconds));
     }
+    /** Dùng chung bộ đếm sai mật khẩu với đổi mật khẩu để endpoint đổi email không thành đường dò mật khẩu. */
+    public long passwordWrongWait(String email) { return limitWait(email, "PASSWORD_WRONG", 3600, 5); }
+    public void recordPasswordWrong(String email) { event(email, "PASSWORD_WRONG"); }
     private boolean recoverable(Map<String,Object> row) {
         return row != null && Boolean.TRUE.equals(row.get("email_verified")) && !"VO_HIEU_HOA".equals(row.get("trang_thai_tai_khoan"));
     }
@@ -405,13 +410,6 @@ public class AuthService {
         db.update("update auth_reset_grant set used=true where user_id=?",userId);
         db.update("update auth_challenge set used=true where email=? and purpose='RESET'",email);
         db.update("insert into auth_notice(email) values (?)",email);
-    }
-    public User updateProfile(Jwt jwt, String name) {
-        var initial = requireSession(jwt); lock(initial.get("email").toString());
-        var row = requireSession(jwt);
-        if ("BI_KHOA".equals(row.get("trang_thai_tai_khoan").toString())) throw accountRestricted(row);
-        db.update("update thanh_viens set ho_ten=?,updated_at=?,version=version+1 where user_id=?",required(name,150),at(now()),row.get("user_id"));
-        return user(account(row.get("email").toString()),jwt.getClaimAsString("client"));
     }
     private String randomToken() { byte[] bytes = new byte[32]; random.nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     private String digest(String value) {

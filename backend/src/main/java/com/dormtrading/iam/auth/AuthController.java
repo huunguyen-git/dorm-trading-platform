@@ -51,11 +51,6 @@ public class AuthController {
     }
     @GetMapping("/me")
     public AuthService.User me(@AuthenticationPrincipal Jwt jwt) { return auth.me(jwt); }
-    @PatchMapping("/profile")
-    public AuthService.User profile(@AuthenticationPrincipal Jwt jwt,@RequestBody Map<String,String> body) {
-        if (!body.keySet().equals(Set.of("name"))) throw new AuthFailure(400,"INVALID_PROFILE_FIELDS","Chỉ cập nhật họ tên tại API này; đổi email cần xác minh riêng.");
-        return auth.updateProfile(jwt,body.get("name"));
-    }
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@AuthenticationPrincipal Jwt jwt,HttpServletRequest req) {
         if ("admin-web".equals(jwt.getClaimAsString("client"))) origin(req);

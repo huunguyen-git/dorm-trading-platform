@@ -1,129 +1,157 @@
-import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import type { Nav } from '../navigation';
-import { api, RestrictedAccountError } from '../api/client';
-import { resolveUserRestriction, useSession, type User } from '../auth/session';
-import { AuthScreen, Action, Field, Notice, ui } from '../components/AuthUI';
+import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
+import { useSession, resolveUserRestriction, type User } from '../auth/session';
+import { api, RestrictedAccountError } from '../api/client';
+import { colors, space } from '../theme';
+import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
+
+type Draft = { [K in keyof Required<ProfileUpdate>]: string };
+const empty: Draft = { name: '', studentId: '', phone: '', school: '', campus: '', major: '', cohort: '', studyStatus: '' };
+const toDraft = (p: Profile): Draft => ({ name: p.name ?? '', studentId: p.studentId ?? '', phone: p.phone ?? '', school: p.school ?? '', campus: p.campus ?? '', major: p.major ?? '', cohort: p.cohort ?? '', studyStatus: p.studyStatus ?? '' });
+const STUDY = ['DANG_HOC', 'DA_TOT_NGHIEP'] as const;
+const studyLabel = (value: string | null) => (value === 'DA_TOT_NGHIEP' ? 'Đã tốt nghiệp' : 'Đang học');
+const MAX_CARD_BYTES = 5 * 1024 * 1024;
+const locked = (p: Profile) => p.accountStatus === 'BI_KHOA' || p.accountStatus === 'VO_HIEU_HOA';
 
 export default function ProfileScreen() {
   const nav = useNavigation<Nav>();
-  const user = useSession((s) => s.user);
-  const isLocked = user?.accountStatus === 'BI_KHOA';
-  const [name, setName] = useState(user?.name ?? '');
+  const sessionUser = useSession((s) => s.user);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [cardUri, setCardUri] = useState<string | null>(null);
+  const [pick, setPick] = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [draft, setDraft] = useState<Draft>(empty);
+  const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
 
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setMessage('');
-    setError('');
+  async function load() {
+    setLoading(true); setError('');
     try {
-      await action();
-    } catch (e) {
-      if (typeof RestrictedAccountError === 'function' && e instanceof RestrictedAccountError) {
-        if (!useSession.getState().restriction) {
-          useSession.setState({ restriction: e.restriction, restrictionDismissed: false });
-        }
-        setError('');
-      } else {
-        setError((e as Error).message);
-      }
-    } finally {
-      setBusy(false);
-    }
+      const fresh = await profileApi.me();
+      setProfile(fresh); setDraft(toDraft(fresh));
+      setCardUri(fresh.hasStudentCard ? await profileApi.cardUri(fresh.id) : null);
+      // Hồ sơ đổi trạng thái thì quyền MEMBER cũng đổi: đồng bộ lại phiên để nút giao dịch bật/tắt đúng.
+      const sessionFresh = await api<User>('/auth/me');
+      useSession.setState({
+        user: sessionFresh,
+        restriction: resolveUserRestriction(sessionFresh),
+        restrictionDismissed: false,
+      });
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function chooseCard() {
+    setError('');
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (asset.fileSize && asset.fileSize > MAX_CARD_BYTES) { setError('Ảnh thẻ tối đa 5MB.'); return; }
+    const type = asset.mimeType ?? 'image/jpeg';
+    if (type !== 'image/jpeg' && type !== 'image/png') { setError('Ảnh thẻ chỉ nhận JPEG hoặc PNG.'); return; }
+    setPick({ uri: asset.uri, name: asset.fileName ?? 'the-sinh-vien.jpg', type });
+    setCardUri(asset.uri);
   }
 
-  return (
-    <AuthScreen title="Hồ sơ của bạn" subtitle="Quản lý thông tin cá nhân và bảo mật tài khoản.">
-      <Text style={ui.label}>{user?.email}</Text>
-      <Text style={ui.caption}>MSSV · {user?.studentId}</Text>
-      <View style={ui.row}>
-        <Text style={ui.badge}>{user?.emailVerified ? 'Email đã xác minh' : 'Chưa xác minh email'}</Text>
-        <Text style={ui.badge}>{user?.profileApproved ? 'Hồ sơ đã duyệt' : 'Hồ sơ chờ duyệt'}</Text>
+  async function save() {
+    setBusy(true); setError(''); setMessage('');
+    try {
+      if (!draft.name.trim() || !draft.studentId.trim()) throw new Error('Nhập họ tên và MSSV.');
+      if (draft.phone.trim() && !/^\+?[0-9][0-9 -]{7,19}$/.test(draft.phone.trim())) throw new Error('Số điện thoại không hợp lệ.');
+      // Gửi chuỗi rỗng cho trường tuỳ chọn để xoá được giá trị cũ (server hiểu null là "giữ nguyên").
+      const body = Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as ProfileUpdate;
+      const updated = await profileApi.update(body);
+      // Phần chữ đã lưu trên server: cập nhật ngay để lỗi tải ảnh (413/mạng) không làm UI hiện sai.
+      setProfile(updated); setDraft(toDraft(updated));
+      if (pick) { await profileApi.uploadCard(pick); setPick(null); }
+      const fresh = pick ? await profileApi.me() : updated;
+      setProfile(fresh); setDraft(toDraft(fresh));
+      setCardUri(fresh.hasStudentCard ? await profileApi.cardUri(fresh.id) : null);
+      // Tên hiệu lực chỉ đổi sau khi duyệt: đồng bộ lại phiên để header/nút giao dịch khớp trạng thái thật.
+      const sessionFresh = await api<User>('/auth/me');
+      useSession.setState({ user: sessionFresh, restriction: resolveUserRestriction(sessionFresh) });
+      setEditing(false);
+      setMessage(fresh.profileStatus === 'CHO_DUYET' ? 'Đã lưu. Thông tin định danh đang chờ kiểm duyệt.' : 'Đã lưu hồ sơ.');
+    } catch (e) {
+      // Hạn chế tài khoản đã có banner riêng; báo thêm lỗi đỏ ở đây là trùng.
+      if (e instanceof RestrictedAccountError) {
+        if (!useSession.getState().restriction) useSession.setState({ restriction: e.restriction, restrictionDismissed: false });
+        return;
+      }
+      setError((e as Error).message);
+    } finally { setBusy(false); }
+  }
+
+  function cancel() { setDraft(profile ? toDraft(profile) : empty); setPick(null); setEditing(false); setError(''); setMessage(''); }
+
+  if (loading) return <AuthScreen title="Hồ sơ của bạn"><Text style={ui.caption}>Đang tải hồ sơ…</Text></AuthScreen>;
+  if (!profile) return <AuthScreen title="Hồ sơ của bạn">
+    <RestrictedAccountNotice />
+    <Notice message={error || 'Không tải được hồ sơ.'} error />
+    <Action title="Thử lại" onPress={() => void load()} />
+    <Action title="Về trang tin đăng" secondary onPress={() => nav.navigate('Listings')} />
+  </AuthScreen>;
+
+  const status = statusLabel(profile);
+  const readOnly = locked(profile) || sessionUser?.accountStatus === 'BI_KHOA';
+  const rows: [string, string | null][] = [
+    ['Họ tên', profile.name], ['MSSV', profile.studentId],
+    // Đổi email ở Cài đặt thì phiên đã mới nhưng hồ sơ vừa tải còn cũ: lấy theo phiên.
+    ['Email', sessionUser?.email ?? profile.email], ['Số điện thoại', profile.phone],
+    ['Trường', profile.school], ['Cơ sở', profile.campus], ['Ngành học', profile.major], ['Niên khóa', profile.cohort],
+    ['Tình trạng học tập', studyLabel(profile.studyStatus)],
+  ];
+  return <AuthScreen title="Hồ sơ của bạn">
+    <RestrictedAccountNotice />
+    <View style={[ui.row, { alignItems: 'center' }]}>
+      <Text style={[ui.badge, status.tone === 'ok' && { backgroundColor: '#eef3ec', color: '#36532c' }, status.tone === 'danger' && { backgroundColor: '#fff0ec', color: colors.danger }]}>{status.text}</Text>
+      <Text style={ui.badge}>Điểm uy tín · {profile.reputation}</Text>
+      <Text style={ui.badge}>{profile.emailVerified ? 'Email đã xác minh' : 'Chưa xác minh email'}</Text>
+    </View>
+    {status.tone === 'danger' && <Notice message={`Lý do từ chối: ${status.note || 'Kiểm duyệt viên chưa ghi lý do.'}`} error />}
+    {status.tone === 'warn' && <Notice message={status.note} />}
+    {!readOnly && !profile.profileApproved && <Notice message="Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch." />}
+    {readOnly && <Notice message="Tài khoản đang bị khóa nên không thể lưu thay đổi hồ sơ." error />}
+    {!profile.emailVerified && <Action title="Xác minh email" secondary disabled={busy} onPress={() => nav.navigate('AuthFlow', { mode: 'verify' })} />}
+
+    {editing ? <>
+      <Field label="Họ tên" testID="profile-name" maxLength={150} value={draft.name} onChangeText={(name) => setDraft({ ...draft, name })} editable={!busy} />
+      <Field label="MSSV" testID="profile-student-id" maxLength={20} value={draft.studentId} onChangeText={(studentId) => setDraft({ ...draft, studentId })} editable={!busy} />
+      <Field label="Số điện thoại" testID="profile-phone" maxLength={20} keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => setDraft({ ...draft, phone })} editable={!busy} hint="Chỉ đổi số điện thoại thì lưu ngay, không cần duyệt lại." />
+      <Field label="Trường" maxLength={150} value={draft.school} onChangeText={(school) => setDraft({ ...draft, school })} editable={!busy} />
+      <Field label="Cơ sở" maxLength={150} value={draft.campus} onChangeText={(campus) => setDraft({ ...draft, campus })} editable={!busy} />
+      <Field label="Ngành học" maxLength={150} value={draft.major} onChangeText={(major) => setDraft({ ...draft, major })} editable={!busy} />
+      <Field label="Niên khóa" maxLength={50} value={draft.cohort} onChangeText={(cohort) => setDraft({ ...draft, cohort })} editable={!busy} hint="Đổi định danh, học tập hoặc ảnh thẻ sẽ chuyển hồ sơ sang chờ duyệt." />
+      <View style={{ gap: space.xs }}>
+        <Text style={ui.label}>Tình trạng học tập</Text>
+        <View style={ui.row}>{STUDY.map((value) => <Action key={value} secondary={draft.studyStatus !== value}
+          title={studyLabel(value)} disabled={busy} onPress={() => setDraft({ ...draft, studyStatus: value })} />)}</View>
       </View>
-      <RestrictedAccountNotice />
-      {!isLocked && !user?.roles.includes('MEMBER') && (
-        <Notice message="Bạn có thể sửa hồ sơ và xem mặt hàng. Cần xác minh email và duyệt hồ sơ trước khi giao dịch." />
-      )}
-      <Field
-        label="Họ tên"
-        testID="profile-name"
-        maxLength={150}
-        value={name}
-        onChangeText={setName}
-        editable={!busy && !isLocked}
-      />
-      <Notice message={message} />
-      <Notice message={error} error />
-      <Action
-        title="Lưu họ tên"
-        busy={busy}
-        disabled={isLocked}
-        onPress={() =>
-          void run(async () => {
-            if (!name.trim()) throw new Error('Họ tên không được để trống.');
-            const updated = await api<User>('/auth/profile', {
-              method: 'PATCH',
-              body: JSON.stringify({ name: name.trim() }),
-            });
-            useSession.setState({
-              user: updated,
-              restriction: resolveUserRestriction(updated),
-              restrictionDismissed: false,
-            });
-            setMessage('Đã lưu hồ sơ.');
-          })
-        }
-      />
-      {!user?.emailVerified && (
-        <Action
-          title="Xác minh email"
-          secondary
-          disabled={busy || isLocked}
-          onPress={() => nav.navigate('AuthFlow', { mode: 'verify' })}
-        />
-      )}
-      <Action
-        title="Cập nhật trạng thái hồ sơ"
-        secondary
-        disabled={busy}
-        onPress={() =>
-          void run(async () => {
-            const fresh = await api<User>('/auth/me');
-            useSession.setState({
-              user: fresh,
-              restriction: resolveUserRestriction(fresh),
-              restrictionDismissed: false,
-            });
-            setName(fresh.name);
-            setMessage('Đã cập nhật trạng thái hồ sơ.');
-          })
-        }
-      />
-      <View style={ui.divider}>
-        <Text style={ui.label}>Bảo mật tài khoản</Text>
-        <Text style={ui.caption}>Đổi mật khẩu sẽ đăng xuất tất cả thiết bị. Hãy đăng nhập lại sau khi đổi.</Text>
-        <Action
-          title="Đổi mật khẩu"
-          secondary
-          disabled={busy || isLocked}
-          onPress={() => nav.navigate('AuthFlow', { mode: 'change' })}
-        />
-        <Action
-          title="Đăng xuất thiết bị này"
-          secondary
-          disabled={busy}
-          onPress={() =>
-            void run(async () => {
-              await useSession.getState().logout();
-              nav.replace('Listings');
-            })
-          }
-        />
+      <View style={{ gap: space.sm }}>
+        <Text style={ui.label}>Ảnh thẻ sinh viên</Text>
+        {cardUri ? <Image testID="profile-card-preview" source={{ uri: cardUri }} style={{ width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f2ede4' }} resizeMode="contain" accessibilityLabel="Ảnh thẻ sinh viên" /> : <Text style={ui.caption}>Chưa có ảnh thẻ.</Text>}
+        <Action title={pick ? 'Chọn ảnh khác' : 'Tải ảnh thẻ'} secondary disabled={busy} onPress={() => void chooseCard()} />
+        <Text style={ui.caption}>JPEG hoặc PNG, tối đa 5MB.</Text>
       </View>
-    </AuthScreen>
-  );
+      <Notice message={message} /><Notice message={error} error />
+      <Action title="Lưu" testID="profile-save" busy={busy} disabled={readOnly} onPress={() => void save()} />
+      <Action title="Hủy" secondary disabled={busy} onPress={cancel} />
+    </> : <>
+      <View style={{ gap: space.sm }}>{rows.map(([label, value]) => <View key={label} style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: space.sm }}>
+        <Text style={ui.caption}>{label}</Text><Text style={ui.label}>{value || 'Chưa cập nhật'}</Text>
+      </View>)}</View>
+      {cardUri ? <Image testID="profile-card-preview" source={{ uri: cardUri }} style={{ width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f2ede4' }} resizeMode="contain" accessibilityLabel="Ảnh thẻ sinh viên" /> : <Text style={ui.caption}>Chưa có ảnh thẻ sinh viên.</Text>}
+      <Notice message={message} /><Notice message={error} error />
+      <Action title="Cập nhật hồ sơ" testID="profile-edit" disabled={readOnly} onPress={() => { setEditing(true); setMessage(''); setError(''); }} />
+      <Action title="Cài đặt tài khoản" secondary disabled={busy} onPress={() => nav.navigate('Settings')} />
+      <Action title="Tải lại hồ sơ" secondary disabled={busy} onPress={() => void load()} />
+    </>}
+  </AuthScreen>;
 }

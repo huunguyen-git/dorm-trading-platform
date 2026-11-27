@@ -375,7 +375,7 @@ class UserManagementApiTest extends BaseIntegrationTest {
         given().auth().oauth2(studentAMobileToken)
                 .contentType("application/json")
                 .body(Map.of("name", "Nguyễn Văn Tự Sửa Mobile"))
-                .patch("/api/v1/auth/profile")
+                .patch("/api/v1/profile/me")
                 .then()
                 .statusCode(200)
                 .body("name", equalTo("Nguyễn Văn Tự Sửa Mobile"));

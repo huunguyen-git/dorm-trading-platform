@@ -17,11 +17,11 @@ export const ui = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   badge: { paddingHorizontal: space.md, paddingVertical: space.sm, backgroundColor: '#f2ede4', borderRadius: 20, color: colors.ink, fontSize: 12, overflow: 'hidden' },
 });
-export function AuthScreen({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+export function AuthScreen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return <KeyboardAvoidingView style={ui.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView contentContainerStyle={ui.content} keyboardShouldPersistTaps="handled">
       <View style={[ui.heading, { maxWidth: 520, width: '100%', alignSelf: 'center' }]}>
-        <Text style={ui.brand}>DORM TRADING</Text><Text accessibilityRole="header" style={text.title}>{title}</Text><Text style={ui.caption}>{subtitle}</Text>
+        <Text style={ui.brand}>DORM TRADING</Text><Text accessibilityRole="header" style={text.title}>{title}</Text>{subtitle ? <Text style={ui.caption}>{subtitle}</Text> : null}
       </View>
       <View style={ui.card}>{children}</View>
       <Text style={[ui.caption, { textAlign: 'center', fontSize: 12 }]}>Trao đổi đồ dùng. Kết nối sinh viên.</Text>
