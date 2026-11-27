@@ -89,10 +89,29 @@ export async function attachment(path: string): Promise<Blob | null> {
   const send = () => fetch(`${baseUrl()}${path}`, { credentials: 'include', headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
   const sentToken = accessToken;
   let response = await send();
-  if (response.status === 401) {
-    try { if (accessToken === sentToken) await refreshSession(); response = await send(); } catch { /* handled below */ }
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    try { if (accessToken === sentToken) await refreshSession(); response = await send(); } catch (error) {
+      if (error instanceof ApiError && error.status === 403 && error.code === 'ACCOUNT_RESTRICTED') {
+        setAccessToken(null);
+        window.dispatchEvent(new Event('session-expired'));
+        throw error;
+      }
+    }
   }
   if (response.status === 404) return null;
-  if (!response.ok) throw new ApiError(response.status, 'Không tải được tệp đính kèm.');
+  if (!response.ok) {
+    let message = 'Không tải được tệp đính kèm.';
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(await response.text()) as { code?: string; message?: string };
+      code = parsed?.code;
+      message = parsed?.message ?? message;
+    } catch { /* plain response */ }
+    if (response.status === 403 && code === 'ACCOUNT_RESTRICTED') {
+      setAccessToken(null);
+      window.dispatchEvent(new Event('session-expired'));
+    }
+    throw new ApiError(response.status, message, code);
+  }
   return response.blob();
 }

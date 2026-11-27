@@ -51,7 +51,8 @@ export default function ProfileDetailPage() {
       navigate('/profiles', { replace: true, state: { done: action === 'approve' ? 'Đã chấp thuận hồ sơ.' : 'Đã từ chối hồ sơ và gửi email thông báo.' } });
     } catch (cause) {
       const status = cause instanceof ApiError ? cause.status : 0;
-      if (status === 409) {
+      // Chỉ 409 PROFILE_ALREADY_HANDLED mới là "người khác xử lý"; 409 khác (vd STUDENT_ID_IN_USE) phải hiện lý do thật.
+      if (status === 409 && cause instanceof ApiError && cause.code === 'PROFILE_ALREADY_HANDLED') {
         setRejecting(false);
         setStale('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
         setRefresh((value) => value + 1);

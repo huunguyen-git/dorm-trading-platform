@@ -149,14 +149,18 @@ async function handleRestrictedResponse(
 }
 
 async function errorOf(response: Response) {
-  const raw = await response.text();
+  const raw = await readResponseText(response);
+  await handleRestrictedResponse(response, raw, false);
   let message = `API ${response.status}: ${raw}`;
+  let code: string | undefined;
   try {
-    message = JSON.parse(raw).message ?? message;
+    const parsed = JSON.parse(raw);
+    message = parsed.message ?? message;
+    code = parsed.code;
   } catch {
     /* plain response */
   }
-  return new Error(message);
+  return new ApiError(response.status, message, code);
 }
 
 /** Upload multipart; không tự đặt Content-Type để fetch sinh boundary. */
@@ -169,9 +173,9 @@ export async function upload(path: string, file: { uri: string; name: string; ty
     body: form,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (response.status === 401) {
+  if (response.status === 401 && hasBearerChallenge(response)) {
     await tokenStore.clear();
-    useSession.setState({ token: null, user: null, loading: false });
+    useSession.setState({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
   }
   if (!response.ok) throw await errorOf(response);
 }
@@ -182,6 +186,10 @@ export async function attachment(path: string) {
   const response = await fetch(apiUrl(path), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+  if (response.status === 401 && hasBearerChallenge(response)) {
+    await tokenStore.clear();
+    useSession.setState({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+  }
   if (response.status === 404) return null;
   if (!response.ok) throw await errorOf(response);
   return {
@@ -246,7 +254,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       refreshError = error;
     }
   }
-  if (response.status === 401 && !publicCall && (path !== '/auth/password/change' || hasBearerChallenge(response))) {
+  // Chỉ 401 có thử thách Bearer mới chứng minh phiên hỏng. 401 sai mật khẩu (không có header) phải giữ phiên.
+  if (response.status === 401 && !publicCall && hasBearerChallenge(response)) {
     await tokenStore.clear();
     useSession.setState({
       token: null,

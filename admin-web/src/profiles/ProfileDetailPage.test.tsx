@@ -4,7 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { api, ApiError } from '../api/client';
 import ProfileDetailPage from './ProfileDetailPage';
 
-vi.mock('../api/client', () => ({ api: vi.fn(), attachment: vi.fn(async () => null), ApiError: class extends Error { constructor(public status: number, message: string) { super(message); } } }));
+vi.mock('../api/client', () => ({ api: vi.fn(), attachment: vi.fn(async () => null), ApiError: class extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } } }));
 
 const profile = {
   id: 'u1', name: 'Trần Minh', studentId: 'SE123456', email: 'minh@uni.edu.vn', phone: null,
@@ -33,7 +33,7 @@ it('blocks rejecting a profile without a reason', async () => {
 
 it('reports a stale profile on approve 409 and reloads it', async () => {
   vi.mocked(api).mockResolvedValueOnce(profile)
-    .mockRejectedValueOnce(new ApiError(409, 'PROFILE_ALREADY_HANDLED'))
+    .mockRejectedValueOnce(new ApiError(409, 'Hồ sơ đã được người khác xử lý.', 'PROFILE_ALREADY_HANDLED'))
     .mockResolvedValueOnce({ ...profile, profileApproved: true, profileStatus: 'DA_DUYET' });
   renderPage();
   fireEvent.click(await screen.findByTestId('approve'));
@@ -45,6 +45,15 @@ it('reports a stale profile on approve 409 and reloads it', async () => {
   expect(screen.getByText('Hồ sơ này đã được xử lý nên không thể duyệt hay từ chối lại.')).toBeInTheDocument();
   // Thông báo xung đột phải sống sót qua lần tải lại, không bị load() xóa.
   expect(screen.getByRole('alert')).toHaveTextContent('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.');
+});
+
+it('shows the real message for a non-stale 409 instead of the stale hint', async () => {
+  vi.mocked(api).mockResolvedValueOnce(profile)
+    .mockRejectedValueOnce(new ApiError(409, 'MSSV đã thuộc về tài khoản khác.', 'STUDENT_ID_IN_USE'));
+  renderPage();
+  fireEvent.click(await screen.findByTestId('approve'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('MSSV đã thuộc về tài khoản khác.');
+  expect(screen.queryByText('Hồ sơ đã được người khác xử lý. Thông tin vừa được làm mới.')).toBeNull();
 });
 
 it('shows the latest rejection reason for an approved profile', async () => {

@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import type { Nav } from '../navigation';
 import { Action, AuthScreen, Field, Notice, ui } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
-import { useSession, type User } from '../auth/session';
+import { useSession, resolveUserRestriction, type User } from '../auth/session';
 import { api } from '../api/client';
 import { colors, space } from '../theme';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
@@ -36,7 +36,12 @@ export default function ProfileScreen() {
       setProfile(fresh); setDraft(toDraft(fresh));
       setCardUri(fresh.hasStudentCard ? await profileApi.cardUri(fresh.id) : null);
       // Hồ sơ đổi trạng thái thì quyền MEMBER cũng đổi: đồng bộ lại phiên để nút giao dịch bật/tắt đúng.
-      useSession.setState({ user: await api<User>('/auth/me') });
+      const sessionFresh = await api<User>('/auth/me');
+      useSession.setState({
+        user: sessionFresh,
+        restriction: resolveUserRestriction(sessionFresh),
+        restrictionDismissed: false,
+      });
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
@@ -123,7 +128,7 @@ export default function ProfileScreen() {
       {cardUri ? <Image testID="profile-card-preview" source={{ uri: cardUri }} style={{ width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f2ede4' }} resizeMode="contain" accessibilityLabel="Ảnh thẻ sinh viên" /> : <Text style={ui.caption}>Chưa có ảnh thẻ sinh viên.</Text>}
       <Notice message={message} /><Notice message={error} error />
       <Action title="Cập nhật hồ sơ" testID="profile-edit" disabled={readOnly} onPress={() => { setEditing(true); setMessage(''); setError(''); }} />
-      <Action title="Cài đặt tài khoản" secondary disabled={busy || readOnly} onPress={() => nav.navigate('Settings')} />
+      <Action title="Cài đặt tài khoản" secondary disabled={busy} onPress={() => nav.navigate('Settings')} />
       <Action title="Tải lại hồ sơ" secondary disabled={busy} onPress={() => void load()} />
     </>}
   </AuthScreen>;

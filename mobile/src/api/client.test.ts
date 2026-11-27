@@ -80,15 +80,33 @@ test('rejects without calling fetch when EXPO_PUBLIC_API_URL is missing', async 
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-test('clears the stored token and resets the session on 401', async () => {
+test('clears the stored token and resets the session on 401 with a Bearer challenge', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
   store.get.mockResolvedValue('stale');
-  fetchMock.mockResolvedValue({ status: 401, ok: false, text: async () => '' });
+  fetchMock.mockResolvedValue({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' });
 
-  await expect(api('/auth/me')).rejects.toThrow('API 401');
+  await expect(api('/auth/me')).rejects.toMatchObject({ status: 401 });
 
   expect(store.clear).toHaveBeenCalled();
   expect(useSession.getState().token).toBeNull();
+});
+
+test('keeps the session on a 401 without a Bearer challenge (wrong current password)', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('valid-jwt');
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false });
+  fetchMock.mockResolvedValue({
+    status: 401,
+    ok: false,
+    text: async () => JSON.stringify({ code: 'INVALID_CREDENTIALS', message: 'Mật khẩu hiện tại không đúng.' }),
+  });
+
+  await expect(api('/profile/email', { method: 'PATCH', body: '{}' })).rejects.toMatchObject({
+    status: 401,
+    code: 'INVALID_CREDENTIALS',
+  });
+  expect(store.clear).not.toHaveBeenCalled();
+  expect(useSession.getState().token).toBe('valid-jwt');
 });
 
 test('sends the bearer token and returns parsed json', async () => {

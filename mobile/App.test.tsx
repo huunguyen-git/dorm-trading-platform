@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import App from './App';
 import { api, RestrictedAccountError } from './src/api/client';
 import { resolveUserRestriction, useSession, type AccountRestriction, type User } from './src/auth/session';
@@ -122,6 +122,38 @@ test('approved profile still shows the rejection reason of a rejected update (UC
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
   expect(await screen.findByText('Lý do từ chối: Ảnh thẻ mờ, không đọc được MSSV.')).toBeTruthy();
   expect(screen.getAllByText('Hồ sơ đã duyệt').length).toBeGreaterThan(0);
+});
+
+test('reloading the profile clears a stale restriction banner (UC-03)', async () => {
+  routes({ '/profile/me': { ...profile, profileApproved: true, profileStatus: 'DA_DUYET', accountStatus: 'BI_KHOA' } });
+  useSession.setState({
+    token: 'token',
+    user: {
+      id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: [],
+      emailVerified: true, profileApproved: true, accountStatus: 'BI_KHOA',
+      restriction: {
+        accountStatus: 'BI_KHOA', lockType: 'KHOA_TAM_THOI', reason: 'Vi phạm nội quy',
+        lockedUntil: null, appealable: false, reputationScore: 45,
+        message: 'Tài khoản của bạn đang bị khóa tạm thời. Các chức năng giao dịch tạm thời bị giới hạn.',
+      },
+    },
+    loading: false,
+    restriction: resolveUserRestriction(useSession.getState().user),
+  });
+  render(<App />);
+  fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
+  expect(await screen.findByTestId('restricted-account-notice')).toBeTruthy();
+
+  // Moderation đã mở khóa: /auth/me trả tài khoản hoạt động bình thường, banner phải biến mất sau khi tải lại.
+  act(() => {
+    useSession.setState({
+      user: { id: '1', name: 'Pending', role: 'member', email: 'pending@uni.edu.vn', studentId: 'pending', roles: ['MEMBER'], emailVerified: true, profileApproved: true, accountStatus: 'HOAT_DONG' },
+    });
+  });
+  routes({ '/profile/me': { ...profile, profileApproved: true, profileStatus: 'DA_DUYET', accountStatus: 'HOAT_DONG' } });
+  fireEvent.press(screen.getByRole('button', { name: 'Tải lại hồ sơ' }));
+  await waitFor(() => expect(screen.queryByTestId('restricted-account-notice')).toBeNull());
+  expect(useSession.getState().restriction).toBeNull();
 });
 
 test('changes email after verifying the OTP and reports a wrong code', async () => {
@@ -251,7 +283,7 @@ test('locked BI_KHOA account can sign in with limited permissions on listings an
     screen.queryByText('Tài khoản đang chờ hoàn tất xác minh hoặc duyệt hồ sơ. Bạn vẫn có thể xem các mặt hàng công khai.'),
   ).toBeNull();
 
-  // Navigate to ProfileScreen: shows restriction notice, hides pending notice, disables edit and account settings, keeps reload enabled
+  // Navigate to ProfileScreen: shows restriction notice, hides pending notice, disables edit but keeps account settings and reload enabled
   routes({ '/profile/me': { ...profile, accountStatus: 'BI_KHOA' } });
   fireEvent.press(screen.getByRole('button', { name: 'Hồ sơ' }));
   expect(await screen.findByText('Hồ sơ của bạn')).toBeTruthy();
@@ -260,8 +292,15 @@ test('locked BI_KHOA account can sign in with limited permissions on listings an
     screen.queryByText('Bạn vẫn xem được mặt hàng và sửa hồ sơ. Cần được duyệt trước khi giao dịch.'),
   ).toBeNull();
   expect(screen.getByRole('button', { name: 'Cập nhật hồ sơ' }).props.accessibilityState.disabled).toBe(true);
-  expect(screen.getByRole('button', { name: 'Cài đặt tài khoản' }).props.accessibilityState.disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Tải lại hồ sơ' }).props.accessibilityState.disabled).toBe(false);
+
+  // Tài khoản bị khóa vẫn phải mở được Cài đặt để đăng xuất thiết bị này.
+  expect(screen.getByRole('button', { name: 'Cài đặt tài khoản' }).props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(screen.getByRole('button', { name: 'Cài đặt tài khoản' }));
+  expect(await screen.findByText('Cài đặt tài khoản')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Đăng xuất thiết bị này' }).props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(screen.getByRole('button', { name: 'Đăng xuất thiết bị này' }));
+  expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeTruthy();
 });
 
 test('renders temporary lock details on 403 ACCOUNT_RESTRICTED login without duplicate error notice and dismisses', async () => {
