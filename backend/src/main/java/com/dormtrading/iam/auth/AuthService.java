@@ -54,9 +54,13 @@ public class AuthService {
                               Instant lockedUntil, boolean appealable, int reputationScore) {}
     public record User(UUID id, String name, String email, String studentId, String role, List<String> roles,
                        boolean emailVerified, boolean profileApproved, String accountStatus, Restriction restriction) {}
-    public record Session(String token, String refreshToken, User user) {}
+    public record Session(String token, String refreshToken, User user) {
+        @Override public String toString() { return "Session[redacted]"; }
+    }
     public record Challenge(UUID challengeId, int expiresIn, int resendAfter, String message) {}
-    public record Verified(String resetToken, boolean emailVerified) {}
+    public record Verified(String resetToken, boolean emailVerified) {
+        @Override public String toString() { return "Verified[redacted]"; }
+    }
 
     private Instant now() { return clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS); }
     private Timestamp at(Instant time) { return Timestamp.from(time); }
@@ -84,7 +88,22 @@ public class AuthService {
     }
     private AuthFailure invalid() { return new AuthFailure(400, "INVALID_INPUT", "Thông tin không hợp lệ."); }
     private AuthFailure denied() { return new AuthFailure(401, "INVALID_CREDENTIALS", "Thông tin xác thực không hợp lệ hoặc đã hết hạn."); }
-    private AuthFailure limited() { return new AuthFailure(429, "RATE_LIMITED", "Đã vượt giới hạn. Vui lòng chờ và thử lại."); }
+    private AuthFailure limited(long seconds) {
+        long wait = Math.max(1, seconds);
+        return new AuthFailure(429, "RATE_LIMITED", "Đã vượt giới hạn. Vui lòng thử lại sau " + wait + " giây.", wait);
+    }
+    private long secondsUntil(Instant until) {
+        var remaining = Duration.between(now(), until);
+        return Math.max(1, remaining.getSeconds() + (remaining.getNano() > 0 ? 1 : 0));
+    }
+    private long limitWait(String subject, String kind, long seconds, int limit) {
+        var events = db.queryForList("select happened_at from auth_event where subject=? and kind=? and happened_at>? order by happened_at desc",
+                subject, kind, at(now().minusSeconds(seconds)));
+        return events.size() < limit ? 0 : secondsUntil(instant(events.get(limit - 1), "happened_at").plusSeconds(seconds));
+    }
+    private boolean recoverable(Map<String,Object> row) {
+        return row != null && Boolean.TRUE.equals(row.get("email_verified")) && !"VO_HIEU_HOA".equals(row.get("trang_thai_tai_khoan"));
+    }
     private Map<String,Object> account(String email) { return one("select * from thanh_viens where lower(email)=?", email); }
     private AccountRestrictedFailure.RestrictionPayload buildRestrictionPayload(Map<String,Object> row) {
         return new AccountRestrictedFailure.RestrictionPayload(
@@ -109,23 +128,26 @@ public class AuthService {
                 && !instant(row, "khoa_den_ngay").isAfter(now());
     }
     private void event(String subject, String kind) { db.update("insert into auth_event(subject,kind,happened_at) values (?,?,?)", subject, kind, at(now())); }
-    private int count(String subject, String kind, long seconds) {
-        return db.queryForObject("select count(*) from auth_event where subject=? and kind=? and happened_at>?", Integer.class,
-                subject, kind, at(now().minusSeconds(seconds)));
-    }
-    private void ipLimit(String ip) {
+    private void publicLimits(String ip, String email, java.util.function.LongSupplier emailWait) {
         String subject = "ip:" + ip;
-        lock(subject);
-        if (count(subject, "REQUEST", 3600) >= ipHourly) throw limited();
-        event(subject, "REQUEST");
+        // All public operations acquire locks in the same order before reading limits.
+        lock(subject); lock(email);
+        long ipWait = limitWait(subject, "REQUEST", 3600, ipHourly);
+        long wait = Math.max(ipWait, emailWait.getAsLong());
+        // Preserve IP accounting for email-rejected attempts; IP-rejected attempts do not extend the window.
+        if (ipWait == 0) {
+            event(subject, "REQUEST");
+            // A rejected email attempt may itself fill the IP quota. Include that new window too.
+            if (wait > 0) wait = Math.max(wait, limitWait(subject, "REQUEST", 3600, ipHourly));
+        }
+        if (wait > 0) throw limited(wait);
     }
     public Challenge register(String name, String studentId, String address, String password, String ip) {
         String email = email(address);
         name = required(name, 150); studentId = required(studentId, 20);
-        ipLimit(ip); lock(email); lock("student:" + studentId);
+        publicLimits(ip, email, () -> sendWait(email)); lock("student:" + studentId);
         if (account(email) != null || one("select user_id from thanh_viens where mssv=?", studentId) != null)
             throw new AuthFailure(409, "ACCOUNT_CONFLICT", "Không thể đăng ký bằng thông tin này. Hãy đăng nhập hoặc khôi phục tài khoản.");
-        checkSendLimits(email);
         String hash = encoder.encode(policy.validate(password, email, studentId));
         db.update("insert into thanh_viens(user_id,email,mat_khau_hash,ho_ten,mssv,diem_uy_tin) values (?,?,?,?,?,0)",
                 UUID.randomUUID(), email, hash, name, studentId);
@@ -133,20 +155,19 @@ public class AuthService {
     }
     public Challenge requestOtp(String address, String purpose, String ip) {
         String email = email(address); purpose(purpose);
-        ipLimit(ip); lock(email);
+        publicLimits(ip, email, () -> sendWait(email));
         return issue(email, purpose);
     }
     private void purpose(String value) {
         if (!Set.of("REGISTER", "RESET").contains(value == null ? "" : value)) throw invalid();
     }
     private Challenge issue(String email, String purpose) {
-        checkSendLimits(email);
         event(email,"SEND");
         UUID id = UUID.randomUUID();
         var user = account(email);
-        // Same response and limits for unknown/already verified addresses or deleted accounts.
+        // Same response and limits for unknown/already verified addresses.
         if (user != null && !"VO_HIEU_HOA".equals(user.get("trang_thai_tai_khoan")) &&
-                (purpose.equals("RESET") || !Boolean.TRUE.equals(user.get("email_verified")))) {
+                (purpose.equals("RESET") ? recoverable(user) : !Boolean.TRUE.equals(user.get("email_verified")))) {
             String code = String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
             db.update("update auth_challenge set used=true where email=? and purpose=? and not used",email,purpose);
             db.update("insert into auth_challenge(id,email,purpose,secret_hash,expires_at,created_at) values (?,?,?,?,?,?)",
@@ -155,14 +176,18 @@ public class AuthService {
         }
         return new Challenge(id, otpSeconds, resendSeconds, "Nếu email có tài khoản phù hợp, chúng tôi sẽ gửi mã xác minh.");
     }
-    private void checkSendLimits(String email) {
-        if (count(email,"SEND",resendSeconds) > 0 || count(email,"SEND",3600) >= hourlySends || count(email,"SEND",86400) >= dailySends)
-            throw limited();
+    private long sendWait(String email) {
+        return Math.max(limitWait(email,"SEND",resendSeconds,1),
+                Math.max(limitWait(email,"SEND",3600,hourlySends), limitWait(email,"SEND",86400,dailySends)));
+    }
+    private long loginWait(String email) {
+        var guard = one("select blocked_until from auth_login_guard where email=?",email);
+        return guard != null && guard.get("blocked_until") != null && instant(guard,"blocked_until").isAfter(now())
+                ? secondsUntil(instant(guard,"blocked_until")) : 0;
     }
     public Verified verify(UUID id, String address, String purpose, String code, String ip) {
         String email = email(address); purpose(purpose);
-        ipLimit(ip); lock(email);
-        if (count(email,"WRONG",3600) >= hourlyWrong) throw limited();
+        publicLimits(ip, email, () -> limitWait(email,"WRONG",3600,hourlyWrong));
         var challenge = one("select * from auth_challenge where id=? and email=? and purpose=?",id,email,purpose);
         boolean valid = challenge != null && !Boolean.TRUE.equals(challenge.get("used")) &&
                 instant(challenge,"expires_at").isAfter(now()) && ((Number)challenge.get("attempts")).intValue() < otpAttempts &&
@@ -174,8 +199,12 @@ public class AuthService {
             if (challenge != null) db.update("update auth_challenge set attempts=attempts+1,used=used or attempts+1>=? where id=?",otpAttempts,id);
             throw new AuthFailure(400,"INVALID_OTP","Mã không hợp lệ, đã dùng hoặc hết hạn.");
         }
-        db.update("update auth_challenge set used=true where id=?",id);
         var user = account(email);
+        if (user == null || "VO_HIEU_HOA".equals(user.get("trang_thai_tai_khoan")) || (purpose.equals("RESET") && !recoverable(user))) {
+            db.update("update auth_challenge set used=true where id=?",id);
+            throw denied();
+        }
+        db.update("update auth_challenge set used=true where id=?",id);
         if (purpose.equals("REGISTER")) {
             db.update("update thanh_viens set email_verified=true,updated_at=?,version=version+1 where user_id=?",at(now()),user.get("user_id"));
             return new Verified(null,true);
@@ -187,10 +216,9 @@ public class AuthService {
     }
     public Session login(String address, String password, String client, String ip) {
         String email = email(address); checkClient(client);
-        ipLimit(ip); lock(email);
+        publicLimits(ip, email, () -> loginWait(email));
         db.update("insert into auth_login_guard(email) values (?) on conflict do nothing",email);
         var guard = one("select * from auth_login_guard where email=?",email);
-        if (guard.get("blocked_until") != null && instant(guard,"blocked_until").isAfter(now())) throw limited();
         var row = account(email);
         String normalized = policy.normalize(password);
         boolean matches = encoder.matches(normalized, row == null ? dummyHash : row.get("mat_khau_hash").toString());
@@ -230,6 +258,9 @@ public class AuthService {
     private void checkClient(String client) {
         if (!Set.of("mobile","admin-web").contains(client == null ? "" : client)) throw invalid();
     }
+    private List<String> assignedRoles(Object userId) {
+        return db.queryForList("select loai_vai_tro from vai_tro_quan_tri where user_id=? and trang_thai_hieu_luc and bat_dau<=? and (ket_thuc is null or ket_thuc>?) and loai_vai_tro in ('KIEM_DUYET_VIEN','QUAN_TRI_VIEN_CAP_CAO')",String.class,userId,at(now()),at(now()));
+    }
     private User user(Map<String,Object> row, String client) {
         List<String> roles = new ArrayList<>();
         String status = row.get("trang_thai_tai_khoan").toString();
@@ -237,7 +268,7 @@ public class AuthService {
         if (active) {
             roles.add("MEMBER");
             if (client.equals("admin-web")) {
-                var assigned = db.queryForList("select loai_vai_tro from vai_tro_quan_tri where user_id=? and trang_thai_hieu_luc and bat_dau<=? and (ket_thuc is null or ket_thuc>?)",String.class,row.get("user_id"),at(now()),at(now()));
+                var assigned = assignedRoles(row.get("user_id"));
                 if (assigned.contains("KIEM_DUYET_VIEN")) roles.add("MODERATOR");
                 if (assigned.contains("QUAN_TRI_VIEN_CAP_CAO")) { roles.add("SENIOR_ADMIN"); if (!roles.contains("MODERATOR")) roles.add("MODERATOR"); }
             }
@@ -336,33 +367,33 @@ public class AuthService {
         var row = requireSession(jwt); lock(row.get("email").toString());
         db.update("update auth_session set revoked=true where id=?",UUID.fromString(jwt.getClaimAsString("sid")));
     }
-    public Session changePassword(Jwt jwt, String current, String password) {
+    public void changePassword(Jwt jwt, String current, String password) {
         var initial = requireSession(jwt); lock(initial.get("email").toString());
         var row = requireSession(jwt);
         if ("BI_KHOA".equals(row.get("trang_thai_tai_khoan").toString())) throw accountRestricted(row);
         String email = row.get("email").toString();
-        if (count(email,"PASSWORD_WRONG",3600) >= 5) throw limited();
+        long wait = limitWait(email,"PASSWORD_WRONG",3600,5);
+        if (wait > 0) throw limited(wait);
         if (!encoder.matches(policy.normalize(current),row.get("mat_khau_hash").toString())) { event(email,"PASSWORD_WRONG"); throw denied(); }
         String value = policy.validate(password,email,row.get("mssv").toString());
         if (encoder.matches(value,row.get("mat_khau_hash").toString())) throw new AuthFailure(400,"PASSWORD_REUSED","Mật khẩu mới phải khác mật khẩu hiện tại.");
-        UUID sid = UUID.fromString(jwt.getClaimAsString("sid"));
         db.update("update thanh_viens set mat_khau_hash=?,updated_at=? where user_id=?",encoder.encode(value),at(now()),row.get("user_id"));
-        db.update("update auth_session set revoked=true where user_id=? and id<>?",row.get("user_id"),sid);
-        db.update("update auth_refresh set used=true where session_id=?",sid);
-        db.update("update auth_session set generation=generation+1 where id=?",sid);
+        db.update("update auth_session set revoked=true where user_id=?",row.get("user_id"));
         invalidateRecovery(row.get("user_id"),email);
-        int generation = db.queryForObject("select generation from auth_session where id=?",Integer.class,sid);
-        return tokens(sid,generation,user(row,jwt.getClaimAsString("client")),jwt.getClaimAsString("client"));
     }
+
     public void reset(String grant, String password) {
         if (grant == null || grant.length() > 256) throw denied();
         var found = one("select g.*,u.email from auth_reset_grant g join thanh_viens u on u.user_id=g.user_id where secret_hash=?",digest(grant));
         if (found == null) throw denied();
         String email = found.get("email").toString(); lock(email);
         found = one("select * from auth_reset_grant where secret_hash=?",digest(grant));
-        if (Boolean.TRUE.equals(found.get("used")) || !instant(found,"expires_at").isAfter(now())) throw denied();
-        var row = account(email);
-        if ("VO_HIEU_HOA".equals(row.get("trang_thai_tai_khoan").toString())) throw denied();
+        if (found == null || Boolean.TRUE.equals(found.get("used")) || !instant(found,"expires_at").isAfter(now())) throw denied();
+        var row = one("select * from thanh_viens where user_id=?", found.get("user_id"));
+        if (!recoverable(row)) {
+            db.update("update auth_reset_grant set used=true where user_id=?", found.get("user_id"));
+            throw denied();
+        }
         String value = policy.validate(password,email,row.get("mssv").toString());
         if (encoder.matches(value,row.get("mat_khau_hash").toString())) throw new AuthFailure(400,"PASSWORD_REUSED","Mật khẩu mới phải khác mật khẩu hiện tại.");
         db.update("update thanh_viens set mat_khau_hash=?,updated_at=? where user_id=?",encoder.encode(value),at(now()),row.get("user_id"));

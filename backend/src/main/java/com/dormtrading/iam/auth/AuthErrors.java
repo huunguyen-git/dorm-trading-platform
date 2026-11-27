@@ -15,8 +15,15 @@ public class AuthErrors {
         return ResponseEntity.status(e.status).body(e.toBody());
     }
     @ExceptionHandler(AuthFailure.class)
-    ResponseEntity<Map<String,String>> auth(AuthFailure e) {
-        return ResponseEntity.status(e.status).body(Map.of("code",e.code,"message",e.getMessage()));
+    ResponseEntity<Map<String,Object>> auth(AuthFailure e) {
+        var body = new java.util.LinkedHashMap<String,Object>();
+        body.put("code", e.code); body.put("message", e.getMessage());
+        var response = ResponseEntity.status(e.status);
+        if (e.retryAfter != null) {
+            body.put("retryAfter", e.retryAfter);
+            response.header(HttpHeaders.RETRY_AFTER, e.retryAfter.toString());
+        }
+        return response.body(body);
     }
     @ExceptionHandler(MailException.class)
     ResponseEntity<Map<String,String>> mail() {

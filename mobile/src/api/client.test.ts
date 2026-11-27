@@ -24,6 +24,7 @@ const activeUser: User = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  fetchMock.mockReset();
   store.get.mockResolvedValue(null);
   store.getRefresh.mockResolvedValue(null);
   store.save.mockResolvedValue(undefined);
@@ -38,6 +39,40 @@ beforeEach(() => {
   });
   global.fetch = fetchMock as unknown as typeof fetch;
   delete process.env.EXPO_PUBLIC_API_URL;
+});
+
+test.each(['offline', '503', '403', 'retry-offline'])('keeps mobile credentials until logout succeeds after %s', async (failure) => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired'; let refresh: string | null = 'refresh-original';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockImplementation(async () => refresh);
+  store.save.mockImplementation(async (value) => { access = value; });
+  store.saveRefresh.mockImplementation(async (value) => { refresh = value; });
+  store.clear.mockImplementation(async () => { access = null; refresh = null; });
+  useSession.setState({ token: 'expired', user: null, loading: false });
+  const expired = { status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' };
+  const fresh = { status: 200, ok: true, json: async () => ({ token: 'fresh', refreshToken: 'refresh-new', user: null }) };
+  fetchMock.mockResolvedValueOnce(expired);
+  if (failure === 'offline') fetchMock.mockRejectedValueOnce(new TypeError('offline'));
+  else if (failure === 'retry-offline') fetchMock.mockResolvedValueOnce(fresh).mockRejectedValueOnce(new TypeError('offline'));
+  else fetchMock.mockResolvedValueOnce({ status: Number(failure), ok: false });
+  await expect(useSession.getState().logout()).rejects.toThrow();
+  expect(store.clear).not.toHaveBeenCalled();
+  expect(access).toBe(failure === 'retry-offline' ? 'fresh' : 'expired');
+  expect(refresh).toBe(failure === 'retry-offline' ? 'refresh-new' : 'refresh-original');
+  expect(useSession.getState().token).toBe(access);
+  fetchMock.mockResolvedValueOnce(expired).mockResolvedValueOnce(fresh).mockResolvedValueOnce({ status: 204, ok: true });
+  await expect(useSession.getState().logout()).resolves.toBeUndefined();
+  expect(access).toBeNull(); expect(refresh).toBeNull(); expect(useSession.getState().token).toBeNull();
+});
+
+test('finishes mobile logout after refresh returns an explicit 401', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired'); store.getRefresh.mockResolvedValue('rejected');
+  fetchMock.mockResolvedValueOnce({ status: 401, ok: false, headers: { get: () => 'Bearer' }, text: async () => '' })
+    .mockResolvedValueOnce({ status: 401, ok: false });
+  await expect(useSession.getState().logout()).resolves.toBeUndefined();
+  expect(store.clear).toHaveBeenCalled(); expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 test('rejects without calling fetch when EXPO_PUBLIC_API_URL is missing', async () => {
@@ -314,4 +349,71 @@ test('leaves session intact on ordinary non-restriction 403 error', async () => 
   expect(store.clear).not.toHaveBeenCalled();
   expect(useSession.getState().token).toBe('valid-jwt');
   expect(useSession.getState().restriction).toBeNull();
+});
+
+test('logout succeeds on expired credentials but does not hide network failure', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired');
+  fetchMock.mockResolvedValue({ status: 401, ok: false, text: async () => '' });
+  await expect(useSession.getState().logout()).resolves.toBeUndefined();
+  expect(useSession.getState().token).toBeNull();
+  store.clear.mockClear();
+  fetchMock.mockRejectedValueOnce(new TypeError('offline'));
+  await expect(useSession.getState().logout()).rejects.toThrow('offline');
+  expect(store.clear).not.toHaveBeenCalled();
+});
+
+test('handles lowercase www-authenticate bearer challenge on password change, clears restriction, and preserves Vietnamese refresh 401 message', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('expired');
+  store.getRefresh.mockResolvedValue('expired-refresh');
+  useSession.setState({
+    token: 'expired',
+    user: activeUser,
+    loading: false,
+    restriction: {
+      accountStatus: 'BI_KHOA',
+      lockType: 'KHOA_TAM_THOI',
+      reason: 'Cũ',
+      lockedUntil: null,
+      appealable: false,
+      reputationScore: 45,
+      message: 'Cũ',
+    },
+    restrictionDismissed: true,
+  });
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: { get: (name: string) => (name === 'www-authenticate' ? 'bearer error="invalid_token"' : null) },
+      text: async () => '',
+    })
+    .mockResolvedValueOnce({ status: 401, ok: false, text: async () => '' });
+
+  await expect(api('/auth/password/change', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+    status: 401,
+    message: 'Phiên đã hết hạn.',
+  });
+  expect(store.clear).toHaveBeenCalledTimes(1);
+  expect(useSession.getState().token).toBeNull();
+  expect(useSession.getState().user).toBeNull();
+  expect(useSession.getState().restriction).toBeNull();
+  expect(useSession.getState().restrictionDismissed).toBe(false);
+});
+
+test('preserves server error code on ApiError for 409 inventory conflicts', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('valid-jwt');
+  fetchMock.mockResolvedValueOnce({
+    status: 409,
+    ok: false,
+    text: async () => JSON.stringify({ code: 'VERSION_CONFLICT', message: 'Phiên bản dữ liệu đã cũ.' }),
+  });
+
+  await expect(api('/inventory/item-1', { method: 'PUT', body: '{}' })).rejects.toMatchObject({
+    status: 409,
+    code: 'VERSION_CONFLICT',
+    message: 'Phiên bản dữ liệu đã cũ.',
+  });
 });

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { tokenStore } from './tokenStore';
 
 export type AccountRestriction = {
@@ -113,8 +113,8 @@ export const useSession = create<SessionState>((set) => ({
     }
   },
   logout: async () => {
-    await api<void>('/auth/logout', { method: 'POST' });
-    await tokenStore.clear();
-    set({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
+    try { await api<void>('/auth/logout', { method: 'POST' }); }
+    catch (e) { if (!(e instanceof ApiError) || e.status !== 401) throw e; }
+    await tokenStore.clear(); set({ token: null, user: null, loading: false, restriction: null, restrictionDismissed: false });
   },
 }));
