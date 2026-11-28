@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRoute, type RouteProp } from '@react-navigation/native';
 import type { RootStack } from '../navigation';
-import { RestrictedAccountError } from '../api/client';
+import { ApiError, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import { useChat } from '../chat/store';
 import type { ChatMessage, OfferStatus, PendingOutgoingMessage, RestrictionReason } from '../chat/types';
@@ -81,11 +81,17 @@ function validateOfferAmount(raw: string, listingPrice: number | null): { price?
   return { price: parsed };
 }
 
-function getRestrictionMessage(reason: RestrictionReason): string | null {
+function getRestrictionMessage(
+  reason: RestrictionReason,
+  options?: { listingStatus?: string | null; canSendMessage?: boolean },
+): string | null {
   switch (reason) {
     case 'COUNTERPARTY_RESTRICTED':
       return 'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch. Tính năng nhắn tin và thương lượng đã bị khóa.';
     case 'LISTING_NOT_AVAILABLE':
+      if (options?.canSendMessage) {
+        return 'Tin đăng đang được giữ chỗ nên tạm khóa thương lượng giá. Bạn vẫn có thể nhắn tin trao đổi thông thường.';
+      }
       return 'Tin đăng không còn ở trạng thái công khai. Lịch sử hội thoại được giữ ở chế độ chỉ đọc.';
     case 'FREE_LISTING_NO_NEGOTIATION':
       return 'Tin đăng cho tặng miễn phí (0đ) không hỗ trợ thương lượng giá. Bạn vẫn có thể nhắn tin trao đổi thông thường.';
@@ -148,6 +154,9 @@ export default function ChatScreen() {
   const inFlightRef = useRef(false);
   const stoppedRef = useRef(false);
   const autoOpenedOfferRef = useRef(false);
+  const sendingTextRef = useRef(false);
+  const submittingOfferRef = useRef(false);
+  const respondingOfferRef = useRef(false);
   const flatListRef = useRef<FlatList<TimelineItem>>(null);
   const lastScrollStateRef = useRef<{
     conversationId: string;
@@ -186,11 +195,16 @@ export default function ChatScreen() {
       try {
         await loadConversationDetail(conversationId, { silent });
       } catch (err: any) {
+        const status = err instanceof ApiError ? err.status : err?.status;
+        const code = err instanceof ApiError ? err.code : err?.code;
         if (
           (typeof RestrictedAccountError === 'function' && err instanceof RestrictedAccountError) ||
-          err?.status === 401 ||
-          err?.code === 'ACCOUNT_RESTRICTED' ||
-          err?.code === 'ACCOUNT_NOT_ACTIVE'
+          status === 401 ||
+          status === 403 ||
+          status === 404 ||
+          code === 'CONVERSATION_NOT_FOUND' ||
+          code === 'ACCOUNT_RESTRICTED' ||
+          code === 'ACCOUNT_NOT_ACTIVE'
         ) {
           stoppedRef.current = true;
         }
@@ -251,7 +265,10 @@ export default function ChatScreen() {
       detail?.restrictionReason === 'COUNTERPARTY_RESTRICTED',
   );
   const restrictionBanner =
-    getRestrictionMessage(detail?.restrictionReason ?? null) ||
+    getRestrictionMessage(detail?.restrictionReason ?? null, {
+      listingStatus: detail?.listingStatus,
+      canSendMessage: detail?.canSendMessage,
+    }) ||
     (isCounterpartyRestricted ? getRestrictionMessage('COUNTERPARTY_RESTRICTED') : null);
   const reservationNotice =
     detail?.agreedPrice != null
@@ -311,6 +328,7 @@ export default function ChatScreen() {
   }, [clearError, runFetch]);
 
   const handleSendText = async () => {
+    if (sendingTextRef.current) return;
     setLocalError('');
     clearError();
     if (!canSendMessage) {
@@ -328,11 +346,14 @@ export default function ChatScreen() {
       setLocalError('Nội dung tin nhắn không được vượt quá 2000 ký tự.');
       return;
     }
+    sendingTextRef.current = true;
     setMessageInput('');
     try {
       await sendMessage(conversationId, content);
     } catch (err: any) {
       setLocalError(err?.message || 'Gửi tin nhắn thất bại.');
+    } finally {
+      sendingTextRef.current = false;
     }
   };
 
@@ -347,6 +368,7 @@ export default function ChatScreen() {
   };
 
   const handleCreateOffer = async () => {
+    if (submittingOfferRef.current || submittingOffer) return;
     setLocalError('');
     clearError();
     if (!canMakeOffer) {
@@ -365,6 +387,7 @@ export default function ChatScreen() {
       return;
     }
 
+    submittingOfferRef.current = true;
     setSubmittingOffer(true);
     try {
       await createOffer(conversationId, {
@@ -377,6 +400,7 @@ export default function ChatScreen() {
     } catch (err: any) {
       setLocalError(err?.message || 'Không thể gửi đề nghị giá.');
     } finally {
+      submittingOfferRef.current = false;
       setSubmittingOffer(false);
     }
   };
@@ -385,6 +409,7 @@ export default function ChatScreen() {
     messageId: string,
     action: 'ACCEPT' | 'REJECT' | 'COUNTER',
   ) => {
+    if (respondingOfferRef.current || respondingMessageId !== null) return;
     setLocalError('');
     clearError();
 
@@ -402,6 +427,7 @@ export default function ChatScreen() {
       return;
     }
 
+    respondingOfferRef.current = true;
     setRespondingMessageId(messageId);
     try {
       await respondToOffer(conversationId, messageId, {
@@ -415,6 +441,7 @@ export default function ChatScreen() {
     } catch (err: any) {
       setLocalError(err?.message || 'Không thể phản hồi đề nghị giá.');
     } finally {
+      respondingOfferRef.current = false;
       setRespondingMessageId(null);
     }
   };
@@ -689,7 +716,7 @@ export default function ChatScreen() {
                   Chưa có tin nhắn nào. Hãy gửi lời chào hoặc đề nghị mức giá phù hợp!
                 </Text>
               </View>
-            ) : null
+            ) : undefined
           }
           renderItem={renderTimelineItem}
         />

@@ -32,6 +32,8 @@ export type RootStack = {
       }
     | undefined;
   OrderDetail: { id: string; justCreated?: boolean };
+  Conversations: undefined;
+  Chat: { conversationId: string; autoOpenOffer?: boolean };
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;

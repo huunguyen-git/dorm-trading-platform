@@ -904,6 +904,17 @@ export default function ListingsScreen() {
             </Pressable>
 
             <Pressable
+              testID="open-inbox-button"
+              onPress={() => navigation.navigate(isMember ? 'Conversations' : 'Login')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Hộp thư cá nhân"
+              style={({ pressed }) => [styles.refreshBtn, pressed && styles.refreshBtnPressed]}
+            >
+              <Icon name="message-circle" size={16} color={semantic.color.textInverse} />
+            </Pressable>
+
+            <Pressable
               testID="listings-refresh-button"
               onPress={handleRefresh}
               disabled={effectiveLoading || refreshing}

@@ -282,7 +282,7 @@ export default function ConversationsScreen() {
                 Hãy chọn một tin đăng công khai và nhấn "Nhắn tin" hoặc "Thương lượng giá" để bắt đầu trao đổi.
               </Text>
             </View>
-          ) : null
+          ) : undefined
         }
         renderItem={renderConversationCard}
       />

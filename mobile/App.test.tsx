@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import App from './App';
 import { api, RestrictedAccountError } from './src/api/client';
 import { resolveUserRestriction, useSession, type AccountRestriction, type User } from './src/auth/session';
+import { useChat } from './src/chat/store';
 import { useListings } from './src/listings/store';
 
 jest.mock('./src/api/client', () => {
@@ -63,6 +64,7 @@ beforeEach(() => {
     load: jest.fn<() => Promise<void>>(async () => {}),
     create: jest.fn(async () => {}),
   });
+  useChat.getState().reset();
 });
 
 test('shows empty listing state', async () => {
@@ -517,4 +519,111 @@ test('password reset clears stale restriction before returning to Login', async 
   fireEvent.press(screen.getByTestId('auth-success-continue'));
   expect(await screen.findByTestId('login-submit')).toBeTruthy();
   expect(screen.queryByTestId('restricted-account-notice')).toBeNull();
+});
+
+test('clears useChat cache when useSession logs out or switches accounts', async () => {
+  const buyerAccount: User = {
+    id: 'buyer-1',
+    name: 'Nguyễn Văn Mua',
+    role: 'member',
+    email: 'buyer@uni.edu.vn',
+    studentId: '22120001',
+    roles: ['MEMBER'],
+    emailVerified: true,
+    profileApproved: true,
+    accountStatus: 'HOAT_DONG',
+  };
+  const sellerAccount: User = {
+    id: 'seller-2',
+    name: 'Trần Thị Bán',
+    role: 'member',
+    email: 'seller@uni.edu.vn',
+    studentId: '22120002',
+    roles: ['MEMBER'],
+    emailVerified: true,
+    profileApproved: true,
+    accountStatus: 'HOAT_DONG',
+  };
+
+  const sampleConv = {
+    id: 'conv-cache-1',
+    currentUserId: buyerAccount.id,
+    listing: null,
+    listingId: 'listing-1',
+    listingTitle: 'Đèn học LED',
+    listingPrice: 90000,
+    listingType: 'BAN_LE' as const,
+    listingStatus: 'CONG_KHAI' as const,
+    buyer: { id: buyerAccount.id, name: buyerAccount.name },
+    buyerId: buyerAccount.id,
+    buyerName: buyerAccount.name,
+    seller: { id: sellerAccount.id, name: sellerAccount.name },
+    sellerId: sellerAccount.id,
+    sellerName: sellerAccount.name,
+    counterpartyId: sellerAccount.id,
+    counterpartyName: sellerAccount.name,
+    counterpartyStatus: 'HOAT_DONG',
+    counterpartyRestricted: false,
+    agreedPrice: null,
+    agreedOfferId: null,
+    pendingOfferId: null,
+    pendingOfferPrice: null,
+    pendingOfferSenderId: null,
+    reservationNotice: null,
+    lastMessage: null,
+    canSendMessage: true,
+    canMakeOffer: true,
+    restrictionReason: null,
+    messages: [],
+    version: 1,
+    createdAt: '2026-11-26T04:00:00Z',
+    updatedAt: '2026-11-26T04:00:00Z',
+  };
+
+  await useSession.getState().setSession('buyer-token', buyerAccount);
+  useChat.setState({
+    conversations: [sampleConv],
+    detailsById: { [sampleConv.id]: sampleConv },
+    pendingMessagesByConversation: {
+      [sampleConv.id]: [
+        {
+          clientMessageId: 'cmsg-pending-1',
+          conversationId: sampleConv.id,
+          content: 'Chào bạn',
+          status: 'failed',
+          createdAt: '2026-11-26T04:01:00Z',
+        },
+      ],
+    },
+  });
+
+  expect(useChat.getState().conversations).toHaveLength(1);
+  expect(useChat.getState().detailsById[sampleConv.id]).toBeTruthy();
+
+  await useSession.getState().logout();
+  expect(useChat.getState().conversations).toEqual([]);
+  expect(useChat.getState().detailsById).toEqual({});
+  expect(useChat.getState().pendingMessagesByConversation).toEqual({});
+
+  await useSession.getState().setSession('buyer-token-2', buyerAccount);
+  useChat.setState({
+    conversations: [sampleConv],
+    detailsById: { [sampleConv.id]: sampleConv },
+    pendingMessagesByConversation: {
+      [sampleConv.id]: [
+        {
+          clientMessageId: 'cmsg-pending-2',
+          conversationId: sampleConv.id,
+          content: 'Hỏi lại',
+          status: 'sending',
+          createdAt: '2026-11-26T04:02:00Z',
+        },
+      ],
+    },
+  });
+
+  await useSession.getState().setSession('seller-token', sellerAccount);
+  expect(useChat.getState().conversations).toEqual([]);
+  expect(useChat.getState().detailsById).toEqual({});
+  expect(useChat.getState().pendingMessagesByConversation).toEqual({});
 });

@@ -2,7 +2,11 @@ import React from 'react';
 import { AppState, type AppStateStatus, FlatList } from 'react-native';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { ApiError } from '../api/client';
 import { useSession } from '../auth/session';
+import * as discoveryApi from '../listings/discoveryApi';
+import { useDiscovery } from '../listings/discoveryStore';
+import type { ListingDetail } from '../listings/types';
 import { useChat } from './store';
 import * as chatApi from './api';
 import type { ChatMessage, ConversationDetail, ConversationSummary } from './types';
@@ -42,7 +46,9 @@ jest.mock('@react-navigation/native', () => {
 });
 
 jest.mock('./api');
+jest.mock('../listings/discoveryApi');
 const mockedChatApi = jest.mocked(chatApi);
+const mockedDiscoveryApi = jest.mocked(discoveryApi);
 
 const buyerUser = {
   id: 'buyer-1',
@@ -201,6 +207,74 @@ function makeOfferMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   };
 }
 
+function makeSampleListingDetail(overrides: Partial<ListingDetail> = {}): ListingDetail {
+  return {
+    id: 'listing-1',
+    title: 'Bàn học gấp gọn KTX Khu B',
+    description: 'Bàn gỗ chắc chắn',
+    condition: 'Mới 95%',
+    priceVnd: 150000,
+    listingType: 'BAN_LE',
+    isCombo: false,
+    isFree: false,
+    status: 'CONG_KHAI',
+    categoryId: 'DO_GIA_DUNG',
+    categoryName: 'Đồ gia dụng',
+    courseCode: null,
+    courseName: null,
+    author: null,
+    locationCode: 'KTX_KHU_B',
+    locationName: 'KTX Khu B',
+    locationText: 'Sảnh nhà B1',
+    latitude: 10.8824,
+    longitude: 106.7825,
+    distanceKm: null,
+    thumbnailUrl: null,
+    images: [],
+    itemCount: 1,
+    seller: {
+      id: sellerUser.id,
+      displayName: sellerUser.name,
+      reputationScore: 110,
+      averageRating: 4.9,
+      reviewCount: 4,
+    },
+    hasUnavailableItems: false,
+    publishedAt: '2026-11-26T03:00:00Z',
+    expiresAt: '2026-12-26T03:00:00Z',
+    renewalReminderDue: false,
+    renewalCount: 0,
+    createdAt: '2026-11-26T03:00:00Z',
+    updatedAt: '2026-11-26T03:00:00Z',
+    version: 1,
+    category: { id: 'DO_GIA_DUNG', name: 'Đồ gia dụng', parentId: null, description: null },
+    items: [
+      {
+        id: 'item-1',
+        name: 'Bàn học gấp gọn',
+        condition: 'Mới 95%',
+        status: 'KHA_DUNG',
+        images: [],
+      },
+    ],
+    viewer: {
+      isOwner: false,
+      canEdit: false,
+      canWithdraw: false,
+      canDelete: false,
+      canPublish: false,
+      canRenew: false,
+      canMakeOffer: true,
+      canReserve: true,
+      canMessage: true,
+    },
+    pendingRequestCount: 0,
+    closedAt: null,
+    hiddenReason: null,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.useRealTimers();
@@ -216,6 +290,7 @@ beforeEach(() => {
     restrictionDismissed: false,
   });
   useChat.getState().reset();
+  useDiscovery.getState().reset();
 });
 
 afterEach(() => {
@@ -225,24 +300,18 @@ afterEach(() => {
 describe('TC-01: ListingScreen & ConversationsScreen (Mở hội thoại, chặn tự nhắn tin, hộp thư cá nhân)', () => {
   test('opens or creates conversation from ListingScreen and navigates to Chat', async () => {
     const detail = makeSampleDetail();
+    const listingDetail = makeSampleListingDetail();
+    mockedDiscoveryApi.fetchListingDetail.mockResolvedValue(listingDetail);
     mockedChatApi.openOrCreateConversation.mockResolvedValue(detail);
-    mockRouteParams.listing = {
-      id: 'listing-1',
-      title: 'Bàn học gấp gọn KTX Khu B',
-      description: 'Bàn gỗ chắc chắn',
-      price: 150000,
-      seller: sellerUser.name,
-      sellerId: sellerUser.id,
-      listingType: 'BAN_LE',
-      status: 'CONG_KHAI',
-    };
+    mockRouteParams.id = listingDetail.id;
+    mockRouteParams.listing = listingDetail;
 
     render(<ListingScreen />);
 
-    expect(screen.getByTestId('listing-message-button')).toBeTruthy();
-    expect(screen.getByTestId('listing-negotiate-button')).toBeTruthy();
+    expect(await screen.findByTestId('message-button')).toBeTruthy();
+    expect(screen.getByTestId('make-offer-button')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('listing-message-button'));
+    fireEvent.press(screen.getByTestId('message-button'));
 
     await waitFor(() => {
       expect(mockedChatApi.openOrCreateConversation).toHaveBeenCalledWith('listing-1');
@@ -250,9 +319,10 @@ describe('TC-01: ListingScreen & ConversationsScreen (Mở hội thoại, chặn
         conversationId: 'conv-1',
         autoOpenOffer: false,
       });
+      expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(false);
     });
 
-    fireEvent.press(screen.getByTestId('listing-negotiate-button'));
+    fireEvent.press(screen.getByTestId('make-offer-button'));
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('Chat', {
@@ -262,17 +332,11 @@ describe('TC-01: ListingScreen & ConversationsScreen (Mở hội thoại, chặn
     });
   });
 
-  test('shows restriction or pending activation notice and disables chat/negotiate buttons on ListingScreen', () => {
-    mockRouteParams.listing = {
-      id: 'listing-1',
-      title: 'Bàn học gấp gọn KTX Khu B',
-      description: 'Bàn gỗ chắc chắn',
-      price: 150000,
-      seller: sellerUser.name,
-      sellerId: sellerUser.id,
-      listingType: 'BAN_LE',
-      status: 'CONG_KHAI',
-    };
+  test('shows restriction or pending activation notice and disables chat/negotiate buttons on ListingScreen', async () => {
+    const listingDetail = makeSampleListingDetail();
+    mockedDiscoveryApi.fetchListingDetail.mockResolvedValue(listingDetail);
+    mockRouteParams.id = listingDetail.id;
+    mockRouteParams.listing = listingDetail;
 
     // 1. Pending activation account (no MEMBER role, not BI_KHOA)
     useSession.setState({
@@ -290,12 +354,12 @@ describe('TC-01: ListingScreen & ConversationsScreen (Mở hội thoại, chặn
     const { rerender } = render(<ListingScreen />);
 
     expect(
-      screen.getByText(
-        'Tài khoản đang bị hạn chế hoặc chờ duyệt kích hoạt nên chưa thể nhắn tin/thương lượng.',
+      await screen.findByText(
+        'Tài khoản cần được xác minh và ở trạng thái hoạt động để thực hiện giao dịch.',
       ),
     ).toBeTruthy();
-    expect(screen.getByTestId('listing-message-button').props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByTestId('listing-negotiate-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('message-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
 
     // 2. Locked BI_KHOA account shows RestrictedAccountNotice
     act(() => {
@@ -322,51 +386,65 @@ describe('TC-01: ListingScreen & ConversationsScreen (Mở hội thoại, chặn
     rerender(<ListingScreen />);
 
     expect(screen.getByTestId('restricted-account-notice')).toBeTruthy();
-    expect(screen.getByTestId('listing-message-button').props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByTestId('listing-negotiate-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('message-button').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('make-offer-button').props.accessibilityState.disabled).toBe(true);
   });
 
-  test('hides chat and negotiate buttons when user views their own listing', () => {
+  test('hides chat and negotiate buttons when user views their own listing', async () => {
     useSession.setState({ token: 'seller-token', user: sellerUser });
-    mockRouteParams.listing = {
-      id: 'listing-1',
-      title: 'Bàn học gấp gọn KTX Khu B',
-      description: 'Bàn gỗ chắc chắn',
-      price: 150000,
-      seller: sellerUser.name,
-      sellerId: sellerUser.id,
-      listingType: 'BAN_LE',
-      status: 'CONG_KHAI',
-    };
+    const ownerListing = makeSampleListingDetail({
+      viewer: {
+        isOwner: true,
+        canEdit: true,
+        canWithdraw: true,
+        canDelete: true,
+        canPublish: false,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: false,
+        canMessage: false,
+      },
+    });
+    mockedDiscoveryApi.fetchListingDetail.mockResolvedValue(ownerListing);
+    mockRouteParams.id = ownerListing.id;
+    mockRouteParams.listing = ownerListing;
 
     render(<ListingScreen />);
 
-    expect(screen.queryByTestId('listing-message-button')).toBeNull();
-    expect(screen.queryByTestId('listing-negotiate-button')).toBeNull();
-    expect(
-      screen.getByText(
-        'Đây là tin đăng của bạn. Bạn không thể tự nhắn tin hoặc thương lượng trên tin đăng này.',
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByTestId('owner-edit-button')).toBeTruthy();
+    expect(screen.queryByTestId('message-button')).toBeNull();
+    expect(screen.queryByTestId('make-offer-button')).toBeNull();
   });
 
-  test('hides negotiate button on free giveaway listing (CHO_TANG / 0 VND)', () => {
-    mockRouteParams.listing = {
+  test('hides negotiate button on free giveaway listing (CHO_TANG / 0 VND)', async () => {
+    const freeListing = makeSampleListingDetail({
       id: 'listing-free',
       title: 'Tặng giáo trình Giải tích 1',
-      description: null,
-      price: 0,
-      seller: sellerUser.name,
-      sellerId: sellerUser.id,
+      description: '',
+      priceVnd: 0,
       listingType: 'CHO_TANG',
-      status: 'CONG_KHAI',
-    };
+      isFree: true,
+      viewer: {
+        isOwner: false,
+        canEdit: false,
+        canWithdraw: false,
+        canDelete: false,
+        canPublish: false,
+        canRenew: false,
+        canMakeOffer: false,
+        canReserve: true,
+        canMessage: true,
+      },
+    });
+    mockedDiscoveryApi.fetchListingDetail.mockResolvedValue(freeListing);
+    mockRouteParams.id = freeListing.id;
+    mockRouteParams.listing = freeListing;
 
     render(<ListingScreen />);
 
-    expect(screen.getByTestId('listing-message-button')).toBeTruthy();
-    expect(screen.queryByTestId('listing-negotiate-button')).toBeNull();
-    expect(screen.getByText('0 ₫ (Cho tặng miễn phí)')).toBeTruthy();
+    expect(await screen.findByTestId('message-button')).toBeTruthy();
+    expect(screen.queryByTestId('make-offer-button')).toBeNull();
+    expect(screen.getByText('Miễn phí (0đ)')).toBeTruthy();
   });
 
   test('renders ConversationsScreen with simultaneous agreed & pending badges, restricted counterparty, deleted listing notice, and navigates to Chat', async () => {
@@ -811,7 +889,7 @@ describe('TC-05 & Ràng buộc đồng bộ: Lỗi 409 tự refetch, 403 COUNTER
       .mockResolvedValueOnce(
         makeSampleDetail({
           currentUserId: sellerUser.id,
-          listingStatus: 'GIU_CHO',
+          listingStatus: 'DA_RUT',
           canSendMessage: false,
           canMakeOffer: false,
           restrictionReason: 'LISTING_NOT_AVAILABLE',
@@ -1437,5 +1515,323 @@ describe('P2-03 V2 [P2] Mobile polish: note >1000 validation, conversationId for
     expect(screen.getByTestId('conversation-time-conv-sell').props.children).toBe(
       expectedLocalTime(updatedOnlyIso),
     );
+  });
+});
+
+describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, stale lock guard, 404 stop-polling, GIU_CHO sync', () => {
+  test('retrying createOffer and respondToOffer(COUNTER) after network error reuses exact clientMessageId and clears after success or 4xx', async () => {
+    // 1. createOffer: network error preserves clientMessageId on retry, then clears on success & non-retryable 4xx
+    mockedChatApi.createPriceOffer
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValueOnce(makeSampleDetail({ version: 2 }))
+      .mockResolvedValueOnce(makeSampleDetail({ version: 3 }))
+      .mockRejectedValueOnce(
+        new ApiError(409, 'Tin đăng không còn công khai.', 'LISTING_NOT_AVAILABLE'),
+      )
+      .mockResolvedValueOnce(makeSampleDetail({ version: 4 }));
+    mockedChatApi.fetchConversationDetail.mockResolvedValue(makeSampleDetail({ version: 4 }));
+
+    await expect(
+      useChat.getState().createOffer('conv-1', { offeredPrice: 120000, note: 'Giữ giúp mình' }),
+    ).rejects.toThrow('Network request failed');
+
+    await useChat
+      .getState()
+      .createOffer('conv-1', { offeredPrice: 120000, note: '  Giữ giúp mình  ' });
+
+    const offerId1 = mockedChatApi.createPriceOffer.mock.calls[0][1].clientMessageId;
+    const offerId2 = mockedChatApi.createPriceOffer.mock.calls[1][1].clientMessageId;
+    expect(offerId1).toBeTruthy();
+    expect(offerId2).toBe(offerId1);
+
+    // After success, the next identical offer draft gets a fresh clientMessageId
+    await useChat
+      .getState()
+      .createOffer('conv-1', { offeredPrice: 120000, note: 'Giữ giúp mình' });
+    const offerId3 = mockedChatApi.createPriceOffer.mock.calls[2][1].clientMessageId;
+    expect(offerId3).toBeTruthy();
+    expect(offerId3).not.toBe(offerId1);
+
+    // Non-retryable 409 error clears the draft clientMessageId so the next attempt rotates it
+    await expect(
+      useChat.getState().createOffer('conv-1', { offeredPrice: 120000, note: 'Giữ giúp mình' }),
+    ).rejects.toThrow('Tin đăng không còn công khai.');
+    const offerId4 = mockedChatApi.createPriceOffer.mock.calls[3][1].clientMessageId;
+
+    await useChat
+      .getState()
+      .createOffer('conv-1', { offeredPrice: 120000, note: 'Giữ giúp mình' });
+    const offerId5 = mockedChatApi.createPriceOffer.mock.calls[4][1].clientMessageId;
+    expect(offerId5).toBeTruthy();
+    expect(offerId5).not.toBe(offerId4);
+
+    // 2. respondToOffer('COUNTER'): network error preserves clientMessageId on retry, then clears on success & 4xx
+    mockedChatApi.respondToPriceOffer
+      .mockRejectedValueOnce(new Error('Request timeout'))
+      .mockResolvedValueOnce(makeSampleDetail({ version: 5 }))
+      .mockResolvedValueOnce(makeSampleDetail({ version: 6 }))
+      .mockRejectedValueOnce(new ApiError(400, 'Giá đề xuất không hợp lệ.', 'INVALID_OFFER_PRICE'))
+      .mockResolvedValueOnce(makeSampleDetail({ version: 7 }));
+
+    await expect(
+      useChat.getState().respondToOffer('conv-1', 'offer-1', {
+        action: 'COUNTER',
+        counterPrice: 135000,
+        note: 'Bớt 15k nhé',
+      }),
+    ).rejects.toThrow('Request timeout');
+
+    await useChat.getState().respondToOffer('conv-1', 'offer-1', {
+      action: 'COUNTER',
+      counterPrice: 135000,
+      note: ' Bớt 15k nhé ',
+    });
+
+    const counterId1 = mockedChatApi.respondToPriceOffer.mock.calls[0][2].clientMessageId;
+    const counterId2 = mockedChatApi.respondToPriceOffer.mock.calls[1][2].clientMessageId;
+    expect(counterId1).toBeTruthy();
+    expect(counterId2).toBe(counterId1);
+
+    // After success, new COUNTER gets a fresh clientMessageId
+    await useChat.getState().respondToOffer('conv-1', 'offer-1', {
+      action: 'COUNTER',
+      counterPrice: 135000,
+      note: 'Bớt 15k nhé',
+    });
+    const counterId3 = mockedChatApi.respondToPriceOffer.mock.calls[2][2].clientMessageId;
+    expect(counterId3).toBeTruthy();
+    expect(counterId3).not.toBe(counterId1);
+
+    // Non-retryable 400 error clears draft key
+    await expect(
+      useChat.getState().respondToOffer('conv-1', 'offer-1', {
+        action: 'COUNTER',
+        counterPrice: 135000,
+        note: 'Bớt 15k nhé',
+      }),
+    ).rejects.toThrow('Giá đề xuất không hợp lệ.');
+    const counterId4 = mockedChatApi.respondToPriceOffer.mock.calls[3][2].clientMessageId;
+
+    await useChat.getState().respondToOffer('conv-1', 'offer-1', {
+      action: 'COUNTER',
+      counterPrice: 135000,
+      note: 'Bớt 15k nhé',
+    });
+    const counterId5 = mockedChatApi.respondToPriceOffer.mock.calls[4][2].clientMessageId;
+    expect(counterId5).toBeTruthy();
+    expect(counterId5).not.toBe(counterId4);
+  });
+
+  test('stale same-version poll response does not overwrite COUNTERPARTY_RESTRICTED lock in detail or conversation list', async () => {
+    const pendingOffer = makeOfferMessage({
+      id: 'offer-lock-1',
+      senderId: sellerUser.id,
+      senderName: sellerUser.name,
+      offerStatus: 'CHO_PHAN_HOI',
+      canRespond: true,
+    });
+
+    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(
+      makeSampleDetail({
+        id: 'conv-1',
+        version: 2,
+        canSendMessage: true,
+        canMakeOffer: true,
+        restrictionReason: null,
+        counterpartyStatus: 'HOAT_DONG',
+        counterpartyRestricted: false,
+        messages: [pendingOffer],
+      }),
+    );
+    await useChat.getState().loadConversationDetail('conv-1');
+
+    // Trigger 403 COUNTERPARTY_RESTRICTED -> locks detail & summary locally at version 2
+    mockedChatApi.sendChatMessage.mockRejectedValueOnce(
+      new ApiError(
+        403,
+        'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+        'COUNTERPARTY_RESTRICTED',
+      ),
+    );
+    await expect(useChat.getState().sendMessage('conv-1', 'Alo')).rejects.toThrow(
+      'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+    );
+
+    expect(useChat.getState().detailsById['conv-1'].restrictionReason).toBe(
+      'COUNTERPARTY_RESTRICTED',
+    );
+    expect(useChat.getState().detailsById['conv-1'].messages[0].canRespond).toBe(false);
+
+    // Overlapping stale poll returns same version 2 without restriction -> lock must stay preserved
+    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(
+      makeSampleDetail({
+        id: 'conv-1',
+        version: 2,
+        canSendMessage: true,
+        canMakeOffer: true,
+        restrictionReason: null,
+        counterpartyStatus: 'HOAT_DONG',
+        counterpartyRestricted: false,
+        messages: [pendingOffer],
+      }),
+    );
+    await useChat.getState().loadConversationDetail('conv-1', { silent: true });
+
+    const lockedDetail = useChat.getState().detailsById['conv-1'];
+    expect(lockedDetail.canSendMessage).toBe(false);
+    expect(lockedDetail.canMakeOffer).toBe(false);
+    expect(lockedDetail.restrictionReason).toBe('COUNTERPARTY_RESTRICTED');
+    expect(lockedDetail.counterpartyStatus).toBe('HAN_CHE');
+    expect(lockedDetail.counterpartyRestricted).toBe(true);
+    expect(lockedDetail.messages[0].canRespond).toBe(false);
+
+    const lockedSummaryFromDetail = useChat.getState().conversations.find((c) => c.id === 'conv-1');
+    expect(lockedSummaryFromDetail?.restrictionReason).toBe('COUNTERPARTY_RESTRICTED');
+    expect(lockedSummaryFromDetail?.canSendMessage).toBe(false);
+    expect(lockedSummaryFromDetail?.canMakeOffer).toBe(false);
+
+    // Stale same-version list poll also must not unlock the summary
+    mockedChatApi.fetchConversations.mockResolvedValueOnce([
+      makeSampleSummary({
+        id: 'conv-1',
+        version: 2,
+        canSendMessage: true,
+        canMakeOffer: true,
+        restrictionReason: null,
+        counterpartyStatus: 'HOAT_DONG',
+        counterpartyRestricted: false,
+        lastMessage: pendingOffer,
+      }),
+    ]);
+    await useChat.getState().loadConversations({ silent: true });
+
+    const lockedSummaryFromList = useChat.getState().conversations.find((c) => c.id === 'conv-1');
+    expect(lockedSummaryFromList?.restrictionReason).toBe('COUNTERPARTY_RESTRICTED');
+    expect(lockedSummaryFromList?.canSendMessage).toBe(false);
+    expect(lockedSummaryFromList?.canMakeOffer).toBe(false);
+    expect(lockedSummaryFromList?.counterpartyStatus).toBe('HAN_CHE');
+    expect(lockedSummaryFromList?.counterpartyRestricted).toBe(true);
+    expect(lockedSummaryFromList?.lastMessage?.canRespond).toBe(false);
+  });
+
+  test('ChatScreen stops 5s polling immediately when getConversation returns 404 CONVERSATION_NOT_FOUND', async () => {
+    jest.useFakeTimers();
+    mockRouteParams.conversationId = 'conv-missing';
+    mockedChatApi.fetchConversationDetail.mockRejectedValue(
+      new ApiError(404, 'Không tìm thấy cuộc hội thoại.', 'CONVERSATION_NOT_FOUND'),
+    );
+
+    render(<ChatScreen />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedChatApi.fetchConversationDetail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(15000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedChatApi.fetchConversationDetail).toHaveBeenCalledTimes(1);
+  });
+
+  test('ChatScreen synchronous ref guards prevent same-frame double-tap duplicate API requests', async () => {
+    useSession.setState({ token: 'seller-token', user: sellerUser });
+    mockRouteParams.conversationId = 'conv-1';
+
+    const buyerOffer = makeOfferMessage({
+      id: 'offer-dbl-1',
+      senderId: buyerUser.id,
+      senderName: buyerUser.name,
+      offeredPrice: 120000,
+      offerStatus: 'CHO_PHAN_HOI',
+      canRespond: true,
+    });
+    mockedChatApi.fetchConversationDetail.mockResolvedValue(
+      makeSampleDetail({
+        currentUserId: sellerUser.id,
+        messages: [buyerOffer],
+        version: 1,
+      }),
+    );
+
+    let resolveMsg!: (v: ChatMessage) => void;
+    let resolveOffer!: (v: ConversationDetail) => void;
+    let resolveRespond!: (v: ConversationDetail) => void;
+
+    mockedChatApi.sendChatMessage.mockReturnValue(
+      new Promise<ChatMessage>((r) => {
+        resolveMsg = r;
+      }),
+    );
+    mockedChatApi.createPriceOffer.mockReturnValue(
+      new Promise<ConversationDetail>((r) => {
+        resolveOffer = r;
+      }),
+    );
+    mockedChatApi.respondToPriceOffer.mockReturnValue(
+      new Promise<ConversationDetail>((r) => {
+        resolveRespond = r;
+      }),
+    );
+
+    render(<ChatScreen />);
+    expect(await screen.findByTestId('accept-offer-offer-dbl-1')).toBeTruthy();
+
+    // 1. Double-tap send text in the same frame
+    fireEvent.changeText(screen.getByTestId('chat-message-input'), 'Tin nhắn không gửi đúp');
+    const sendBtn = screen.getByTestId('chat-send-button');
+    fireEvent.press(sendBtn);
+    fireEvent.press(sendBtn);
+    expect(mockedChatApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // 2. Double-tap create offer in the same frame
+    fireEvent.press(screen.getByTestId('open-offer-form-button'));
+    fireEvent.changeText(screen.getByTestId('offer-price-input'), '130000');
+    const submitOfferBtn = screen.getByTestId('submit-offer-button');
+    fireEvent.press(submitOfferBtn);
+    fireEvent.press(submitOfferBtn);
+    expect(mockedChatApi.createPriceOffer).toHaveBeenCalledTimes(1);
+
+    // 3. Double-tap respond offer in the same frame
+    const acceptBtn = screen.getByTestId('accept-offer-offer-dbl-1');
+    fireEvent.press(acceptBtn);
+    fireEvent.press(acceptBtn);
+    expect(mockedChatApi.respondToPriceOffer).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveMsg(makeTextMessage({ id: 'msg-dbl-ok', conversationVersion: 2 }));
+      resolveOffer(makeSampleDetail({ currentUserId: sellerUser.id, version: 3 }));
+      resolveRespond(makeSampleDetail({ currentUserId: sellerUser.id, version: 4 }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
+  test('GIU_CHO rule sync: keeps text messaging enabled while disabling price negotiation on ChatScreen', async () => {
+    mockRouteParams.conversationId = 'conv-reserved';
+    mockedChatApi.fetchConversationDetail.mockResolvedValue(
+      makeSampleDetail({
+        id: 'conv-reserved',
+        listingStatus: 'GIU_CHO',
+        canSendMessage: true,
+        canMakeOffer: false,
+        restrictionReason: 'LISTING_NOT_AVAILABLE',
+      }),
+    );
+
+    render(<ChatScreen />);
+
+    expect(await screen.findByTestId('chat-restriction-banner')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Tin đăng đang được giữ chỗ nên tạm khóa thương lượng giá. Bạn vẫn có thể nhắn tin trao đổi thông thường.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('offer-composer-section')).toBeNull();
+    expect(screen.getByTestId('chat-send-button').props.accessibilityState.disabled).toBe(false);
   });
 });

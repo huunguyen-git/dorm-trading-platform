@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { ApiError, RestrictedAccountError } from '../api/client';
 import { useSession } from '../auth/session';
 import * as chatApi from './api';
 import type {
@@ -11,10 +12,40 @@ import type {
 } from './types';
 
 let clientMsgCounter = 0;
+const draftClientIds = new Map<string, string>();
 
 export function generateClientMessageId(): string {
   clientMsgCounter += 1;
   return `cmsg-${Date.now()}-${clientMsgCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isNonRetryableBusinessError(err: unknown): boolean {
+  if (typeof RestrictedAccountError === 'function' && err instanceof RestrictedAccountError) {
+    return true;
+  }
+  const status =
+    err instanceof ApiError
+      ? err.status
+      : typeof (err as { status?: unknown } | null)?.status === 'number'
+        ? (err as { status: number }).status
+        : undefined;
+  return status === 400 || status === 403 || status === 404 || status === 409;
+}
+
+function preserveCounterpartyRestrictedOnSummary(
+  summary: ConversationSummary,
+): ConversationSummary {
+  return {
+    ...summary,
+    canSendMessage: false,
+    canMakeOffer: false,
+    restrictionReason: 'COUNTERPARTY_RESTRICTED',
+    counterpartyStatus: 'HAN_CHE',
+    counterpartyRestricted: true,
+    lastMessage: summary.lastMessage
+      ? { ...summary.lastMessage, canRespond: false }
+      : summary.lastMessage,
+  };
 }
 
 function detailToSummary(detail: ConversationDetail): ConversationSummary {
@@ -95,8 +126,17 @@ function upsertSummaryWithVersionGuard(
   ) {
     return list;
   }
+  const nextIncoming =
+    existing &&
+    typeof existing.version === 'number' &&
+    typeof incoming.version === 'number' &&
+    incoming.version === existing.version &&
+    existing.restrictionReason === 'COUNTERPARTY_RESTRICTED' &&
+    incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED'
+      ? preserveCounterpartyRestrictedOnSummary(incoming)
+      : incoming;
   const filtered = list.filter((c) => c.id !== incoming.id);
-  return sortConversations([incoming, ...filtered]);
+  return sortConversations([nextIncoming, ...filtered]);
 }
 
 function isConflictError(err: any): boolean {
@@ -215,6 +255,34 @@ export const useChat = create<ChatState>((set, get) => {
       };
     }
 
+    const existingSummary = get().conversations.find((c) => c.id === detail.id);
+    const shouldPreserveCounterpartyLock =
+      typeof detail.version === 'number' &&
+      effectiveDetail.restrictionReason !== 'COUNTERPARTY_RESTRICTED' &&
+      ((existing &&
+        typeof existing.version === 'number' &&
+        detail.version === existing.version &&
+        existing.restrictionReason === 'COUNTERPARTY_RESTRICTED') ||
+        (existingSummary &&
+          typeof existingSummary.version === 'number' &&
+          detail.version === existingSummary.version &&
+          existingSummary.restrictionReason === 'COUNTERPARTY_RESTRICTED'));
+
+    if (shouldPreserveCounterpartyLock) {
+      effectiveDetail = {
+        ...effectiveDetail,
+        canSendMessage: false,
+        canMakeOffer: false,
+        restrictionReason: 'COUNTERPARTY_RESTRICTED',
+        counterpartyStatus: 'HAN_CHE',
+        counterpartyRestricted: true,
+        messages: (effectiveDetail.messages || []).map((m) => ({
+          ...m,
+          canRespond: false,
+        })),
+      };
+    }
+
     const deliveredClientIds = new Set(
       (effectiveDetail.messages || [])
         .map((m) => m.clientMessageId)
@@ -291,7 +359,8 @@ export const useChat = create<ChatState>((set, get) => {
 
     clearError: () => set({ error: null }),
 
-    reset: () =>
+    reset: () => {
+      draftClientIds.clear();
       set((state) => ({
         conversations: [],
         detailsById: {},
@@ -300,7 +369,8 @@ export const useChat = create<ChatState>((set, get) => {
         loadingDetail: false,
         error: null,
         sessionGeneration: state.sessionGeneration + 1,
-      })),
+      }));
+    },
 
     loadConversations: async (options) => {
       const guard = captureSessionGuard();
@@ -313,8 +383,10 @@ export const useChat = create<ChatState>((set, get) => {
           return get().conversations;
         }
         const currentById = new Map(get().conversations.map((c) => [c.id, c]));
+        const detailsById = get().detailsById;
         const merged = fetched.map((incoming) => {
           const prev = currentById.get(incoming.id);
+          const existingDetail = detailsById[incoming.id];
           if (
             prev &&
             typeof prev.version === 'number' &&
@@ -322,6 +394,20 @@ export const useChat = create<ChatState>((set, get) => {
             incoming.version < prev.version
           ) {
             return prev;
+          }
+          const lockedSameVersion =
+            typeof incoming.version === 'number' &&
+            incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED' &&
+            ((prev &&
+              typeof prev.version === 'number' &&
+              incoming.version === prev.version &&
+              prev.restrictionReason === 'COUNTERPARTY_RESTRICTED') ||
+              (existingDetail &&
+                typeof existingDetail.version === 'number' &&
+                incoming.version === existingDetail.version &&
+                existingDetail.restrictionReason === 'COUNTERPARTY_RESTRICTED'));
+          if (lockedSameVersion) {
+            return preserveCounterpartyRestrictedOnSummary(incoming);
           }
           return incoming;
         });
@@ -568,20 +654,32 @@ export const useChat = create<ChatState>((set, get) => {
 
     createOffer: async (conversationId: string, input: CreateOfferInput) => {
       const guard = captureSessionGuard();
+      const draftKey = `offer:${conversationId}:${input.offeredPrice}:${(input.note ?? '').trim()}`;
+      const explicitClientId = input.clientMessageId?.trim();
+      let clientMessageId = explicitClientId || draftClientIds.get(draftKey);
+      if (!clientMessageId) {
+        clientMessageId = generateClientMessageId();
+        draftClientIds.set(draftKey, clientMessageId);
+      }
+
       set({ error: null });
       try {
         const detail = await chatApi.createPriceOffer(conversationId, {
           ...input,
-          clientMessageId: input.clientMessageId || generateClientMessageId(),
+          clientMessageId,
         });
         if (!isGuardActive(guard)) {
           return get().detailsById[conversationId] ?? detail;
         }
+        draftClientIds.delete(draftKey);
         const applied = applyDetailWithVersionGuard(detail);
         set({ error: null });
         return applied;
       } catch (err: any) {
         if (isGuardActive(guard)) {
+          if (isNonRetryableBusinessError(err)) {
+            draftClientIds.delete(draftKey);
+          }
           const message = err?.message || 'Không thể gửi đề nghị giá.';
           if (err?.status === 403 && err?.code === 'COUNTERPARTY_RESTRICTED') {
             applyCounterpartyRestrictedLock(conversationId);
@@ -603,20 +701,32 @@ export const useChat = create<ChatState>((set, get) => {
       input: RespondOfferInput,
     ) => {
       const guard = captureSessionGuard();
+      const draftKey = `respond:${conversationId}:${messageId}:${input.action}:${input.counterPrice ?? ''}:${(input.note ?? '').trim()}`;
+      const explicitClientId = input.clientMessageId?.trim();
+      let clientMessageId = explicitClientId || draftClientIds.get(draftKey);
+      if (!clientMessageId) {
+        clientMessageId = generateClientMessageId();
+        draftClientIds.set(draftKey, clientMessageId);
+      }
+
       set({ error: null });
       try {
         const detail = await chatApi.respondToPriceOffer(conversationId, messageId, {
           ...input,
-          clientMessageId: input.clientMessageId || generateClientMessageId(),
+          clientMessageId,
         });
         if (!isGuardActive(guard)) {
           return get().detailsById[conversationId] ?? detail;
         }
+        draftClientIds.delete(draftKey);
         const applied = applyDetailWithVersionGuard(detail);
         set({ error: null });
         return applied;
       } catch (err: any) {
         if (isGuardActive(guard)) {
+          if (isNonRetryableBusinessError(err)) {
+            draftClientIds.delete(draftKey);
+          }
           const message = err?.message || 'Không thể phản hồi đề nghị giá.';
           if (err?.status === 403 && err?.code === 'COUNTERPARTY_RESTRICTED') {
             applyCounterpartyRestrictedLock(conversationId);
