@@ -119,6 +119,7 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                       'chk_quyet_dinh_gd_ket_luan',
                       'chk_quyet_dinh_gd_can_cu',
                       'chk_otp_invalidation_reason',
+                      'chk_yc_huy_trang_thai',
                       'chk_nhat_ky_kiem_duyet_action_type'
                   )
                 """,
@@ -129,6 +130,7 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                 "chk_quyet_dinh_gd_ket_luan",
                 "chk_quyet_dinh_gd_can_cu",
                 "chk_otp_invalidation_reason",
+                "chk_yc_huy_trang_thai",
                 "chk_nhat_ky_kiem_duyet_action_type"
         );
     }
@@ -168,11 +170,25 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                 Statement stmt = conn.createStatement()) {
             stmt.execute("SET search_path TO " + upgradeSchema);
 
-            // Simulate P3-02 PR #38 already having added 4-value chk_otp_invalidation_reason before V14
+            // Simulate P3-02 PR #38 already having added 4-value chk_otp_invalidation_reason and 4-value yeu_cau_huy_giao_dichs before V14
             stmt.execute("""
                     ALTER TABLE ma_xac_nhan_otp ADD COLUMN IF NOT EXISTS ly_do_vo_hieu VARCHAR(40);
                     ALTER TABLE ma_xac_nhan_otp ADD CONSTRAINT chk_otp_invalidation_reason
                       CHECK (ly_do_vo_hieu IS NULL OR ly_do_vo_hieu IN ('CAP_LAI', 'VUOT_SO_LAN_SAI', 'DA_HUY_GIAO_DICH', 'HET_HAN'));
+                    CREATE TABLE yeu_cau_huy_giao_dichs (
+                      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                      ma_giao_dich UUID NOT NULL REFERENCES giao_dichs(ma_giao_dich) ON DELETE CASCADE,
+                      nguoi_yeu_cau_id UUID NOT NULL REFERENCES thanh_viens(user_id),
+                      ma_ly_do VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+                      ly_do TEXT,
+                      trang_thai VARCHAR(30) NOT NULL DEFAULT 'CHO_XAC_NHAN'
+                        CHECK (trang_thai IN ('CHO_XAC_NHAN', 'DONG_Y', 'TU_CHOI', 'DA_DONG_DO_HOAN_TAT')),
+                      nguoi_phan_hoi_id UUID REFERENCES thanh_viens(user_id),
+                      phan_hoi_ghi_chu TEXT,
+                      thoi_diem_phan_hoi TIMESTAMPTZ,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
                     """);
 
             stmt.execute(
@@ -203,6 +219,16 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                     "INSERT INTO ma_xac_nhan_otp(ma_giao_dich, ma_otp, thoi_diem_phat, thoi_diem_het_han, bi_vo_hieu, ly_do_vo_hieu) "
                             + "VALUES ('" + orderId + "', NULL, NOW(), NOW() + INTERVAL '10 minutes', TRUE, 'QUYET_DINH_KIEM_DUYET')"
             );
+
+            // Verify DA_DONG_DO_HUY is allowed on yeu_cau_huy_giao_dichs after upgrade (and invalid status rejected)
+            stmt.execute(
+                    "INSERT INTO yeu_cau_huy_giao_dichs(ma_giao_dich, nguoi_yeu_cau_id, ma_ly_do, ly_do, trang_thai) "
+                            + "VALUES ('" + orderId + "', '" + buyerId + "', 'OTHER', 'Đóng do KDV hủy', 'DA_DONG_DO_HUY')"
+            );
+            assertThatThrownBy(() -> stmt.execute(
+                    "INSERT INTO yeu_cau_huy_giao_dichs(ma_giao_dich, nguoi_yeu_cau_id, ma_ly_do, ly_do, trang_thai) "
+                            + "VALUES ('" + orderId + "', '" + buyerId + "', 'OTHER', 'Trạng thái sai', 'INVALID_STATUS')"))
+                    .isInstanceOf(SQLException.class);
 
             // Verify quyet_dinh_giao_dichs checks & uq_quyet_dinh_gd
             assertThatThrownBy(() -> stmt.execute(

@@ -296,7 +296,7 @@ public class DisputeService {
                                  WHEN g.trang_thai = 'CHO_XU_LY' THEN 1
                                  ELSE 2
                              END ASC,
-                             CASE WHEN g.trang_thai = 'CHO_XU_LY' THEN g.han_phan_hoi_kdv END ASC NULLS LAST,
+                             CASE WHEN g.trang_thai = 'CHO_XU_LY' THEN COALESCE(g.han_phan_hoi_kdv, g.thoi_diem_chuyen_xu_ly + INTERVAL '3 days') END ASC NULLS LAST,
                              CASE WHEN g.trang_thai = 'CHO_XU_LY' THEN g.thoi_diem_chuyen_xu_ly END ASC NULLS LAST,
                              COALESCE(qd.thoi_diem, g.updated_at) DESC,
                              g.ma_giao_dich DESC
@@ -317,7 +317,7 @@ public class DisputeService {
 
     @Transactional(readOnly = true)
     public DisputeDtos.EvidenceBinaryContent loadAdminHandoverPhoto(UUID moderatorId, UUID orderId, UUID photoId) {
-        OrderLookup lookup = lookupOrderOrThrow(orderId);
+        OrderLookup lookup = lookupDisputeOrderOrThrow(orderId);
         enforceNotSelfDispute(moderatorId, lookup.buyerId(), lookup.sellerId());
 
         List<Map<String, Object>> rows = db.queryForList(
@@ -347,7 +347,11 @@ public class DisputeService {
             );
             if (!legacy.isEmpty() && legacy.getFirst() != null && !legacy.getFirst().isBlank()) {
                 String rawKey = legacy.getFirst().strip();
-                if (!rawKey.startsWith("http://") && !rawKey.startsWith("https://") && !rawKey.startsWith("/")) {
+                String lower = rawKey.toLowerCase(Locale.ROOT);
+                if (!rawKey.startsWith("/")
+                        && !lower.startsWith("http://")
+                        && !lower.startsWith("https://")
+                        && !rawKey.contains("://")) {
                     Resource resource = evidenceStorage.loadHandoverAsResource(rawKey);
                     long size = resolveSize(resource, 0L);
                     String contentType = guessImageContentType(rawKey);
@@ -361,7 +365,7 @@ public class DisputeService {
 
     @Transactional(readOnly = true)
     public DisputeDtos.EvidenceBinaryContent loadAdminSupplementaryAttachment(UUID moderatorId, UUID orderId, UUID attachmentId) {
-        OrderLookup lookup = lookupOrderOrThrow(orderId);
+        OrderLookup lookup = lookupDisputeOrderOrThrow(orderId);
         enforceNotSelfDispute(moderatorId, lookup.buyerId(), lookup.sellerId());
         return loadSupplementaryAttachmentBinary(orderId, attachmentId);
     }
@@ -384,8 +388,8 @@ public class DisputeService {
         OrderLookup lookup = lookupOrderOrThrow(orderId);
         enforceNotSelfDispute(moderatorId, lookup.buyerId(), lookup.sellerId());
 
-        // Strict global lock order: (1) thanh_viens -> (2) tin_dangs -> (3) giao_dichs -> (4) do_vats ASC
-        lockMemberForKeyShare(lookup.sellerId());
+        // Strict global lock order: (1) thanh_viens ASC -> (2) tin_dangs -> (3) giao_dichs -> (4) do_vats ASC
+        lockMembersForKeyShareSorted(lookup.sellerId(), lookup.buyerId(), moderatorId);
         LockedListing listing = lockListingForNoKeyUpdate(lookup.listingId());
         LockedOrder order = lockOrderForNoKeyUpdate(orderId);
 
@@ -393,7 +397,23 @@ public class DisputeService {
         validateModerationOrderState(order, expectedVersion);
 
         List<UUID> orderItemIds = findOrderItemIdsSorted(orderId, listing.id());
-        lockItemsSorted(orderItemIds);
+        List<LockedItem> lockedItems = lockItemsSorted(orderItemIds);
+        if (lockedItems.size() != orderItemIds.size()) {
+            throw new AuthFailure(
+                    409,
+                    "INVALID_STATE_TRANSITION",
+                    "Một hoặc nhiều đồ vật thuộc giao dịch không còn tồn tại trong kho để hoàn tất."
+            );
+        }
+        for (LockedItem item : lockedItems) {
+            if ("DA_CHUYEN_GIAO".equals(item.status()) || hasActiveItemHoldExcludingOrder(item.id(), orderId)) {
+                throw new AuthFailure(
+                        409,
+                        "INVALID_STATE_TRANSITION",
+                        "Một hoặc nhiều đồ vật thuộc giao dịch đã được chuyển giao hoặc đang bị giữ chỗ bởi giao dịch khác."
+                );
+            }
+        }
 
         Instant reviewDeadline = current.plus(REVIEW_WINDOW_DAYS, ChronoUnit.DAYS);
         Timestamp tsReviewDeadline = Timestamp.from(reviewDeadline);
@@ -523,9 +543,9 @@ public class DisputeService {
         OrderLookup lookup = lookupOrderOrThrow(orderId);
         enforceNotSelfDispute(moderatorId, lookup.buyerId(), lookup.sellerId());
 
-        // Strict global lock order: (1) thanh_viens(seller) -> (2) tin_dangs -> (3) giao_dichs -> (4) do_vats ASC
+        // Strict global lock order: (1) thanh_viens ASC (reconciling/updating sellerId in canonical order) -> (2) tin_dangs -> (3) giao_dichs -> (4) do_vats ASC
         // Reconcile expired 14-day temporary lock per FR-12 before checking seller reopen eligibility
-        LockedSeller seller = lockSellerForReopenEvaluation(lookup.sellerId());
+        LockedSeller seller = lockMembersCanonicalForCancel(lookup.sellerId(), lookup.buyerId(), moderatorId);
         LockedListing listing = lockListingForNoKeyUpdate(lookup.listingId());
         LockedOrder order = lockOrderForNoKeyUpdate(orderId);
 
@@ -558,10 +578,15 @@ public class DisputeService {
                 orderId
         );
 
-        // 2. Invalidate active OTP codes & close open evidence/schedule requests
+        // 2. Invalidate active OTP codes & close open evidence/cancel/schedule requests
         invalidateActiveOtps(orderId);
         db.update(
                 "UPDATE yeu_cau_bo_sung_giao_dichs SET trang_thai = 'DA_DONG' WHERE ma_giao_dich = ? AND trang_thai = 'CHO_BO_SUNG'",
+                orderId
+        );
+        db.update(
+                "UPDATE yeu_cau_huy_giao_dichs SET trang_thai = 'DA_DONG_DO_HUY', updated_at = ? WHERE ma_giao_dich = ? AND trang_thai = 'CHO_XAC_NHAN'",
+                tsNow,
                 orderId
         );
         db.update(
@@ -615,6 +640,7 @@ public class DisputeService {
                         """
                         UPDATE tin_dangs
                         SET trang_thai = 'CONG_KHAI',
+                            ly_do_an = NULL,
                             updated_at = ?,
                             version = version + 1
                         WHERE ma_tin = ?
@@ -747,6 +773,9 @@ public class DisputeService {
         OrderLookup lookup = lookupOrderOrThrow(orderId);
         enforceNotSelfDispute(moderatorId, lookup.buyerId(), lookup.sellerId());
 
+        // Strict global lock order: (1) thanh_viens ASC -> (2) tin_dangs (FOR KEY SHARE) -> (3) giao_dichs (FOR NO KEY UPDATE)
+        lockMembersForKeyShareSorted(lookup.sellerId(), lookup.buyerId(), moderatorId);
+        String listingTitle = lockListingTitleForKeyShare(lookup.listingId());
         LockedOrder order = lockOrderForNoKeyUpdate(orderId);
         enforceNotSelfDispute(moderatorId, order.buyerId(), order.sellerId());
         validateModerationOrderState(order, expectedVersion);
@@ -850,7 +879,6 @@ public class DisputeService {
                 tsNow
         );
 
-        String listingTitle = loadListingTitle(order.listingId());
         if ("BUYER".equals(targetParty) || "BOTH".equals(targetParty)) {
             notificationService.notifyUser(
                     order.buyerId(),
@@ -930,7 +958,10 @@ public class DisputeService {
             }
             String senderRole = isBuyer ? "BUYER" : "SELLER";
 
-            verifyActiveMemberForWrite(senderId);
+            // Strict global lock order: (1) thanh_viens ASC -> (2) tin_dangs (FOR KEY SHARE) -> (3) giao_dichs -> (4) yeu_cau_bo_sung_giao_dichs
+            UUID evidenceRequesterId = lookupEvidenceRequestActorOrNull(orderId, requestId);
+            lockMembersCanonicalForEvidenceSubmit(senderId, lookup.sellerId(), lookup.buyerId(), evidenceRequesterId);
+            String listingTitle = lockListingTitleForKeyShare(lookup.listingId());
 
             LockedOrder order = lockOrderForNoKeyUpdate(orderId);
             if ("HOAN_TAT".equals(order.status()) || "HUY".equals(order.status())) {
@@ -997,8 +1028,8 @@ public class DisputeService {
 
             try {
                 for (SanitizedEvidenceFile file : preparedFiles) {
-                    evidenceStorage.store(file.storageKey(), file.bytes());
                     storedKeys.add(file.storageKey());
+                    evidenceStorage.store(file.storageKey(), file.bytes());
 
                     db.update(
                             """
@@ -1064,7 +1095,6 @@ public class DisputeService {
             insertTimeline(orderId, "EVIDENCE_SUBMITTED", "CHO_XU_LY", "CHO_XU_LY", senderId, senderRole, timelineNote, tsNow);
 
             String senderRoleLabel = isBuyer ? "Người mua" : "Người bán";
-            String listingTitle = loadListingTitle(order.listingId());
             notificationService.notifyUser(
                     evReq.requestedById(),
                     OrderDtos.NotificationType.DISPUTE_EVIDENCE_SUBMITTED,
@@ -1089,8 +1119,11 @@ public class DisputeService {
      * FR-09 / UC-29: Auto-escalates CHO_XAC_NHAN orders whose {@code thoi_diem_bao_giao <= now - 24h}
      * to {@code CHO_XU_LY} with reason {@code OVERDUE_24H} and 3-business-day SLA.
      * NEVER auto-completes or releases items (do_vats stay DANG_GIU, tin_dangs stay GIU_CHO).
+     *
+     * <p>Selects candidate rows without lock, sorts by {@code ma_giao_dich ASC}, then processes each
+     * candidate in its own short transaction following the global lock order
+     * {@code thanh_viens (ASC, FOR KEY SHARE) -> tin_dangs (FOR KEY SHARE) -> giao_dichs (FOR NO KEY UPDATE SKIP LOCKED)}.
      */
-    @Transactional
     public int escalateOverdueTransactionsBatch(int batchSize) {
         int safeBatchSize = Math.clamp(batchSize, 1, 500);
         Instant current = now();
@@ -1100,7 +1133,7 @@ public class DisputeService {
         Timestamp tsCutoff = Timestamp.from(cutoff);
         Timestamp tsDeadline = Timestamp.from(responseDeadline);
 
-        List<OverdueOrderRow> overdueOrders = db.query(
+        List<OverdueOrderRow> candidates = new ArrayList<>(db.query(
                 """
                 SELECT g.ma_giao_dich, g.ma_tin, g.nguoi_mua_id, g.nguoi_ban_id, t.tieu_de
                 FROM giao_dichs g
@@ -1110,7 +1143,6 @@ public class DisputeService {
                   AND g.thoi_diem_bao_giao <= ?
                 ORDER BY g.thoi_diem_bao_giao ASC, g.ma_giao_dich ASC
                 LIMIT ?
-                FOR UPDATE OF g SKIP LOCKED
                 """,
                 (rs, rowNum) -> new OverdueOrderRow(
                         rs.getObject("ma_giao_dich", UUID.class),
@@ -1121,68 +1153,159 @@ public class DisputeService {
                 ),
                 tsCutoff,
                 safeBatchSize
-        );
+        ));
+        candidates.sort(Comparator.comparing(row -> row.orderId().toString()));
 
-        for (OverdueOrderRow row : overdueOrders) {
-            db.update(
-                    """
-                    UPDATE giao_dichs
-                    SET trang_thai = 'CHO_XU_LY',
-                        ly_do_cho_xu_ly = 'OVERDUE_24H',
-                        thoi_diem_chuyen_xu_ly = ?,
-                        han_phan_hoi_kdv = ?,
-                        updated_at = ?,
-                        version = version + 1
-                    WHERE ma_giao_dich = ?
-                      AND trang_thai = 'CHO_XAC_NHAN'
-                    """,
-                    tsNow,
-                    tsDeadline,
-                    tsNow,
-                    row.orderId()
-            );
+        int escalatedCount = 0;
+        for (OverdueOrderRow row : candidates) {
+            Integer escalated = transactionTemplate.execute(status -> {
+                lockMembersForKeyShareSorted(row.sellerId(), row.buyerId());
+                String listingTitle = lockListingTitleForKeyShare(row.listingId());
 
-            insertTimeline(
-                    row.orderId(),
-                    "AUTO_ESCALATED_OVERDUE_24H",
-                    "CHO_XAC_NHAN",
-                    "CHO_XU_LY",
-                    null,
-                    "SYSTEM",
-                    "Quá 24 giờ kể từ lúc người bán báo đã giao nhưng người mua chưa xác nhận hoàn tất. Hệ thống tự động chuyển Kiểm duyệt viên xem xét (hạn phản hồi 3 ngày làm việc).",
-                    tsNow
-            );
+                List<UUID> lockedOrders = db.queryForList(
+                        """
+                        SELECT ma_giao_dich
+                        FROM giao_dichs
+                        WHERE ma_giao_dich = ?
+                          AND trang_thai = 'CHO_XAC_NHAN'
+                          AND thoi_diem_bao_giao IS NOT NULL
+                          AND thoi_diem_bao_giao <= ?
+                        FOR NO KEY UPDATE SKIP LOCKED
+                        """,
+                        UUID.class,
+                        row.orderId(),
+                        tsCutoff
+                );
+                if (lockedOrders.isEmpty()) {
+                    return 0;
+                }
 
-            notificationService.notifyUser(
-                    row.buyerId(),
-                    OrderDtos.NotificationType.ORDER_ESCALATED_OVERDUE_24H,
-                    "Giao dịch đã chuyển Kiểm duyệt viên do quá hạn 24 giờ",
-                    "Giao dịch cho tin \"" + row.listingTitle()
-                            + "\" đã quá 24 giờ kể từ khi người bán báo đã giao và được chuyển Kiểm duyệt viên xem xét (phản hồi trong 3 ngày làm việc).",
-                    row.listingId(),
-                    row.orderId()
-            );
-            notificationService.notifyUser(
-                    row.sellerId(),
-                    OrderDtos.NotificationType.ORDER_ESCALATED_OVERDUE_24H,
-                    "Giao dịch đã chuyển Kiểm duyệt viên do quá hạn 24 giờ",
-                    "Giao dịch cho tin \"" + row.listingTitle()
-                            + "\" đã quá 24 giờ chưa được người mua xác nhận nên hệ thống chuyển Kiểm duyệt viên xem xét (phản hồi trong 3 ngày làm việc).",
-                    row.listingId(),
-                    row.orderId()
-            );
+                int updated = db.update(
+                        """
+                        UPDATE giao_dichs
+                        SET trang_thai = 'CHO_XU_LY',
+                            ly_do_cho_xu_ly = 'OVERDUE_24H',
+                            thoi_diem_chuyen_xu_ly = ?,
+                            han_phan_hoi_kdv = ?,
+                            updated_at = ?,
+                            version = version + 1
+                        WHERE ma_giao_dich = ?
+                          AND trang_thai = 'CHO_XAC_NHAN'
+                        """,
+                        tsNow,
+                        tsDeadline,
+                        tsNow,
+                        row.orderId()
+                );
+                if (updated != 1) {
+                    return 0;
+                }
+
+                insertTimeline(
+                        row.orderId(),
+                        "AUTO_ESCALATED_OVERDUE_24H",
+                        "CHO_XAC_NHAN",
+                        "CHO_XU_LY",
+                        null,
+                        "SYSTEM",
+                        "Quá 24 giờ kể từ lúc người bán báo đã giao nhưng người mua chưa xác nhận hoàn tất. Hệ thống tự động chuyển Kiểm duyệt viên xem xét (hạn phản hồi 3 ngày làm việc).",
+                        tsNow
+                );
+
+                notificationService.notifyUser(
+                        row.buyerId(),
+                        OrderDtos.NotificationType.ORDER_ESCALATED_OVERDUE_24H,
+                        "Giao dịch đã chuyển Kiểm duyệt viên do quá hạn 24 giờ",
+                        "Giao dịch cho tin \"" + listingTitle
+                                + "\" đã quá 24 giờ kể từ khi người bán báo đã giao và được chuyển Kiểm duyệt viên xem xét (phản hồi trong 3 ngày làm việc).",
+                        row.listingId(),
+                        row.orderId()
+                );
+                notificationService.notifyUser(
+                        row.sellerId(),
+                        OrderDtos.NotificationType.ORDER_ESCALATED_OVERDUE_24H,
+                        "Giao dịch đã chuyển Kiểm duyệt viên do quá hạn 24 giờ",
+                        "Giao dịch cho tin \"" + listingTitle
+                                + "\" đã quá 24 giờ chưa được người mua xác nhận nên hệ thống chuyển Kiểm duyệt viên xem xét (phản hồi trong 3 ngày làm việc).",
+                        row.listingId(),
+                        row.orderId()
+                );
+                return 1;
+            });
+            if (escalated != null) {
+                escalatedCount += escalated;
+            }
         }
 
-        return overdueOrders.size();
+        return escalatedCount;
+    }
+
+    /**
+     * P3-02 compatibility: backfills {@code han_phan_hoi_kdv} for {@code CHO_XU_LY} orders escalated
+     * by P3-02 paths that only populated {@code thoi_diem_chuyen_xu_ly}. Does not bump {@code version}.
+     */
+    @Transactional
+    public int backfillMissingResponseDeadlinesBatch(int batchSize) {
+        int safeBatchSize = Math.clamp(batchSize, 1, 500);
+        List<UUID> candidateIds = new ArrayList<>(db.queryForList(
+                """
+                SELECT ma_giao_dich
+                FROM giao_dichs
+                WHERE trang_thai = 'CHO_XU_LY'
+                  AND han_phan_hoi_kdv IS NULL
+                  AND thoi_diem_chuyen_xu_ly IS NOT NULL
+                ORDER BY thoi_diem_chuyen_xu_ly ASC, ma_giao_dich ASC
+                LIMIT ?
+                """,
+                UUID.class,
+                safeBatchSize
+        ));
+        candidateIds.sort(Comparator.comparing(UUID::toString));
+
+        int backfilledCount = 0;
+        for (UUID orderId : candidateIds) {
+            List<Timestamp> lockedEscalatedAt = db.queryForList(
+                    """
+                    SELECT thoi_diem_chuyen_xu_ly
+                    FROM giao_dichs
+                    WHERE ma_giao_dich = ?
+                      AND trang_thai = 'CHO_XU_LY'
+                      AND han_phan_hoi_kdv IS NULL
+                      AND thoi_diem_chuyen_xu_ly IS NOT NULL
+                    FOR NO KEY UPDATE SKIP LOCKED
+                    """,
+                    Timestamp.class,
+                    orderId
+            );
+            if (lockedEscalatedAt.isEmpty() || lockedEscalatedAt.getFirst() == null) {
+                continue;
+            }
+            Instant deadline = addBusinessDays(lockedEscalatedAt.getFirst().toInstant(), SLA_RESPONSE_BUSINESS_DAYS);
+            int updated = db.update(
+                    """
+                    UPDATE giao_dichs
+                    SET han_phan_hoi_kdv = ?
+                    WHERE ma_giao_dich = ?
+                      AND trang_thai = 'CHO_XU_LY'
+                      AND han_phan_hoi_kdv IS NULL
+                    """,
+                    Timestamp.from(deadline),
+                    orderId
+            );
+            if (updated == 1) {
+                backfilledCount++;
+            }
+        }
+        return backfilledCount;
     }
 
     /**
      * UC-29 Alt 2: Expires overdue supplementary evidence requests ({@code han_bo_sung <= now})
-     * to {@code QUA_HAN} so the dispute automatically returns to the READY queue.
+     * on active {@code CHO_XU_LY} disputes to {@code QUA_HAN} so they automatically return to READY.
      *
-     * <p>Follows canonical lock ordering ({@code giao_dichs -> yeu_cau_bo_sung_giao_dichs},
-     * sorted by {@code ma_giao_dich ASC}) to remain deadlock-free with {@code completeDispute},
-     * {@code cancelDispute}, {@code requestEvidence}, and {@code submitEvidenceResponse}.
+     * <p>Filters {@code g.trang_thai = 'CHO_XU_LY'} in the candidate query to prevent permanent
+     * batch starvation from terminal orders, and follows canonical lock ordering
+     * ({@code giao_dichs -> yeu_cau_bo_sung_giao_dichs}, sorted by {@code ma_giao_dich ASC}).
      */
     @Transactional
     public int expireOverdueEvidenceRequestsBatch(int batchSize) {
@@ -1192,11 +1315,13 @@ public class DisputeService {
 
         List<ExpiredEvidenceRow> candidates = new ArrayList<>(db.query(
                 """
-                SELECT id, ma_giao_dich
-                FROM yeu_cau_bo_sung_giao_dichs
-                WHERE trang_thai = 'CHO_BO_SUNG'
-                  AND han_bo_sung <= ?
-                ORDER BY han_bo_sung ASC, id ASC
+                SELECT yc.id, yc.ma_giao_dich
+                FROM yeu_cau_bo_sung_giao_dichs yc
+                JOIN giao_dichs g ON g.ma_giao_dich = yc.ma_giao_dich
+                WHERE yc.trang_thai = 'CHO_BO_SUNG'
+                  AND yc.han_bo_sung <= ?
+                  AND g.trang_thai = 'CHO_XU_LY'
+                ORDER BY yc.han_bo_sung ASC, yc.id ASC
                 LIMIT ?
                 """,
                 (rs, rowNum) -> new ExpiredEvidenceRow(
@@ -1257,6 +1382,65 @@ public class DisputeService {
         }
 
         return expiredCount;
+    }
+
+    /**
+     * Secondary cleanup pass closing dangling {@code CHO_BO_SUNG} evidence requests to {@code DA_DONG}
+     * on orders that reached terminal {@code HOAN_TAT}/{@code HUY} via P3-02 self-confirmation or mutual cancel.
+     */
+    @Transactional
+    public int closeOrphanedEvidenceRequestsBatch(int batchSize) {
+        int safeBatchSize = Math.clamp(batchSize, 1, 500);
+
+        List<ExpiredEvidenceRow> candidates = new ArrayList<>(db.query(
+                """
+                SELECT yc.id, yc.ma_giao_dich
+                FROM yeu_cau_bo_sung_giao_dichs yc
+                JOIN giao_dichs g ON g.ma_giao_dich = yc.ma_giao_dich
+                WHERE yc.trang_thai = 'CHO_BO_SUNG'
+                  AND g.trang_thai IN ('HOAN_TAT', 'HUY')
+                ORDER BY yc.thoi_diem_tao ASC, yc.id ASC
+                LIMIT ?
+                """,
+                (rs, rowNum) -> new ExpiredEvidenceRow(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("ma_giao_dich", UUID.class)
+                ),
+                safeBatchSize
+        ));
+        candidates.sort(Comparator.comparing(row -> row.orderId().toString()));
+
+        int closedCount = 0;
+        for (ExpiredEvidenceRow row : candidates) {
+            List<UUID> lockedOrders = db.queryForList(
+                    """
+                    SELECT ma_giao_dich
+                    FROM giao_dichs
+                    WHERE ma_giao_dich = ?
+                      AND trang_thai IN ('HOAN_TAT', 'HUY')
+                    FOR NO KEY UPDATE SKIP LOCKED
+                    """,
+                    UUID.class,
+                    row.orderId()
+            );
+            if (lockedOrders.isEmpty()) {
+                continue;
+            }
+
+            int updated = db.update(
+                    """
+                    UPDATE yeu_cau_bo_sung_giao_dichs
+                    SET trang_thai = 'DA_DONG'
+                    WHERE id = ?
+                      AND trang_thai = 'CHO_BO_SUNG'
+                    """,
+                    row.requestId()
+            );
+            if (updated == 1) {
+                closedCount++;
+            }
+        }
+        return closedCount;
     }
 
     // =========================================================================
@@ -1353,6 +1537,13 @@ public class DisputeService {
                 LEFT JOIN quyet_dinh_giao_dichs qd ON qd.ma_giao_dich = g.ma_giao_dich
                 LEFT JOIN thanh_viens decider ON decider.user_id = qd.nguoi_quyet_dinh_id
                 WHERE g.ma_giao_dich = ?
+                  AND (
+                      g.trang_thai = 'CHO_XU_LY'
+                      OR (
+                          g.trang_thai IN ('HOAN_TAT', 'HUY')
+                          AND (qd.id IS NOT NULL OR g.thoi_diem_chuyen_xu_ly IS NOT NULL)
+                      )
+                  )
                 """,
                 (rs, rowNum) -> new AdminDetailRow(
                         rs.getObject("ma_giao_dich", UUID.class),
@@ -1407,7 +1598,8 @@ public class DisputeService {
         boolean isCombo = ListingDtos.ListingType.BAN_COMBO.name().equals(row.listingType()) || items.size() >= 2;
         boolean isFree = row.listedPriceVnd() == 0;
         String queueState = computeQueueState(row.status(), row.hasActiveEvidenceRequest());
-        boolean overdueSla = computeOverdueSla(row.status(), row.responseDeadlineAt(), current);
+        Instant effectiveDeadline = resolveEffectiveResponseDeadline(row.responseDeadlineAt(), row.escalatedAt());
+        boolean overdueSla = computeOverdueSla(row.status(), effectiveDeadline, current);
 
         DisputeDtos.DecisionSummaryDto decisionSummary = row.decisionId() != null
                 ? new DisputeDtos.DecisionSummaryDto(row.decisionConclusion(), row.decidedByName(), row.decidedAt())
@@ -1428,7 +1620,7 @@ public class DisputeService {
         List<DisputeDtos.HandoverPhotoDto> handoverPhotos = loadHandoverPhotos(orderId, row.legacyHandoverPhoto(), row.reportedDeliveredAt());
         List<DisputeDtos.DisputeScheduleProposalDto> scheduleProposals = loadScheduleProposals(orderId);
         List<DisputeDtos.DisputeCancelRequestDto> cancelRequests = loadCancelRequests(orderId, row.buyerId());
-        List<DisputeDtos.AdminEvidenceRequestDto> evidenceRequests = loadAdminEvidenceRequests(orderId);
+        List<DisputeDtos.AdminEvidenceRequestDto> evidenceRequests = loadAdminEvidenceRequests(orderId, current);
         List<DisputeDtos.DisputeChatMessageDto> chatMessages = loadChatMessages(row.listingId(), row.buyerId(), row.sellerId());
         List<DisputeDtos.DisputeTimelineEntryDto> timeline = loadTimeline(orderId);
 
@@ -1438,7 +1630,7 @@ public class DisputeService {
                 row.status(),
                 row.escalationReason(),
                 row.escalatedAt(),
-                row.responseDeadlineAt(),
+                effectiveDeadline,
                 overdueSla,
                 queueState,
                 new DisputeDtos.DisputeListingSummaryDto(
@@ -1537,6 +1729,7 @@ public class DisputeService {
                 current
         );
         List<DisputeDtos.DisputeTimelineEntryDto> timeline = loadTimeline(orderId);
+        Instant effectiveDeadline = resolveEffectiveResponseDeadline(row.responseDeadlineAt(), row.escalatedAt());
 
         return new DisputeDtos.MemberDisputeDto(
                 row.orderId(),
@@ -1545,7 +1738,7 @@ public class DisputeService {
                 viewerRole,
                 row.escalationReason(),
                 row.escalatedAt(),
-                row.responseDeadlineAt(),
+                effectiveDeadline,
                 row.reviewDeadlineAt(),
                 decision,
                 evidenceRequests,
@@ -1556,7 +1749,11 @@ public class DisputeService {
     private DisputeDtos.DisputeSummaryDto mapSummaryRow(ResultSet rs, Instant current) throws SQLException {
         String status = rs.getString("trang_thai");
         boolean hasActiveEvidence = rs.getBoolean("has_active_evidence_request");
-        Instant responseDeadlineAt = toInstant(rs.getTimestamp("han_phan_hoi_kdv"));
+        Instant escalatedAt = toInstant(rs.getTimestamp("thoi_diem_chuyen_xu_ly"));
+        Instant responseDeadlineAt = resolveEffectiveResponseDeadline(
+                toInstant(rs.getTimestamp("han_phan_hoi_kdv")),
+                escalatedAt
+        );
         List<String> images = extractTextArray(rs, "hinh_anh");
         int listedPrice = rs.getInt("gia_vnd");
         String listingType = rs.getString("hinh_thuc");
@@ -1578,7 +1775,7 @@ public class DisputeService {
                 rs.getLong("version"),
                 status,
                 rs.getString("ly_do_cho_xu_ly"),
-                toInstant(rs.getTimestamp("thoi_diem_chuyen_xu_ly")),
+                escalatedAt,
                 responseDeadlineAt,
                 computeOverdueSla(status, responseDeadlineAt, current),
                 computeQueueState(status, hasActiveEvidence),
@@ -1681,17 +1878,32 @@ public class DisputeService {
         }
         if (legacyHandoverPhoto != null && !legacyHandoverPhoto.isBlank()) {
             String trimmed = legacyHandoverPhoto.strip();
-            UUID legacyId = legacyHandoverPhotoId(orderId);
-            String url = (trimmed.startsWith("/") || trimmed.startsWith("http://") || trimmed.startsWith("https://"))
-                    ? trimmed
-                    : "/api/v1/admin/disputes/" + orderId + "/evidence/handover/" + legacyId;
-            return List.of(new DisputeDtos.HandoverPhotoDto(
-                    legacyId,
-                    url,
-                    guessImageContentType(trimmed),
-                    0L,
-                    reportedDeliveredAt
-            ));
+            String lower = trimmed.toLowerCase(Locale.ROOT);
+            // Reject protocol-relative URLs (//...) and external hosts; allow only /api/v1/... or safe storage keys
+            if (!trimmed.startsWith("//")
+                    && !lower.startsWith("http://")
+                    && !lower.startsWith("https://")
+                    && !trimmed.contains("://")) {
+                UUID legacyId = legacyHandoverPhotoId(orderId);
+                if (trimmed.startsWith("/api/v1/")) {
+                    return List.of(new DisputeDtos.HandoverPhotoDto(
+                            legacyId,
+                            trimmed,
+                            guessImageContentType(trimmed),
+                            0L,
+                            reportedDeliveredAt
+                    ));
+                }
+                if (!trimmed.startsWith("/") && !trimmed.contains("\\") && !trimmed.contains("..")) {
+                    return List.of(new DisputeDtos.HandoverPhotoDto(
+                            legacyId,
+                            "/api/v1/admin/disputes/" + orderId + "/evidence/handover/" + legacyId,
+                            guessImageContentType(trimmed),
+                            0L,
+                            reportedDeliveredAt
+                    ));
+                }
+            }
         }
         return List.of();
     }
@@ -1754,7 +1966,7 @@ public class DisputeService {
         );
     }
 
-    private List<DisputeDtos.AdminEvidenceRequestDto> loadAdminEvidenceRequests(UUID orderId) {
+    private List<DisputeDtos.AdminEvidenceRequestDto> loadAdminEvidenceRequests(UUID orderId, Instant current) {
         List<RawEvidenceRequest> requests = loadRawEvidenceRequests(orderId);
         if (requests.isEmpty()) {
             return List.of();
@@ -1767,6 +1979,7 @@ public class DisputeService {
 
         List<DisputeDtos.AdminEvidenceRequestDto> result = new ArrayList<>(requests.size());
         for (RawEvidenceRequest req : requests) {
+            String effectiveStatus = effectiveEvidenceRequestStatus(req.status(), req.dueAt(), current);
             List<RawEvidenceResponse> rawResps = responsesByReq.getOrDefault(req.id(), List.of());
             List<DisputeDtos.AdminEvidenceResponseDto> mappedResps = rawResps.stream()
                     .map(r -> new DisputeDtos.AdminEvidenceResponseDto(
@@ -1784,7 +1997,7 @@ public class DisputeService {
                     req.targetParty(),
                     req.instruction(),
                     req.dueAt(),
-                    req.status(),
+                    effectiveStatus,
                     req.requestedByName(),
                     req.createdAt(),
                     req.respondedAt(),
@@ -1813,14 +2026,13 @@ public class DisputeService {
 
         List<DisputeDtos.MemberEvidenceRequestDto> result = new ArrayList<>(requests.size());
         for (RawEvidenceRequest req : requests) {
+            String effectiveStatus = effectiveEvidenceRequestStatus(req.status(), req.dueAt(), current);
             List<RawEvidenceResponse> rawResps = responsesByReq.getOrDefault(req.id(), List.of());
             boolean hasViewerResponded = rawResps.stream().anyMatch(r -> viewerRole.equals(r.senderRole()));
             boolean isTargeted = "BOTH".equals(req.targetParty()) || viewerRole.equals(req.targetParty());
             boolean canSubmit = viewerActive
                     && "CHO_XU_LY".equals(orderStatus)
-                    && "CHO_BO_SUNG".equals(req.status())
-                    && req.dueAt() != null
-                    && req.dueAt().isAfter(current)
+                    && "CHO_BO_SUNG".equals(effectiveStatus)
                     && isTargeted
                     && !hasViewerResponded;
 
@@ -1839,7 +2051,7 @@ public class DisputeService {
                     req.targetParty(),
                     req.instruction(),
                     req.dueAt(),
-                    req.status(),
+                    effectiveStatus,
                     req.createdAt(),
                     canSubmit,
                     hasViewerResponded,
@@ -1939,6 +2151,7 @@ public class DisputeService {
                   AND ht.nguoi_mua_id = ?
                   AND ht.nguoi_ban_id = ?
                 ORDER BY tn.thoi_diem_gui ASC, tn.ma_tin_nhan ASC
+                LIMIT 200
                 """,
                 (rs, rowNum) -> {
                     UUID senderId = rs.getObject("nguoi_gui_id", UUID.class);
@@ -2116,6 +2329,16 @@ public class DisputeService {
                           SELECT 1 FROM giao_dich_do_vat gdv
                           WHERE gdv.ma_vat = d.ma_vat AND gdv.giu_hieu_luc = TRUE
                       )
+                      OR EXISTS (
+                          SELECT 1
+                          FROM giao_dichs g
+                          JOIN tin_dang_do_vat tdv2 ON tdv2.ma_tin = g.ma_tin
+                          WHERE tdv2.ma_vat = d.ma_vat
+                            AND g.trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                            AND NOT EXISTS (
+                                SELECT 1 FROM giao_dich_do_vat gdv2 WHERE gdv2.ma_giao_dich = g.ma_giao_dich
+                            )
+                      )
                   )
                 """,
                 Integer.class,
@@ -2139,12 +2362,58 @@ public class DisputeService {
     }
 
     private boolean hasActiveItemHold(UUID itemId) {
-        Integer count = db.queryForObject(
-                "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_vat = ? AND giu_hieu_luc = TRUE",
-                Integer.class,
-                itemId
-        );
-        return count != null && count > 0;
+        return hasActiveItemHoldExcludingOrder(itemId, null);
+    }
+
+    private boolean hasActiveItemHoldExcludingOrder(UUID itemId, UUID excludedOrderId) {
+        Integer snapshotCount = excludedOrderId != null
+                ? db.queryForObject(
+                        "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_vat = ? AND giu_hieu_luc = TRUE AND ma_giao_dich <> ?",
+                        Integer.class,
+                        itemId,
+                        excludedOrderId
+                )
+                : db.queryForObject(
+                        "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_vat = ? AND giu_hieu_luc = TRUE",
+                        Integer.class,
+                        itemId
+                );
+        if (snapshotCount != null && snapshotCount > 0) {
+            return true;
+        }
+        // Fallback for legacy/P3-02 active orders that do not have giao_dich_do_vat snapshot rows
+        Integer legacyOrderCount = excludedOrderId != null
+                ? db.queryForObject(
+                        """
+                        SELECT COUNT(*)
+                        FROM giao_dichs g
+                        JOIN tin_dang_do_vat tdv ON tdv.ma_tin = g.ma_tin
+                        WHERE tdv.ma_vat = ?
+                          AND g.ma_giao_dich <> ?
+                          AND g.trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM giao_dich_do_vat gdv WHERE gdv.ma_giao_dich = g.ma_giao_dich
+                          )
+                        """,
+                        Integer.class,
+                        itemId,
+                        excludedOrderId
+                )
+                : db.queryForObject(
+                        """
+                        SELECT COUNT(*)
+                        FROM giao_dichs g
+                        JOIN tin_dang_do_vat tdv ON tdv.ma_tin = g.ma_tin
+                        WHERE tdv.ma_vat = ?
+                          AND g.trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM giao_dich_do_vat gdv WHERE gdv.ma_giao_dich = g.ma_giao_dich
+                          )
+                        """,
+                        Integer.class,
+                        itemId
+                );
+        return legacyOrderCount != null && legacyOrderCount > 0;
     }
 
     private void invalidateActiveOtps(UUID orderId) {
@@ -2272,9 +2541,115 @@ public class DisputeService {
         return rows.getFirst();
     }
 
+    private OrderLookup lookupDisputeOrderOrThrow(UUID orderId) {
+        List<OrderLookup> rows = db.query(
+                """
+                SELECT g.ma_giao_dich, g.ma_tin, g.nguoi_ban_id, g.nguoi_mua_id
+                FROM giao_dichs g
+                WHERE g.ma_giao_dich = ?
+                  AND (
+                      g.trang_thai = 'CHO_XU_LY'
+                      OR (
+                          g.trang_thai IN ('HOAN_TAT', 'HUY')
+                          AND (
+                              g.thoi_diem_chuyen_xu_ly IS NOT NULL
+                              OR EXISTS (SELECT 1 FROM quyet_dinh_giao_dichs qd WHERE qd.ma_giao_dich = g.ma_giao_dich)
+                          )
+                      )
+                  )
+                """,
+                (rs, rowNum) -> new OrderLookup(
+                        rs.getObject("ma_giao_dich", UUID.class),
+                        rs.getObject("ma_tin", UUID.class),
+                        rs.getObject("nguoi_ban_id", UUID.class),
+                        rs.getObject("nguoi_mua_id", UUID.class)
+                ),
+                orderId
+        );
+        if (rows.isEmpty()) {
+            throw new AuthFailure(404, "DISPUTE_NOT_FOUND", "Không tìm thấy hồ sơ giao dịch tranh chấp.");
+        }
+        return rows.getFirst();
+    }
+
+    private UUID lookupEvidenceRequestActorOrNull(UUID orderId, UUID requestId) {
+        List<UUID> rows = db.queryForList(
+                "SELECT nguoi_yeu_cau_id FROM yeu_cau_bo_sung_giao_dichs WHERE id = ? AND ma_giao_dich = ?",
+                UUID.class,
+                requestId,
+                orderId
+        );
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
     private void lockMemberForKeyShare(UUID userId) {
         db.query("SELECT user_id FROM thanh_viens WHERE user_id = ? FOR KEY SHARE", rs -> {
         }, userId);
+    }
+
+    private void lockMembersForKeyShareSorted(UUID... userIds) {
+        List<UUID> sorted = canonicalDistinctSorted(userIds);
+        if (sorted.isEmpty()) {
+            return;
+        }
+        UUID[] array = sorted.toArray(UUID[]::new);
+        db.query(
+                con -> {
+                    PreparedStatement ps = con.prepareStatement(
+                            "SELECT user_id FROM thanh_viens WHERE user_id = ANY(?) ORDER BY user_id ASC FOR KEY SHARE"
+                    );
+                    ps.setArray(1, con.createArrayOf("uuid", array));
+                    return ps;
+                },
+                rs -> {
+                }
+        );
+    }
+
+    private LockedSeller lockMembersCanonicalForCancel(UUID sellerId, UUID buyerId, UUID moderatorId) {
+        LockedSeller seller = null;
+        for (UUID uid : canonicalDistinctSorted(sellerId, buyerId, moderatorId)) {
+            if (uid.equals(sellerId)) {
+                seller = lockSellerForReopenEvaluation(sellerId);
+            } else {
+                lockMemberForKeyShare(uid);
+            }
+        }
+        if (seller == null) {
+            throw new AuthFailure(404, "DISPUTE_NOT_FOUND", "Không tìm thấy tài khoản người bán.");
+        }
+        return seller;
+    }
+
+    private void lockMembersCanonicalForEvidenceSubmit(UUID senderId, UUID sellerId, UUID buyerId, UUID requesterId) {
+        for (UUID uid : canonicalDistinctSorted(senderId, sellerId, buyerId, requesterId)) {
+            if (uid.equals(senderId)) {
+                verifyActiveMemberForWrite(senderId);
+            } else {
+                lockMemberForKeyShare(uid);
+            }
+        }
+    }
+
+    private static List<UUID> canonicalDistinctSorted(UUID... ids) {
+        LinkedHashSet<UUID> unique = new LinkedHashSet<>();
+        for (UUID id : ids) {
+            if (id != null) {
+                unique.add(id);
+            }
+        }
+        return unique.stream()
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
+    }
+
+    private String lockListingTitleForKeyShare(UUID listingId) {
+        List<String> rows = db.queryForList(
+                "SELECT tieu_de FROM tin_dangs WHERE ma_tin = ? FOR KEY SHARE",
+                String.class,
+                listingId
+        );
+        return rows.isEmpty() ? "Tin đăng" : rows.getFirst();
     }
 
     private LockedSeller lockSellerForReopenEvaluation(UUID sellerId) {
@@ -2385,15 +2760,22 @@ public class DisputeService {
     }
 
     private List<UUID> findOrderItemIdsSorted(UUID orderId, UUID listingId) {
-        LinkedHashSet<UUID> ids = new LinkedHashSet<>(db.queryForList(
-                "SELECT ma_vat FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND ma_vat IS NOT NULL ORDER BY ma_vat ASC",
-                UUID.class,
+        Integer snapshotCount = db.queryForObject(
+                "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_giao_dich = ?",
+                Integer.class,
                 orderId
-        ));
-        if (ids.isEmpty()) {
-            ids.addAll(findListingItemIdsSorted(listingId));
+        );
+        if (snapshotCount != null && snapshotCount > 0) {
+            return db.queryForList(
+                    "SELECT ma_vat FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND ma_vat IS NOT NULL ORDER BY ma_vat ASC",
+                    UUID.class,
+                    orderId
+            ).stream().distinct().sorted(Comparator.comparing(UUID::toString)).toList();
         }
-        return ids.stream().sorted(Comparator.comparing(UUID::toString)).toList();
+        return findListingItemIdsSorted(listingId).stream()
+                .distinct()
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
     }
 
     private List<LockedItem> lockItemsSorted(Collection<UUID> itemIds) {
@@ -2438,6 +2820,7 @@ public class DisputeService {
                        khoa_den_ngay, loai_han_che, ly_do_han_che, cho_phep_khieu_nai
                 FROM thanh_viens
                 WHERE user_id = ?
+                FOR KEY SHARE
                 """,
                 userId
         );
@@ -2495,9 +2878,18 @@ public class DisputeService {
         return false;
     }
 
-    private String loadListingTitle(UUID listingId) {
-        List<String> rows = db.queryForList("SELECT tieu_de FROM tin_dangs WHERE ma_tin = ?", String.class, listingId);
-        return rows.isEmpty() ? "Tin đăng" : rows.getFirst();
+    private static Instant resolveEffectiveResponseDeadline(Instant dbDeadline, Instant escalatedAt) {
+        if (dbDeadline != null) {
+            return dbDeadline;
+        }
+        return escalatedAt != null ? addBusinessDays(escalatedAt, SLA_RESPONSE_BUSINESS_DAYS) : null;
+    }
+
+    private static String effectiveEvidenceRequestStatus(String rawStatus, Instant dueAt, Instant current) {
+        if ("CHO_BO_SUNG".equals(rawStatus) && dueAt != null && !dueAt.isAfter(current)) {
+            return "QUA_HAN";
+        }
+        return rawStatus;
     }
 
     private static void enforceNotSelfDispute(UUID moderatorId, UUID buyerId, UUID sellerId) {
@@ -2574,10 +2966,10 @@ public class DisputeService {
     }
 
     private static String computeQueueState(String status, boolean hasActiveEvidence) {
-        if ("HOAN_TAT".equals(status) || "HUY".equals(status)) {
-            return "RESOLVED";
+        if ("CHO_XU_LY".equals(status)) {
+            return hasActiveEvidence ? "WAITING_EVIDENCE" : "READY";
         }
-        return hasActiveEvidence ? "WAITING_EVIDENCE" : "READY";
+        return "RESOLVED";
     }
 
     private static boolean computeOverdueSla(String status, Instant responseDeadlineAt, Instant current) {

@@ -43,6 +43,9 @@ class DisputeSchedulerIntegrationTest extends BaseIntegrationTest {
     private DisputeEscalationScheduler scheduler;
 
     @Autowired
+    private DisputeService disputeService;
+
+    @Autowired
     private AuthService auth;
 
     @Autowired
@@ -228,7 +231,7 @@ class DisputeSchedulerIntegrationTest extends BaseIntegrationTest {
         );
 
         int expiredCount = scheduler.expireOverdueEvidenceRequests();
-        assertThat(expiredCount).isEqualTo(1);
+        assertThat(expiredCount).isGreaterThanOrEqualTo(1);
 
         assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, expiredReqId))
                 .isEqualTo("QUA_HAN");
@@ -264,5 +267,153 @@ class DisputeSchedulerIntegrationTest extends BaseIntegrationTest {
         Instant monday = ZonedDateTime.of(2026, 11, 30, 9, 0, 0, 0, DisputeService.VIETNAM_ZONE).toInstant();
         Instant expectedThu = ZonedDateTime.of(2026, 12, 3, 9, 0, 0, 0, DisputeService.VIETNAM_ZONE).toInstant();
         assertThat(DisputeService.addBusinessDays(monday, 3)).isEqualTo(expectedThu);
+    }
+
+    @Test
+    void nullResponseDeadlineFallbackSortingAndSchedulerBackfillForP302Orders() {
+        Account seller = createActiveAccount("s3");
+        Account buyer = createActiveAccount("b3");
+        Account mod = createActiveAccount("m3");
+        db.update(
+                "INSERT INTO vai_tro_quan_tri(user_id, loai_vai_tro, bat_dau, trang_thai_hieu_luc) VALUES (?, 'KIEM_DUYET_VIEN', NOW() - INTERVAL '1 hour', TRUE)",
+                mod.id()
+        );
+        String modEmail = db.queryForObject("SELECT email FROM thanh_viens WHERE user_id = ?", String.class, mod.id());
+        String modAdminToken = auth.login(modEmail, PASSWORD, "admin-web", "10.10.99.1").token();
+
+        String tag = "P302SLA_" + UUID.randomUUID().toString().substring(0, 6);
+        UUID[] p302Order = createAcceptedOrder(seller, buyer, tag + " NullSLA");
+        UUID[] newerOrder = createAcceptedOrder(seller, buyer, tag + " FutureSLA");
+
+        Instant escalatedOld = Instant.now().minus(6, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+        Instant expectedFallbackDeadline = DisputeService.addBusinessDays(escalatedOld, DisputeService.SLA_RESPONSE_BUSINESS_DAYS);
+        Instant escalatedNew = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS);
+        Instant futureDeadline = DisputeService.addBusinessDays(escalatedNew, DisputeService.SLA_RESPONSE_BUSINESS_DAYS);
+
+        db.update(
+                """
+                UPDATE giao_dichs
+                SET trang_thai = 'CHO_XU_LY',
+                    ly_do_cho_xu_ly = 'CANCEL_DISPUTE',
+                    thoi_diem_chuyen_xu_ly = ?,
+                    han_phan_hoi_kdv = NULL
+                WHERE ma_giao_dich = ?
+                """,
+                Timestamp.from(escalatedOld),
+                p302Order[0]
+        );
+        db.update(
+                """
+                UPDATE giao_dichs
+                SET trang_thai = 'CHO_XU_LY',
+                    ly_do_cho_xu_ly = 'OVERDUE_24H',
+                    thoi_diem_chuyen_xu_ly = ?,
+                    han_phan_hoi_kdv = ?
+                WHERE ma_giao_dich = ?
+                """,
+                Timestamp.from(escalatedNew),
+                Timestamp.from(futureDeadline),
+                newerOrder[0]
+        );
+
+        // BEFORE backfill: queue sorts NULL-deadline older P3-02 order FIRST and derives fallback SLA + overdueSla=true
+        var listResp = given()
+                .auth().oauth2(modAdminToken)
+                .queryParam("queueState", "READY")
+                .queryParam("q", tag)
+                .get("/api/v1/admin/disputes")
+                .then()
+                .statusCode(200)
+                .extract().jsonPath();
+
+        List<String> orderIds = listResp.getList("items.orderId");
+        assertThat(orderIds).containsExactly(p302Order[0].toString(), newerOrder[0].toString());
+        assertThat(Instant.parse(listResp.getString("items[0].responseDeadlineAt"))).isEqualTo(expectedFallbackDeadline);
+        assertThat(listResp.getBoolean("items[0].overdueSla")).isTrue();
+
+        // Detail & member endpoints also derive fallback responseDeadlineAt
+        var detailJson = given().auth().oauth2(modAdminToken)
+                .get("/api/v1/admin/disputes/" + p302Order[0])
+                .then().statusCode(200).extract().jsonPath();
+        assertThat(Instant.parse(detailJson.getString("responseDeadlineAt"))).isEqualTo(expectedFallbackDeadline);
+        assertThat(detailJson.getBoolean("overdueSla")).isTrue();
+
+        var memberJson = given().auth().oauth2(buyer.token())
+                .get("/api/v1/orders/" + p302Order[0] + "/dispute")
+                .then().statusCode(200).extract().jsonPath();
+        assertThat(Instant.parse(memberJson.getString("responseDeadlineAt"))).isEqualTo(expectedFallbackDeadline);
+
+        long versionBefore = db.queryForObject("SELECT version FROM giao_dichs WHERE ma_giao_dich = ?", Long.class, p302Order[0]);
+
+        // Scheduler backfill populates DB column without bumping version
+        int backfilled = scheduler.backfillMissingResponseDeadlines();
+        assertThat(backfilled).isGreaterThanOrEqualTo(1);
+
+        Timestamp dbDeadline = db.queryForObject("SELECT han_phan_hoi_kdv FROM giao_dichs WHERE ma_giao_dich = ?", Timestamp.class, p302Order[0]);
+        assertThat(dbDeadline).isNotNull();
+        assertThat(dbDeadline.toInstant()).isEqualTo(expectedFallbackDeadline);
+        assertThat(db.queryForObject("SELECT version FROM giao_dichs WHERE ma_giao_dich = ?", Long.class, p302Order[0]))
+                .isEqualTo(versionBefore);
+
+        // Second run is idempotent
+        assertThat(scheduler.backfillMissingResponseDeadlines()).isZero();
+    }
+
+    @Test
+    void terminalOrdersWithOpenEvidenceRequestsDoNotStarveExpiryAndAreCleanedUpToDaDong() {
+        // Flush any leftover overdue evidence requests from earlier tests in the shared Postgres container
+        scheduler.expireOverdueEvidenceRequests();
+
+        Account seller = createActiveAccount("s4");
+        Account buyer = createActiveAccount("b4");
+        Account mod = createActiveAccount("m4");
+
+        // Create 3 terminal orders (2 HOAN_TAT, 1 HUY) with much older overdue CHO_BO_SUNG requests
+        UUID[] term1 = createAcceptedOrder(seller, buyer, "Terminal starvation 1");
+        UUID[] term2 = createAcceptedOrder(seller, buyer, "Terminal starvation 2");
+        UUID[] term3 = createAcceptedOrder(seller, buyer, "Terminal starvation 3");
+        UUID[] active = createAcceptedOrder(seller, buyer, "Active dispute must not starve");
+
+        db.update("UPDATE giao_dichs SET trang_thai = 'HOAN_TAT', thoi_diem_hoan_tat = NOW() WHERE ma_giao_dich IN (?, ?)",
+                term1[0], term2[0]);
+        db.update("UPDATE giao_dichs SET trang_thai = 'HUY', thoi_diem_huy = NOW() WHERE ma_giao_dich = ?",
+                term3[0]);
+        db.update("UPDATE giao_dichs SET trang_thai = 'CHO_XU_LY', ly_do_cho_xu_ly = 'OVERDUE_24H', thoi_diem_chuyen_xu_ly = NOW() WHERE ma_giao_dich = ?",
+                active[0]);
+
+        UUID termReq1 = UUID.randomUUID();
+        UUID termReq2 = UUID.randomUUID();
+        UUID termReq3 = UUID.randomUUID();
+        UUID activeReq = UUID.randomUUID();
+
+        db.update(
+                """
+                INSERT INTO yeu_cau_bo_sung_giao_dichs(id, ma_giao_dich, nguoi_yeu_cau_id, ben_duoc_yeu_cau, noi_dung, han_bo_sung, trang_thai)
+                VALUES (?, ?, ?, 'BUYER', 'Orphaned 1', NOW() - INTERVAL '10 hours', 'CHO_BO_SUNG'),
+                       (?, ?, ?, 'BUYER', 'Orphaned 2', NOW() - INTERVAL '9 hours', 'CHO_BO_SUNG'),
+                       (?, ?, ?, 'SELLER', 'Orphaned 3', NOW() - INTERVAL '8 hours', 'CHO_BO_SUNG'),
+                       (?, ?, ?, 'BOTH', 'Active overdue request', NOW() - INTERVAL '1 hour', 'CHO_BO_SUNG')
+                """,
+                termReq1, term1[0], mod.id(),
+                termReq2, term2[0], mod.id(),
+                termReq3, term3[0], mod.id(),
+                activeReq, active[0], mod.id()
+        );
+
+        // Batch size 2 (< 3 older terminal rows) MUST still immediately expire the active CHO_XU_LY request!
+        int expired = disputeService.expireOverdueEvidenceRequestsBatch(2);
+        assertThat(expired).isEqualTo(1);
+        assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, activeReq))
+                .isEqualTo("QUA_HAN");
+
+        // Secondary cleanup pass closes all dangling CHO_BO_SUNG rows on terminal orders to DA_DONG
+        int closed = scheduler.closeOrphanedEvidenceRequests();
+        assertThat(closed).isGreaterThanOrEqualTo(3);
+
+        for (UUID reqId : List.of(termReq1, termReq2, termReq3)) {
+            assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, reqId))
+                    .isEqualTo("DA_DONG");
+        }
+        assertThat(scheduler.closeOrphanedEvidenceRequests()).isZero();
     }
 }

@@ -150,8 +150,7 @@ CREATE TABLE IF NOT EXISTS yeu_cau_huy_giao_dichs (
   ma_ly_do VARCHAR(50) NOT NULL DEFAULT 'OTHER'
     CHECK (ma_ly_do IN ('ITEM_NOT_AS_DESCRIBED', 'DEFECT_AT_HANDOVER', 'COMBO_MISSING_ITEM', 'MUTUAL_AGREEMENT', 'OTHER')),
   ly_do TEXT,
-  trang_thai VARCHAR(30) NOT NULL DEFAULT 'CHO_XAC_NHAN'
-    CHECK (trang_thai IN ('CHO_XAC_NHAN', 'DONG_Y', 'TU_CHOI', 'DA_DONG_DO_HOAN_TAT')),
+  trang_thai VARCHAR(30) NOT NULL DEFAULT 'CHO_XAC_NHAN',
   nguoi_phan_hoi_id UUID REFERENCES thanh_viens(user_id),
   phan_hoi_ghi_chu TEXT,
   thoi_diem_phan_hoi TIMESTAMPTZ,
@@ -160,6 +159,28 @@ CREATE TABLE IF NOT EXISTS yeu_cau_huy_giao_dichs (
   CONSTRAINT chk_yc_huy_distinct_responder
     CHECK (nguoi_phan_hoi_id IS NULL OR nguoi_phan_hoi_id <> nguoi_yeu_cau_id)
 );
+
+-- Đồng bộ idempotent ràng buộc trang_thai trên yeu_cau_huy_giao_dichs với cả P3-02 (thêm DA_DONG_DO_HUY khi KDV quyết định hủy)
+DO $$
+DECLARE
+  v_conname TEXT;
+BEGIN
+  FOR v_conname IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_namespace n ON n.oid = c.connamespace
+    WHERE c.conrelid = 'yeu_cau_huy_giao_dichs'::regclass
+      AND n.nspname = current_schema()
+      AND c.contype = 'c'
+      AND pg_get_constraintdef(c.oid) LIKE '%trang_thai%'
+  LOOP
+    EXECUTE format('ALTER TABLE yeu_cau_huy_giao_dichs DROP CONSTRAINT %I', v_conname);
+  END LOOP;
+
+  ALTER TABLE yeu_cau_huy_giao_dichs
+    ADD CONSTRAINT chk_yc_huy_trang_thai
+      CHECK (trang_thai IN ('CHO_XAC_NHAN', 'DONG_Y', 'TU_CHOI', 'DA_DONG_DO_HOAN_TAT', 'DA_DONG_DO_HUY'));
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_yc_huy_pending_per_order
   ON yeu_cau_huy_giao_dichs(ma_giao_dich)

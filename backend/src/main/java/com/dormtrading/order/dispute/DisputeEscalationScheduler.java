@@ -12,8 +12,12 @@ import org.springframework.stereotype.Component;
  * <ol>
  *   <li>Escalates {@code CHO_XAC_NHAN} orders overdue past 24 hours since {@code thoi_diem_bao_giao}
  *       into {@code CHO_XU_LY} with 3-business-day moderator response SLA.</li>
+ *   <li>Backfills {@code han_phan_hoi_kdv} for P3-02 escalated {@code CHO_XU_LY} orders where the
+ *       column is still {@code NULL}.</li>
  *   <li>Expires overdue supplementary evidence requests ({@code CHO_BO_SUNG} past {@code han_bo_sung})
- *       into {@code QUA_HAN} so disputes return to the READY moderation queue.</li>
+ *       on active {@code CHO_XU_LY} disputes into {@code QUA_HAN}.</li>
+ *   <li>Closes orphaned {@code CHO_BO_SUNG} evidence requests on terminal ({@code HOAN_TAT}/{@code HUY})
+ *       orders into {@code DA_DONG}.</li>
  * </ol>
  */
 @Component
@@ -44,9 +48,17 @@ public class DisputeEscalationScheduler {
     )
     public void runScheduledMaintenance() {
         int escalated = escalateOverdueTransactions();
+        int backfilled = backfillMissingResponseDeadlines();
         int expired = expireOverdueEvidenceRequests();
-        if (escalated > 0 || expired > 0) {
-            log.info("UC-29 scheduler escalated {} overdue order(s) and expired {} evidence request(s)", escalated, expired);
+        int closedOrphaned = closeOrphanedEvidenceRequests();
+        if (escalated > 0 || backfilled > 0 || expired > 0 || closedOrphaned > 0) {
+            log.info(
+                    "UC-29 scheduler escalated {} overdue order(s), backfilled {} SLA deadline(s), expired {} evidence request(s), and closed {} orphaned evidence request(s)",
+                    escalated,
+                    backfilled,
+                    expired,
+                    closedOrphaned
+            );
         }
     }
 
@@ -62,10 +74,34 @@ public class DisputeEscalationScheduler {
         return total;
     }
 
+    public int backfillMissingResponseDeadlines() {
+        int total = 0;
+        for (int i = 0; i < MAX_BATCHES_PER_TICK; i++) {
+            int count = disputeService.backfillMissingResponseDeadlinesBatch(batchSize);
+            total += count;
+            if (count < batchSize) {
+                break;
+            }
+        }
+        return total;
+    }
+
     public int expireOverdueEvidenceRequests() {
         int total = 0;
         for (int i = 0; i < MAX_BATCHES_PER_TICK; i++) {
             int count = disputeService.expireOverdueEvidenceRequestsBatch(batchSize);
+            total += count;
+            if (count < batchSize) {
+                break;
+            }
+        }
+        return total;
+    }
+
+    public int closeOrphanedEvidenceRequests() {
+        int total = 0;
+        for (int i = 0; i < MAX_BATCHES_PER_TICK; i++) {
+            int count = disputeService.closeOrphanedEvidenceRequestsBatch(batchSize);
             total += count;
             if (count < batchSize) {
                 break;

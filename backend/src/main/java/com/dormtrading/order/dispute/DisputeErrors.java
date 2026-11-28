@@ -14,6 +14,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -64,13 +65,6 @@ public class DisputeErrors {
         if (e instanceof MaxUploadSizeExceededException) {
             return fileTooLarge();
         }
-        if (e instanceof MissingServletRequestPartException part && "note".equals(part.getRequestPartName())) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of(
-                            "code", "INVALID_INPUT",
-                            "message", "Vui lòng nhập nội dung giải trình (từ 3 đến 2000 ký tự)."
-                    ));
-        }
         return ResponseEntity.badRequest()
                 .body(Map.of(
                         "code", "INVALID_MEDIA",
@@ -83,7 +77,14 @@ public class DisputeErrors {
             MissingServletRequestParameterException.class,
             MethodArgumentTypeMismatchException.class
     })
-    ResponseEntity<Map<String, String>> invalidInput() {
+    ResponseEntity<Map<String, String>> invalidInput(Exception e) {
+        if (e instanceof MissingServletRequestParameterException param && "note".equals(param.getParameterName())) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of(
+                            "code", "INVALID_INPUT",
+                            "message", "Vui lòng nhập nội dung giải trình (từ 3 đến 2000 ký tự)."
+                    ));
+        }
         return ResponseEntity.badRequest()
                 .body(Map.of("code", "INVALID_INPUT", "message", "Dữ liệu đầu vào không hợp lệ."));
     }
@@ -97,8 +98,8 @@ public class DisputeErrors {
                 ));
     }
 
-    @ExceptionHandler(DataAccessException.class)
-    ResponseEntity<Map<String, String>> databaseFailure(DataAccessException e) {
+    @ExceptionHandler({DataAccessException.class, TransactionException.class})
+    ResponseEntity<Map<String, String>> databaseFailure(Exception e) {
         log.error("Dispute transaction failed and rolled back", e);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
