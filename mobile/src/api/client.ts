@@ -1,6 +1,7 @@
 import { useSessionStore } from '../auth/sessionStore';
 import type { AccountRestriction } from '../auth/sessionTypes';
 import { tokenStore } from '../auth/tokenStore';
+import { appendMultipartFile, type MultipartFileInput } from './multipart';
 
 export class RestrictedAccountError extends Error {
   readonly restriction: AccountRestriction;
@@ -26,14 +27,39 @@ type RawRestrictionResponse = {
   } | null;
 };
 
+export interface ApiErrorDetails {
+  attemptsUsed?: number;
+  maxAttempts?: number;
+  remainingAttempts?: number;
+  locked?: boolean;
+  expiresAt?: string | null;
+  [key: string]: unknown;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
     public readonly code?: string,
+    public readonly details?: ApiErrorDetails,
   ) {
     super(message);
   }
+}
+
+function extractErrorDetails(parsed: unknown): ApiErrorDetails | undefined {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const extra: ApiErrorDetails = {};
+  let hasExtra = false;
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'message' || key === 'code') continue;
+    extra[key] = value;
+    hasExtra = true;
+  }
+  return hasExtra ? extra : undefined;
 }
 
 let refreshFlight: Promise<void> | null = null;
@@ -315,25 +341,41 @@ async function errorOf(response: Response) {
   await handleRestrictedResponse(response, raw, false);
   let message = `API ${response.status}: ${raw}`;
   let code: string | undefined;
+  let details: ApiErrorDetails | undefined;
   try {
     const parsed = JSON.parse(raw);
     message = parsed.message ?? message;
     code = parsed.code;
+    details = extractErrorDetails(parsed);
   } catch {
     /* plain response */
   }
-  return new ApiError(response.status, message, code);
+  return new ApiError(response.status, message, code, details);
 }
 
 /** Upload multipart; không tự đặt Content-Type để fetch sinh boundary. */
-export async function upload(path: string, file: { uri: string; name: string; type: string }) {
+export async function upload(path: string, file: MultipartFileInput) {
   // FormData mới mỗi lần gọi để retry sau refresh không gửi lại body đã dùng.
-  const response = await authorizedSend(path, () => {
+  const response = await authorizedSend(path, async () => {
     const form = new FormData();
-    form.append('file', file as unknown as Blob);
+    await appendMultipartFile(form, 'file', file);
     return { method: 'POST', body: form };
   });
   if (!response.ok) throw await errorOf(response);
+}
+
+/** Upload multipart trả về JSON với FormData mới ở mỗi lần gửi (an toàn khi retry 401 refresh). */
+export async function apiMultipart<T>(
+  path: string,
+  buildFormData: () => FormData | Promise<FormData>,
+): Promise<T> {
+  const response = await authorizedSend(path, async () => ({
+    method: 'POST',
+    body: await buildFormData(),
+  }));
+  if (!response.ok) throw await errorOf(response);
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 }
 
 /** Tải tệp nhị phân cần Authorization (ảnh thẻ). Trả null khi 404. */
@@ -395,11 +437,15 @@ function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
  * Gửi request cần Bearer token với cùng state machine của api(): 401 + thử thách Bearer thì refresh một lần rồi thử lại.
  * Chỉ refresh trả 401 mới xóa phiên; lỗi mạng/5xx giữ nguyên token để lần sau thử tiếp.
  */
-async function authorizedSend(path: string, build: () => RequestInit): Promise<Response> {
+async function authorizedSend(
+  path: string,
+  build: () => RequestInit | Promise<RequestInit>,
+): Promise<Response> {
   const send = async () => {
     const token = await tokenStore.get();
+    const requestInit = await build();
     return fetch(apiUrl(path), {
-      ...build(),
+      ...requestInit,
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
   };
@@ -479,14 +525,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     await handleRestrictedResponse(response, raw, path === '/auth/login' || path === '/auth/refresh');
     let message = `API ${response.status}: ${raw}`;
     let code: string | undefined;
+    let details: ApiErrorDetails | undefined;
     try {
       const parsed = JSON.parse(raw);
       message = parsed.message ?? message;
       code = parsed.code;
+      details = extractErrorDetails(parsed);
     } catch {
       /* plain response */
     }
-    throw new ApiError(response.status, message, code);
+    throw new ApiError(response.status, message, code, details);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

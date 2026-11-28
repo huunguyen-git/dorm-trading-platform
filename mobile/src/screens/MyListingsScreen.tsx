@@ -16,6 +16,7 @@ import { buildMediaImageSource } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { useSellerListings } from '../listings/sellerStore';
+import { useTransactions } from '../transactions/store';
 import {
   formatShortDate,
   formatVnd,
@@ -126,6 +127,7 @@ export default function MyListingsScreen() {
     remove,
     clearError,
   } = useSellerListings();
+  const pendingTxCount = useTransactions((state) => state.pendingActionCount);
 
   const statusFilterRef = useRef<ListingStatus | ''>(statusFilter);
   statusFilterRef.current = statusFilter;
@@ -476,14 +478,34 @@ export default function MyListingsScreen() {
         </Text>
         <View style={styles.topBarActions}>
           <Pressable
+            testID="my-listings-transactions-btn"
+            accessibilityRole="button"
+            accessibilityLabel={
+              pendingTxCount > 0
+                ? `Giao dịch của tôi (${pendingTxCount} cần xử lý)`
+                : 'Giao dịch của tôi'
+            }
+            onPress={() => navigation.navigate('Transactions', { initialRole: 'SELLER' })}
+            style={({ pressed }) => [styles.txShortcutBtn, pressed && styles.pressedState]}
+          >
+            <Icon name="shopping-bag" size={16} color={semantic.color.textPrimary} />
+            {pendingTxCount > 0 ? (
+              <View style={styles.txShortcutBadge} testID="my-listings-transactions-badge">
+                <Text style={styles.txShortcutBadgeText}>
+                  {pendingTxCount > 9 ? '9+' : String(pendingTxCount)}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable
             testID="my-listings-orders-btn"
             accessibilityRole="button"
-            accessibilityLabel="Giao dịch của tôi"
+            accessibilityLabel="Yêu cầu giữ chỗ & lịch hẹn"
             onPress={() => navigation.navigate('Orders', { initialRole: 'SELLER' })}
             style={({ pressed }) => [styles.ordersBtn, pressed && styles.pressedState]}
           >
-            <Icon name="shopping-bag" size={15} color={semantic.color.textPrimary} />
-            <Text style={styles.ordersBtnText}>Giao dịch</Text>
+            <Icon name="calendar" size={14} color={semantic.color.textPrimary} />
+            <Text style={styles.ordersBtnText}>Giữ chỗ</Text>
           </Pressable>
           <Pressable
             testID="my-listings-create-btn"
@@ -699,11 +721,14 @@ export default function MyListingsScreen() {
                     label={statusMeta.label}
                     tone={statusMeta.tone}
                     variant={statusMeta.tier}
+                    style={styles.statusSelfStart}
                   />
                 </View>
               </Pressable>
 
-              {item.hasUnavailableItems ? (
+              {item.hasUnavailableItems &&
+              item.status !== 'KET_THUC' &&
+              !(isReserved && Boolean(item.activeTransactionId)) ? (
                 <InlineBanner
                   tone="warning"
                   testID={`unavailable-items-${item.id}`}
@@ -748,7 +773,27 @@ export default function MyListingsScreen() {
               {/* Compact Row Actions: max 1 primary contextual action + overflow trigger */}
               <View style={styles.rowActions}>
                 <View style={styles.primaryActionSlot}>
-                  {canPublish ? (
+                  {isReserved ? (
+                    <Pressable
+                      testID={`my-listing-handover-${item.id}`}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Xử lý bàn giao ${item.title}`}
+                      onPress={() => {
+                        if (item.activeTransactionId) {
+                          navigation.navigate('TransactionDetail', { id: item.activeTransactionId });
+                        } else {
+                          navigation.navigate('Transactions', { initialRole: 'SELLER' });
+                        }
+                      }}
+                      style={({ pressed }) => [
+                        styles.inlinePrimaryBtn,
+                        pressed && styles.pressedState,
+                      ]}
+                    >
+                      <Text style={styles.inlinePrimaryText}>Xử lý bàn giao</Text>
+                    </Pressable>
+                  ) : canPublish ? (
                     <Pressable
                       testID={`my-listing-publish-${item.id}`}
                       accessibilityRole="button"
@@ -862,13 +907,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: primitive.space[2],
   },
+  txShortcutBtn: {
+    width: component.button.minHeightSm,
+    height: component.button.minHeightSm,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+    borderWidth: 1,
+    borderColor: semantic.color.borderHairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  txShortcutBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accent,
+    borderWidth: 1.5,
+    borderColor: semantic.color.bgSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txShortcutBadgeText: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textInverse,
+  },
   ordersBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: primitive.space[1.5],
     minHeight: component.button.minHeightSm,
-    paddingHorizontal: primitive.space[3],
+    paddingHorizontal: primitive.space[2.5],
     borderRadius: primitive.radius.full,
     backgroundColor: semantic.color.bgSubtle,
   },
@@ -1064,8 +1141,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: primitive.space[2],
   },
+  statusSelfStart: {
+    alignSelf: 'flex-start',
+  },
   inlinePrimaryBtn: {
-    minHeight: 34,
+    minHeight: 40,
     paddingHorizontal: primitive.space[3],
     borderRadius: primitive.radius.full,
     backgroundColor: semantic.color.accentSoft,

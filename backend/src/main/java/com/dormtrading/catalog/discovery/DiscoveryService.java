@@ -594,6 +594,29 @@ public class DiscoveryService {
         boolean isFree = row.priceVnd() == 0;
         boolean renewalReminderDue = ListingLifecycleHelper.isRenewalReminderDue(effectiveStatus, row.expiresAt(), now);
 
+        // Participant-only deep-link to active transaction when listing is GIU_CHO (null for outsiders — Zero-PII)
+        UUID activeTransactionId = null;
+        if (viewerId != null && ListingDtos.ListingStatus.GIU_CHO.name().equals(effectiveStatus)) {
+            List<UUID> txRows = db.queryForList(
+                    """
+                    SELECT ma_giao_dich
+                    FROM giao_dichs
+                    WHERE ma_tin = ?
+                      AND (nguoi_ban_id = ? OR nguoi_mua_id = ?)
+                      AND trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                    ORDER BY thoi_diem_tao DESC
+                    LIMIT 1
+                    """,
+                    UUID.class,
+                    listingId,
+                    viewerId,
+                    viewerId
+            );
+            if (!txRows.isEmpty()) {
+                activeTransactionId = txRows.getFirst();
+            }
+        }
+
         ListingDtos.ListingSummaryDto summary = new ListingDtos.ListingSummaryDto(
                 row.id(),
                 row.title(),
@@ -626,7 +649,8 @@ public class DiscoveryService {
                 row.renewalCount(),
                 row.createdAt(),
                 row.updatedAt(),
-                row.version()
+                row.version(),
+                activeTransactionId
         );
 
         ListingDtos.ListingCategoryDto category = row.categoryId() != null

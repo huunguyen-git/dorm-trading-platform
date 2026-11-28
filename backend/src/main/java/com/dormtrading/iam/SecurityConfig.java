@@ -122,6 +122,13 @@ class SecurityConfig {
                                 "/api/v1/listings",
                                 "/api/v1/listings/{id:[0-9a-fA-F-]{36}}")
                         .permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/transactions",
+                                "/api/v1/transactions/{id}",
+                                "/api/v1/transactions/{id}/handover-photo",
+                                "/api/v1/transactions/{id}/handover-photos/{photoId}")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/transactions/**").hasRole("MEMBER")
                         .requestMatchers("/api/v1/**").hasRole("MEMBER")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(server -> server

@@ -15,6 +15,8 @@ import SettingsScreen from '../screens/SettingsScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
+import TransactionsScreen from '../screens/TransactionsScreen';
+import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import ReservationRequestScreen from '../screens/ReservationRequestScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import OrderDetailScreen from '../screens/OrderDetailScreen';
@@ -108,6 +110,16 @@ export default function AppNavigator() {
           options={({ route }) => ({
             title: route.params?.mode === 'edit' ? 'Sửa đồ vật' : 'Thêm đồ vật',
           })}
+        />
+        <Stack.Screen
+          name="Transactions"
+          component={TransactionsScreen}
+          options={{ title: 'Giao dịch của tôi', headerShown: false }}
+        />
+        <Stack.Screen
+          name="TransactionDetail"
+          component={TransactionDetailScreen}
+          options={{ title: 'Chi tiết giao dịch' }}
         />
         <Stack.Screen
           name="ReservationRequest"

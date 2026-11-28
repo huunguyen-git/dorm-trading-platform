@@ -173,7 +173,7 @@ class V13MigrationIntegrationTest extends BaseIntegrationTest {
         UUID orderId = UUID.randomUUID();
 
         try (Connection conn = DriverManager.getConnection(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword());
-                Statement stmt = conn.createStatement()) {
+             Statement stmt = conn.createStatement()) {
             stmt.execute("SET search_path TO " + upgradeSchema);
             stmt.execute(
                     "INSERT INTO thanh_viens(user_id, email, mat_khau_hash, ho_ten, mssv, trang_thai_tai_khoan) "

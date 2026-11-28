@@ -203,8 +203,51 @@ public final class ListingDtos {
             int renewalCount,
             Instant createdAt,
             Instant updatedAt,
-            long version
+            long version,
+            UUID activeTransactionId
     ) {
+        public ListingSummaryDto(
+                UUID id,
+                String title,
+                String description,
+                String condition,
+                int priceVnd,
+                String listingType,
+                boolean isCombo,
+                boolean isFree,
+                String status,
+                String categoryId,
+                String categoryName,
+                String courseCode,
+                String courseName,
+                String author,
+                String locationCode,
+                String locationName,
+                String locationText,
+                Double latitude,
+                Double longitude,
+                Double distanceKm,
+                String thumbnailUrl,
+                List<String> images,
+                int itemCount,
+                SellerPublicSummaryDto seller,
+                boolean hasUnavailableItems,
+                Instant publishedAt,
+                Instant expiresAt,
+                boolean renewalReminderDue,
+                int renewalCount,
+                Instant createdAt,
+                Instant updatedAt,
+                long version
+        ) {
+            this(
+                    id, title, description, condition, priceVnd, listingType, isCombo, isFree, status,
+                    categoryId, categoryName, courseCode, courseName, author, locationCode, locationName,
+                    locationText, latitude, longitude, distanceKm, thumbnailUrl, images, itemCount, seller,
+                    hasUnavailableItems, publishedAt, expiresAt, renewalReminderDue, renewalCount,
+                    createdAt, updatedAt, version, null
+            );
+        }
     }
 
     public record ListingDetailDto(
@@ -245,7 +288,8 @@ public final class ListingDtos {
             String hiddenReason,
             Instant createdAt,
             Instant updatedAt,
-            long version
+            long version,
+            UUID activeTransactionId
     ) {
         public static ListingDetailDto fromSummary(
                 ListingSummaryDto summary,
@@ -294,7 +338,8 @@ public final class ListingDtos {
                     hiddenReason,
                     summary.createdAt(),
                     summary.updatedAt(),
-                    summary.version()
+                    summary.version(),
+                    summary.activeTransactionId()
             );
         }
     }

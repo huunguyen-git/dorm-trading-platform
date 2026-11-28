@@ -18,6 +18,7 @@ import { api, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession, type User } from '../auth/session';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 import { useSellerListings } from '../listings/sellerStore';
+import { useTransactions } from '../transactions/store';
 import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
 import { Action, Field, Notice } from '../components/AuthUI';
@@ -111,6 +112,8 @@ export default function ProfileScreen() {
   const restrictionDismissed = useSession((s) => s.restrictionDismissed);
   const quota = useSellerListings((s) => s.quota);
   const loadQuota = useSellerListings((s) => s.loadQuota);
+  const pendingTxCount = useTransactions((s) => s.pendingActionCount);
+  const loadPendingTxCount = useTransactions((s) => s.loadPendingActionCount);
   const unreadOrderNotifications = useOrders((s) => s.unreadCount);
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -158,6 +161,7 @@ export default function ProfileScreen() {
   const syncQuota = useCallback(() => {
     if (!isActiveMember) return;
     void loadQuota().catch(() => { });
+    void loadPendingTxCount().catch(() => { });
     if (
       sessionUser?.accountStatus === 'HOAT_DONG' &&
       sessionUser.emailVerified &&
@@ -165,7 +169,14 @@ export default function ProfileScreen() {
     ) {
       void useOrders.getState().loadNotifications().catch(() => { });
     }
-  }, [isActiveMember, loadQuota, sessionUser?.accountStatus, sessionUser?.emailVerified, sessionUser?.profileApproved]);
+  }, [
+    isActiveMember,
+    loadQuota,
+    loadPendingTxCount,
+    sessionUser?.accountStatus,
+    sessionUser?.emailVerified,
+    sessionUser?.profileApproved,
+  ]);
 
   useEffect(() => {
     void load();
@@ -415,6 +426,33 @@ export default function ProfileScreen() {
                       </View>
                     ) : null}
 
+                    <Pressable
+                      testID="profile-shortcut-transactions"
+                      accessibilityRole="button"
+                      accessibilityLabel="Mở Giao dịch của tôi"
+                      onPress={() => nav.navigate('Transactions')}
+                      style={({ pressed }) => [styles.featuredLinkTile, pressed && styles.tilePressed]}
+                    >
+                      <View style={styles.quickLinkIcon}>
+                        <Icon name="shopping-bag" size={18} color={semantic.color.accent} />
+                      </View>
+                      <View style={styles.quickLinkTextWrap}>
+                        <Text style={styles.quickLinkTitle}>Giao dịch của tôi</Text>
+                        <Text style={styles.quickLinkSub}>
+                          Bàn giao, xác nhận & hủy đơn
+                        </Text>
+                      </View>
+                      {pendingTxCount > 0 ? (
+                        <StatusIndicator
+                          testID="profile-transactions-badge"
+                          variant="urgent"
+                          tone="accent"
+                          label={String(pendingTxCount)}
+                        />
+                      ) : null}
+                      <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
+                    </Pressable>
+
                     <View style={styles.quickLinksRow}>
                       <Pressable
                         testID="profile-shortcut-my-listings"
@@ -454,17 +492,17 @@ export default function ProfileScreen() {
                     <Pressable
                       testID="profile-shortcut-orders"
                       accessibilityRole="button"
-                      accessibilityLabel="Mở Giao dịch của tôi"
+                      accessibilityLabel="Mở Giữ chỗ & lịch hẹn"
                       onPress={() => nav.navigate('Orders')}
                       style={({ pressed }) => [styles.quickLinkTileFull, pressed && styles.tilePressed]}
                     >
                       <View style={styles.quickLinkIcon}>
-                        <Icon name="shopping-bag" size={18} color={semantic.color.accent} />
+                        <Icon name="calendar" size={18} color={semantic.color.accent} />
                       </View>
                       <View style={styles.quickLinkTextWrap}>
-                        <Text style={styles.quickLinkTitle}>Giao dịch của tôi</Text>
+                        <Text style={styles.quickLinkTitle}>Giữ chỗ & lịch hẹn</Text>
                         <Text style={styles.quickLinkSub}>
-                          Giữ chỗ, lịch hẹn & theo dõi giao nhận
+                          Duyệt yêu cầu giữ chỗ, hẹn lịch & báo bắt đầu giao
                         </Text>
                       </View>
                       {unreadOrderNotifications > 0 ? (
@@ -484,6 +522,32 @@ export default function ProfileScreen() {
                 </>
               ) : null}
 
+              {token && isLocked ? (
+                <>
+                  <View style={styles.lockedShortcutWrap}>
+                    <Pressable
+                      testID="profile-locked-shortcut-transactions"
+                      accessibilityRole="button"
+                      accessibilityLabel="Mở Giao dịch của tôi (chỉ đọc)"
+                      onPress={() => nav.navigate('Transactions')}
+                      style={({ pressed }) => [styles.featuredLinkTile, pressed && styles.tilePressed]}
+                    >
+                      <View style={styles.quickLinkIcon}>
+                        <Icon name="shopping-bag" size={18} color={semantic.color.accent} />
+                      </View>
+                      <View style={styles.quickLinkTextWrap}>
+                        <Text style={styles.quickLinkTitle}>Giao dịch của tôi</Text>
+                        <Text style={styles.quickLinkSub}>
+                          Xem lại lịch sử bàn giao & bằng chứng (chỉ đọc)
+                        </Text>
+                      </View>
+                      <Icon name="chevron-right" size={16} color={semantic.color.textSecondary} />
+                    </Pressable>
+                  </View>
+                  <HairlineDivider />
+                </>
+              ) : null}
+
               {/* Account Alerts */}
               {hasRestriction ||
                 status?.tone === 'danger' ||
@@ -495,7 +559,7 @@ export default function ProfileScreen() {
                   <RestrictedAccountNotice />
                   {status?.tone === 'danger' ? (
                     <Notice
-                      message={`Lý do từ chối: ${status.note || 'Kiểm duyệt viên chưa ghi lý do.'}`}
+                      message={`Lý do từ chối: ${status.note || 'Chưa có ghi chú cụ thể.'}`}
                       error
                     />
                   ) : null}
@@ -823,6 +887,22 @@ const styles = StyleSheet.create({
   statLabel: {
     ...semantic.type.micro,
     color: semantic.color.textSecondary,
+  },
+  featuredLinkTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+    backgroundColor: semantic.color.bgWarmTint,
+    borderWidth: 1,
+    borderColor: semantic.color.accentBorder,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[3],
+  },
+  lockedShortcutWrap: {
+    backgroundColor: semantic.color.bgSurface,
+    paddingHorizontal: semantic.spacing.pageX,
+    paddingVertical: primitive.space[3],
   },
   quickLinksRow: {
     flexDirection: 'row',

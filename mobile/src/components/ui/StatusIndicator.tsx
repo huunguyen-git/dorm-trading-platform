@@ -108,7 +108,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: primitive.space[1.5],
-    alignSelf: 'flex-start',
   },
   dot: {
     width: component.badge.dotSize,
@@ -121,7 +120,6 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
     gap: primitive.space[1],
     borderRadius: component.badge.radius,
     paddingHorizontal: component.badge.paddingX,

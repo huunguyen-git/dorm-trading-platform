@@ -293,10 +293,10 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: component.sheet.paddingX,
-    paddingTop: primitive.space[1],
+    paddingTop: primitive.space[1.5],
     paddingBottom: primitive.space[3],
     borderBottomWidth: 1,
     borderBottomColor: semantic.color.borderHairline,
@@ -304,17 +304,23 @@ const styles = StyleSheet.create({
   },
   headerTextWrap: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
+    paddingTop: 2,
+    gap: 3,
   },
   title: {
     ...semantic.type.sectionTitle,
+    flexShrink: 1,
   },
   subtitle: {
     ...semantic.type.caption,
+    flexShrink: 1,
+    lineHeight: 18,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: primitive.space[2],
   },
   rightActionBtn: {

@@ -133,6 +133,10 @@ export function OrderProgressStepper({
 
     checkAnims.forEach((anim, k) => {
       const done = k < clampedStep;
+      if (cancelled && k === clampedStep) {
+        anim.setValue(0);
+        return;
+      }
       const delay = done && k >= from ? (k - from) * LINE_STAGGER_MS + LINE_STAGGER_MS : 0;
       animations.push(
         Animated.timing(anim, {
@@ -150,7 +154,7 @@ export function OrderProgressStepper({
     return () => {
       composite.stop();
     };
-  }, [clampedStep, reduceMotion]);
+  }, [cancelled, clampedStep, reduceMotion]);
 
   useEffect(() => {
     const shouldBreathe = !reduceMotion && !cancelled && !isAllDone;

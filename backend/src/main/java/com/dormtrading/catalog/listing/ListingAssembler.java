@@ -189,7 +189,16 @@ class ListingAssembler {
         List<ListingDtos.ListingItemSummaryDto> items = loadListingItems(listingId);
         boolean hasUnavailableItems = items.stream().anyMatch(item -> !"KHA_DUNG".equals(item.status()));
         ListingDtos.SellerPublicSummaryDto seller = loadSellerPublicSummary(row.sellerId());
-        ListingDtos.ListingSummaryDto summary = toSummary(row, new ItemStats(items.size(), hasUnavailableItems), seller, now);
+        UUID activeTxId = ListingDtos.ListingStatus.GIU_CHO.name().equals(row.status())
+                ? findActiveTransactionIdForParticipant(listingId, row.sellerId())
+                : null;
+        ListingDtos.ListingSummaryDto summary = toSummary(
+                row,
+                new ItemStats(items.size(), hasUnavailableItems),
+                seller,
+                now,
+                activeTxId
+        );
 
         ListingDtos.ListingCategoryDto category = row.categoryId() == null
                 ? null
@@ -279,11 +288,16 @@ class ListingAssembler {
 
         List<UUID> listingIds = rows.stream().map(ListingRow::id).toList();
         Map<UUID, ItemStats> statsByListing = loadItemStatsBatch(listingIds);
+        List<UUID> reservedIds = rows.stream()
+                .filter(r -> ListingDtos.ListingStatus.GIU_CHO.name().equals(r.status()))
+                .map(ListingRow::id)
+                .toList();
+        Map<UUID, UUID> activeTxByListing = loadActiveTransactionIdsForSellerBatch(reservedIds, sellerId);
 
         List<ListingDtos.ListingSummaryDto> summaries = new ArrayList<>(rows.size());
         for (ListingRow row : rows) {
             ItemStats stats = statsByListing.getOrDefault(row.id(), new ItemStats(0, false));
-            summaries.add(toSummary(row, stats, seller, now));
+            summaries.add(toSummary(row, stats, seller, now, activeTxByListing.get(row.id())));
         }
         return summaries;
     }
@@ -292,7 +306,8 @@ class ListingAssembler {
             ListingRow row,
             ItemStats stats,
             ListingDtos.SellerPublicSummaryDto seller,
-            Instant now
+            Instant now,
+            UUID activeTransactionId
     ) {
         int itemCount = stats.itemCount();
         boolean isCombo = itemCount >= 2 || ListingDtos.ListingType.BAN_COMBO.name().equals(row.listingType());
@@ -332,8 +347,56 @@ class ListingAssembler {
                 row.renewalCount(),
                 row.createdAt(),
                 row.updatedAt(),
-                row.version()
+                row.version(),
+                activeTransactionId
         );
+    }
+
+    private UUID findActiveTransactionIdForParticipant(UUID listingId, UUID participantId) {
+        List<UUID> rows = db.queryForList(
+                """
+                SELECT ma_giao_dich
+                FROM giao_dichs
+                WHERE ma_tin = ?
+                  AND (nguoi_ban_id = ? OR nguoi_mua_id = ?)
+                  AND trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                ORDER BY thoi_diem_tao DESC
+                LIMIT 1
+                """,
+                UUID.class,
+                listingId,
+                participantId,
+                participantId
+        );
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private Map<UUID, UUID> loadActiveTransactionIdsForSellerBatch(List<UUID> reservedListingIds, UUID sellerId) {
+        if (reservedListingIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, UUID> result = new HashMap<>();
+        db.query(
+                con -> {
+                    var ps = con.prepareStatement(
+                            """
+                            SELECT DISTINCT ON (ma_tin) ma_tin, ma_giao_dich
+                            FROM giao_dichs
+                            WHERE ma_tin = ANY(?)
+                              AND nguoi_ban_id = ?
+                              AND trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                            ORDER BY ma_tin, thoi_diem_tao DESC
+                            """
+                    );
+                    ps.setArray(1, con.createArrayOf("uuid", reservedListingIds.toArray(new UUID[0])));
+                    ps.setObject(2, sellerId);
+                    return ps;
+                },
+                rs -> {
+                    result.put(rs.getObject("ma_tin", UUID.class), rs.getObject("ma_giao_dich", UUID.class));
+                }
+        );
+        return result;
     }
 
     List<ListingDtos.ListingItemSummaryDto> loadListingItems(UUID listingId) {

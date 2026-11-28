@@ -417,6 +417,15 @@ export default function OrderDetailScreen() {
                 icon="navigation"
                 title="Đã bắt đầu giao hàng (UC-26)"
                 message={`Bắt đầu lúc ${formatOrderDateTime(order.deliveryStartedAt)}. Ảnh bàn giao và mã hoàn tất 6 số thực hiện sau khi gặp mặt (UC-27).`}
+                actionLabel={
+                  order.status === 'DANG_GIAO'
+                    ? order.viewer.isSeller
+                      ? 'Gửi ảnh & báo đã giao'
+                      : 'Mở màn hình bàn giao'
+                    : 'Xem chi tiết bàn giao'
+                }
+                actionTestID="order-open-handover-button"
+                onActionPress={() => navigation.navigate('TransactionDetail', { id: order.id })}
               />
             ) : null}
 
@@ -435,6 +444,9 @@ export default function OrderDetailScreen() {
                 tone="warning"
                 title="Đã ghi nhận báo đã giao (UC-27)"
                 message="Không thể tự hủy giữ chỗ sau khi người bán đã báo đã giao kèm bằng chứng. Vui lòng sử dụng luồng Yêu cầu hủy sau báo giao (UC-28)."
+                actionLabel="Mở bàn giao & yêu cầu hủy"
+                actionTestID="order-open-post-delivery-handover-button"
+                onActionPress={() => navigation.navigate('TransactionDetail', { id: order.id })}
               />
             ) : null}
 

@@ -45,7 +45,7 @@ export default function SettingsScreen() {
   function verify() {
     return run(async () => {
       if (!challenge) return;
-      if (!/^[0-9]{6}$/.test(code)) throw new Error('Nhập đủ 6 chữ số của mã xác minh.');
+      if (!/^[0-9]{6}$/.test(code)) throw new Error('Nhập đủ mã xác minh.');
       if (!remaining) throw new Error('Mã đã hết hạn. Hãy gửi lại mã.');
       await profileApi.verifyEmail(challenge.challengeId, code);
       useSession.setState({ user: user ? { ...user, email: wantedEmail, emailVerified: true } : user });

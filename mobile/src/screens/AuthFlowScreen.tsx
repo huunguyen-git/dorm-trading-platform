@@ -144,7 +144,7 @@ export default function AuthFlowScreen() {
       await send();
       return;
     } else {
-      if (!/^[0-9]{6}$/.test(code)) throw new Error('Nhập đủ 6 chữ số của mã xác minh.');
+      if (!/^[0-9]{6}$/.test(code)) throw new Error('Nhập đủ mã xác minh.');
       if (!remaining) throw new Error('Mã đã hết hạn. Hãy gửi lại mã.');
       const result = await post<{ resetToken: string | null }>('/auth/otp/verify', {
         challengeId: challenge.challengeId,
@@ -296,7 +296,7 @@ export default function AuthFlowScreen() {
           {challenge && !grant ? (
             <View style={styles.otpGroup}>
               <Field
-                label="Mã OTP"
+                label="Mã xác minh"
                 testID="auth-otp"
                 placeholder="000000"
                 keyboardType="number-pad"

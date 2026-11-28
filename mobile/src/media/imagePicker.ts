@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { api } from '../api/client';
+import { apiMultipart } from '../api/client';
+import { appendMultipartFile } from '../api/multipart';
 
 export const MAX_LISTING_IMAGES = 5;
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -266,26 +267,20 @@ export async function uploadListingImages(assets: PickableImageAsset[]): Promise
     validated.push({ asset, mimeType: check.mimeType });
   }
 
-  const formData = new FormData();
-  validated.forEach(({ asset, mimeType }, index) => {
-    const fileName = resolveAssetFileName(asset, mimeType, index);
-    if (asset.file) {
-      formData.append('files', asset.file, fileName);
-    } else {
-      formData.append(
-        'files',
-        {
-          uri: asset.uri,
-          name: fileName,
-          type: mimeType,
-        } as unknown as Blob,
-      );
+  // FormData mới mỗi lần gửi để 401 refresh retry không tái sử dụng body đã đọc
+  const response = await apiMultipart<{ items?: UploadedMediaItem[] }>('/media/images', async () => {
+    const formData = new FormData();
+    for (let index = 0; index < validated.length; index += 1) {
+      const { asset, mimeType } = validated[index];
+      const fileName = resolveAssetFileName(asset, mimeType, index);
+      await appendMultipartFile(formData, 'files', {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+        file: asset.file,
+      });
     }
-  });
-
-  const response = await api<{ items?: UploadedMediaItem[] }>('/media/images', {
-    method: 'POST',
-    body: formData,
+    return formData;
   });
 
   const items = Array.isArray(response?.items) ? response.items : [];
