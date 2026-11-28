@@ -335,21 +335,25 @@ class TransactionHandoverConcurrencyTest extends BaseIntegrationTest {
         Account buyer = createMember("BuyerRe");
         Deal deal = createDeliveredDeal(seller, buyer);
 
+        record ReissueOutcome(int status, String code, String txStatus, String newOtpCode) {
+        }
+
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
-            Future<Outcome> reissueFuture = pool.submit(() -> {
+            Future<ReissueOutcome> reissueFuture = pool.submit(() -> {
                 ready.countDown();
                 assertThat(start.await(15, TimeUnit.SECONDS)).isTrue();
                 Response res = given().auth().oauth2(buyer.token())
                         .contentType(ContentType.JSON)
                         .body(Map.of())
                         .post("/api/v1/transactions/{id}/otp/reissue", deal.transactionId());
-                return new Outcome(
+                return new ReissueOutcome(
                         res.statusCode(),
                         res.statusCode() == 200 ? null : res.jsonPath().getString("code"),
-                        res.statusCode() == 200 ? res.jsonPath().getString("status") : null
+                        res.statusCode() == 200 ? res.jsonPath().getString("status") : null,
+                        res.statusCode() == 200 ? res.jsonPath().getString("otp.inAppCode") : null
                 );
             });
 
@@ -370,17 +374,35 @@ class TransactionHandoverConcurrencyTest extends BaseIntegrationTest {
             assertThat(ready.await(15, TimeUnit.SECONDS)).isTrue();
             start.countDown();
 
-            Outcome reissueRes = reissueFuture.get(30, TimeUnit.SECONDS);
+            ReissueOutcome reissueRes = reissueFuture.get(30, TimeUnit.SECONDS);
             Outcome completeRes = completeFuture.get(30, TimeUnit.SECONDS);
 
-            // Either complete won first (reissue -> 409 INVALID_STATE_TRANSITION), OR reissue won first (old code rejected with 400 OTP_INVALID unless identical 6-digit collision)
-            assertThat(reissueRes.status()).isIn(200, 409);
-            assertThat(completeRes.status()).isIn(200, 400, 409);
-
+            String finalStatus = db.queryForObject(
+                    "SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?",
+                    String.class,
+                    deal.transactionId()
+            );
             Integer activeCount = db.queryForObject(
                     "SELECT COUNT(*) FROM ma_xac_nhan_otp WHERE ma_giao_dich = ? AND NOT da_dung AND NOT bi_vo_hieu",
                     Integer.class, deal.transactionId());
-            assertThat(activeCount).isLessThanOrEqualTo(1);
+
+            assertThat(finalStatus).isIn("HOAN_TAT", "CHO_XAC_NHAN");
+            if ("HOAN_TAT".equals(finalStatus)) {
+                assertThat(completeRes.status()).isEqualTo(200);
+                assertThat(activeCount).isZero();
+                if (reissueRes.status() == 200) {
+                    // Only possible in the 1-in-1,000,000 event that reissue generated the exact same 6-digit code
+                    assertThat(deal.otpCode()).isEqualTo(reissueRes.newOtpCode());
+                } else {
+                    assertThat(reissueRes.status()).isEqualTo(409);
+                    assertThat(reissueRes.code()).isEqualTo("INVALID_STATE_TRANSITION");
+                }
+            } else {
+                assertThat(reissueRes.status()).isEqualTo(200);
+                assertThat(completeRes.status()).isIn(400, 409);
+                assertThat(completeRes.code()).isIn("OTP_INVALID", "OTP_EXPIRED", "OTP_ALREADY_USED");
+                assertThat(activeCount).isEqualTo(1);
+            }
         } finally {
             pool.shutdownNow();
         }

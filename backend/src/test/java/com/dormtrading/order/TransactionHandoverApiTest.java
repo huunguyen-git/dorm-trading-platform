@@ -640,12 +640,21 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 .then().statusCode(409)
                 .body("code", equalTo("INVALID_STATE_TRANSITION"));
 
-        // Post-delivery order with 2 items (combo)
+        // Post-delivery order with 2 items (combo) + WebP EXIF/XMP stripping verification
         SeededDeal deal = seedDeal(seller.id(), buyer.id(), 180000, 2, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
         given().auth().oauth2(seller.token())
                 .multiPart("file", "proof.webp", HandoverTestImages.webpWithExifAndXmp(), "image/webp")
                 .post("/api/v1/transactions/{id}/deliver", deal.transactionId())
                 .then().statusCode(200);
+
+        byte[] downloadedWebp = given().auth().oauth2(buyer.token())
+                .get("/api/v1/transactions/{id}/handover-photo", deal.transactionId())
+                .then().statusCode(200)
+                .contentType("image/webp")
+                .extract().asByteArray();
+        String webpAscii = new String(downloadedWebp, StandardCharsets.ISO_8859_1);
+        assertThat(webpAscii).startsWith("RIFF").contains("WEBP");
+        assertThat(webpAscii).doesNotContain("EXIF", "ExifGPS10.8782", "XMP ", "secret-device");
 
         String activeOtpBeforeCancel = given().auth().oauth2(buyer.token())
                 .get("/api/v1/transactions/{id}", deal.transactionId())
@@ -737,6 +746,9 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 .isEqualTo("KHA_DUNG");
         assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, deal.itemIds().get(1)))
                 .isEqualTo("DANG_GIU");
+        // Unreleased shared item under UC-28 E5 MUST NOT have its optimistic-lock version bumped!
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, deal.itemIds().get(1)))
+                .isEqualTo(0L);
 
         // Idempotent replay of AGREE -> 200 OK without error
         given().auth().oauth2(seller.token())
@@ -1586,5 +1598,249 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
         }
 
         assertThat(collectedTexts.size()).isGreaterThanOrEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("PR #38 Review Hardening: BI_KHOA đủ 5 POST & hết hạn 14 ngày FR-12, CHO_KICH_HOAT/VO_HIEU_HOA là bên tham gia, IDOR chéo đơn, Admin chặn POST, DA_DONG_DO_HOAN_TAT, scheduler <24h/idempotent & guard AGREE")
+    void reviewHardening_biKhoaAllWrites_tempLockReconcile_participantPendingDisabled_idor_adminPostBlocks_andStateGuards() {
+        Account seller = createMember("SellerRv", true, "HOAT_DONG", 100);
+        Account buyer = createMember("BuyerRv", true, "HOAT_DONG", 100);
+        Account moderator = createAdmin("KIEM_DUYET_VIEN");
+        Account seniorAdmin = createAdmin("QUAN_TRI_VIEN_CAP_CAO");
+        byte[] jpeg = HandoverTestImages.sampleJpeg();
+
+        // 1. BI_KHOA blocks ALL 5 write endpoints (/deliver, /complete, /otp/reissue, /cancel-requests, /respond), then expired 14-day temp lock reconciles!
+        SeededDeal lockDeliverDeal = seedDeal(seller.id(), buyer.id(), 100000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', "
+                        + "ly_do_han_che = 'Tạm khóa 14 ngày', khoa_den_ngay = CURRENT_TIMESTAMP + INTERVAL '14 days' WHERE user_id = ?",
+                seller.id()
+        );
+        given().auth().oauth2(seller.token())
+                .multiPart("file", "ok.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", lockDeliverDeal.transactionId())
+                .then().statusCode(403)
+                .body("code", equalTo("ACCOUNT_RESTRICTED"));
+
+        // Expired 14-day temporary lock auto-reconciles on POST /deliver -> 200 & member status becomes HOAT_DONG!
+        db.update(
+                "UPDATE thanh_viens SET khoa_den_ngay = CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE user_id = ?",
+                seller.id()
+        );
+        given().auth().oauth2(seller.token())
+                .multiPart("file", "ok.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", lockDeliverDeal.transactionId())
+                .then().statusCode(200)
+                .body("status", equalTo("CHO_XAC_NHAN"));
+        assertThat(db.queryForObject("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class, seller.id()))
+                .isEqualTo("HOAT_DONG");
+
+        // Buyer creates cancel request while active, then buyer is locked BI_KHOA -> blocked 403 ACCOUNT_RESTRICTED on remaining 4 writes
+        String sellerReqId = given().auth().oauth2(seller.token())
+                .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", lockDeliverDeal.transactionId())
+                .then().statusCode(201)
+                .extract().jsonPath().getString("cancellationRequest.id");
+
+        db.update(
+                "UPDATE thanh_viens SET trang_thai_tai_khoan = 'BI_KHOA', loai_han_che = 'KHOA_TAM_THOI', "
+                        + "ly_do_han_che = 'Tạm khóa', khoa_den_ngay = CURRENT_TIMESTAMP + INTERVAL '14 days' WHERE user_id = ?",
+                buyer.id()
+        );
+        given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("otp", "123456"))
+                .post("/api/v1/transactions/{id}/complete", lockDeliverDeal.transactionId())
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/transactions/{id}/otp/reissue", lockDeliverDeal.transactionId())
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", lockDeliverDeal.transactionId())
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("decision", "AGREE"))
+                .post("/api/v1/transactions/{id}/cancel-requests/{reqId}/respond", lockDeliverDeal.transactionId(), sellerReqId)
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+
+        // Restore buyer to HOAT_DONG and test Admin POST blocks + Cross-transaction IDOR
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'HOAT_DONG', loai_han_che = NULL, khoa_den_ngay = NULL WHERE user_id = ?", buyer.id());
+
+        for (String adminToken : List.of(moderator.token(), seniorAdmin.token())) {
+            given().auth().oauth2(adminToken)
+                    .multiPart("file", "a.jpg", jpeg, "image/jpeg")
+                    .post("/api/v1/transactions/{id}/deliver", lockDeliverDeal.transactionId())
+                    .then().statusCode(403);
+            given().auth().oauth2(adminToken)
+                    .contentType(ContentType.JSON).body(Map.of("otp", "123456"))
+                    .post("/api/v1/transactions/{id}/complete", lockDeliverDeal.transactionId())
+                    .then().statusCode(403);
+            given().auth().oauth2(adminToken)
+                    .contentType(ContentType.JSON).body(Map.of())
+                    .post("/api/v1/transactions/{id}/otp/reissue", lockDeliverDeal.transactionId())
+                    .then().statusCode(403);
+            given().auth().oauth2(adminToken)
+                    .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                    .post("/api/v1/transactions/{id}/cancel-requests", lockDeliverDeal.transactionId())
+                    .then().statusCode(403);
+            given().auth().oauth2(adminToken)
+                    .contentType(ContentType.JSON).body(Map.of("decision", "AGREE"))
+                    .post("/api/v1/transactions/{id}/cancel-requests/{reqId}/respond", lockDeliverDeal.transactionId(), sellerReqId)
+                    .then().statusCode(403);
+        }
+
+        // Cross-transaction IDOR: txA and txB belong to same seller & buyer -> photoId/reqId from txB must return 404 under txA!
+        SeededDeal txB = seedDeal(seller.id(), buyer.id(), 120000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        String txBPhotoId = given().auth().oauth2(seller.token())
+                .multiPart("file", "b.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", txB.transactionId())
+                .then().statusCode(200)
+                .extract().jsonPath().getString("handoverProof.photos[0].id");
+        String txBReqId = given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", txB.transactionId())
+                .then().statusCode(201)
+                .extract().jsonPath().getString("cancellationRequest.id");
+
+        given().auth().oauth2(buyer.token())
+                .get("/api/v1/transactions/{id}/handover-photos/{photoId}", lockDeliverDeal.transactionId(), txBPhotoId)
+                .then().statusCode(404)
+                .body("code", equalTo("PROOF_NOT_FOUND"));
+        given().auth().oauth2(seller.token())
+                .contentType(ContentType.JSON).body(Map.of("decision", "AGREE"))
+                .post("/api/v1/transactions/{id}/cancel-requests/{reqId}/respond", lockDeliverDeal.transactionId(), txBReqId)
+                .then().statusCode(404)
+                .body("code", equalTo("CANCEL_REQUEST_NOT_FOUND"));
+
+        // Completing txB while txBReqId is CHO_XAC_NHAN closes the cancel request to DA_DONG_DO_HOAN_TAT
+        String txBOtp = given().auth().oauth2(buyer.token())
+                .get("/api/v1/transactions/{id}", txB.transactionId())
+                .then().statusCode(200)
+                .extract().jsonPath().getString("otp.inAppCode");
+        given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("otp", txBOtp))
+                .post("/api/v1/transactions/{id}/complete", txB.transactionId())
+                .then().statusCode(200)
+                .body("status", equalTo("HOAN_TAT"))
+                .body("cancellationRequest.status", equalTo("DA_DONG_DO_HOAN_TAT"));
+        assertThat(db.queryForObject(
+                "SELECT trang_thai FROM yeu_cau_huy_giao_dichs WHERE id = ?",
+                String.class, UUID.fromString(txBReqId))).isEqualTo("DA_DONG_DO_HOAN_TAT");
+
+        // 2. CHO_KICH_HOAT & VO_HIEU_HOA AS ACTUAL PARTICIPANTS
+        Account pendingBuyer = createMember("PendingParticipant", true, "HOAT_DONG", 100);
+        Account disabledSeller = createMember("DisabledParticipant", true, "HOAT_DONG", 100);
+        SeededDeal statusDeal = seedDeal(disabledSeller.id(), pendingBuyer.id(), 70000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        given().auth().oauth2(disabledSeller.token())
+                .multiPart("file", "p.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", statusDeal.transactionId())
+                .then().statusCode(200);
+
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'CHO_KICH_HOAT' WHERE user_id = ?", pendingBuyer.id());
+        db.update("UPDATE thanh_viens SET trang_thai_tai_khoan = 'VO_HIEU_HOA' WHERE user_id = ?", disabledSeller.id());
+
+        given().auth().oauth2(pendingBuyer.token()).get("/api/v1/transactions")
+                .then().statusCode(403).body("code", equalTo("FORBIDDEN"));
+        given().auth().oauth2(pendingBuyer.token()).get("/api/v1/transactions/{id}", statusDeal.transactionId())
+                .then().statusCode(403).body("code", equalTo("FORBIDDEN"));
+        given().auth().oauth2(pendingBuyer.token()).get("/api/v1/transactions/{id}/handover-photo", statusDeal.transactionId())
+                .then().statusCode(403).body("code", equalTo("FORBIDDEN"));
+        given().auth().oauth2(pendingBuyer.token()).contentType(ContentType.JSON).body(Map.of("otp", "123456"))
+                .post("/api/v1/transactions/{id}/complete", statusDeal.transactionId())
+                .then().statusCode(403);
+        given().auth().oauth2(pendingBuyer.token()).contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", statusDeal.transactionId())
+                .then().statusCode(403);
+
+        given().auth().oauth2(disabledSeller.token()).get("/api/v1/transactions").then().statusCode(401);
+        given().auth().oauth2(disabledSeller.token()).get("/api/v1/transactions/{id}", statusDeal.transactionId()).then().statusCode(401);
+        given().auth().oauth2(disabledSeller.token()).get("/api/v1/transactions/{id}/handover-photo", statusDeal.transactionId()).then().statusCode(401);
+        given().auth().oauth2(disabledSeller.token()).multiPart("file", "x.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", statusDeal.transactionId()).then().statusCode(401);
+        given().auth().oauth2(disabledSeller.token()).contentType(ContentType.JSON).body(Map.of())
+                .post("/api/v1/transactions/{id}/otp/reissue", statusDeal.transactionId()).then().statusCode(401);
+        given().auth().oauth2(disabledSeller.token()).contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", statusDeal.transactionId()).then().statusCode(401);
+
+        // 3. Read-only OVERDUE_24H on GET /{id} before scheduler + scheduler <24h=0, >=24h=1, idempotent 2nd call=0
+        SeededDeal schedDeal = seedDeal(seller.id(), buyer.id(), 88000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        given().auth().oauth2(seller.token())
+                .multiPart("file", "sc.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", schedDeal.transactionId())
+                .then().statusCode(200);
+
+        // Make ONLY schedDeal freshly delivered (< 24h) and reconcile any older deals from prior tests first
+        handoverService.reconcileOverdueDeliveries(500);
+        assertThat(handoverService.reconcileOverdueDeliveries(50)).isZero();
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, schedDeal.transactionId()))
+                .isEqualTo("CHO_XAC_NHAN");
+
+        // Advance past 24h WITHOUT calling scheduler: GET /{id} computes CHO_XU_LY / OVERDUE_24H read-only while DB stays CHO_XAC_NHAN!
+        db.update(
+                "UPDATE giao_dichs SET thoi_diem_bao_giao = CURRENT_TIMESTAMP - INTERVAL '25 hours' WHERE ma_giao_dich = ?",
+                schedDeal.transactionId()
+        );
+        given().auth().oauth2(buyer.token())
+                .get("/api/v1/transactions/{id}", schedDeal.transactionId())
+                .then().statusCode(200)
+                .body("status", equalTo("CHO_XU_LY"))
+                .body("escalationReason", equalTo("OVERDUE_24H"));
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, schedDeal.transactionId()))
+                .isEqualTo("CHO_XAC_NHAN");
+
+        // Now run scheduler once -> escalates 1, 2nd run -> 0 and strictly 1 AUTO_ESCALATED_OVERDUE_24H timeline row
+        assertThat(handoverService.reconcileOverdueDeliveries(50)).isEqualTo(1);
+        assertThat(handoverService.reconcileOverdueDeliveries(50)).isZero();
+        assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM lich_su_trang_thai_giao_dich WHERE ma_giao_dich = ? AND hanh_dong = 'AUTO_ESCALATED_OVERDUE_24H'",
+                Integer.class, schedDeal.transactionId())).isEqualTo(1);
+
+        // 4. AGREE guards: never overwrite AN or KET_THUC listings, never overwrite DA_CHUYEN_GIAO or bump unreleased item version
+        SeededDeal hiddenListingDeal = seedDeal(seller.id(), buyer.id(), 55000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        given().auth().oauth2(seller.token())
+                .multiPart("file", "an.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", hiddenListingDeal.transactionId())
+                .then().statusCode(200);
+        String hiddenReqId = given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", hiddenListingDeal.transactionId())
+                .then().statusCode(201)
+                .extract().jsonPath().getString("cancellationRequest.id");
+        db.update("UPDATE tin_dangs SET trang_thai = 'AN' WHERE ma_tin = ?", hiddenListingDeal.listingId());
+
+        given().auth().oauth2(seller.token())
+                .contentType(ContentType.JSON).body(Map.of("decision", "AGREE"))
+                .post("/api/v1/transactions/{id}/cancel-requests/{reqId}/respond", hiddenListingDeal.transactionId(), hiddenReqId)
+                .then().statusCode(200)
+                .body("status", equalTo("HUY"))
+                .body("listing.status", equalTo("AN"))
+                .body("items[0].status", equalTo("KHA_DUNG"));
+
+        SeededDeal transferredItemDeal = seedDeal(seller.id(), buyer.id(), 55000, 1, "DANG_GIAO", Instant.now().plus(20, ChronoUnit.DAYS));
+        given().auth().oauth2(seller.token())
+                .multiPart("file", "kt.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/transactions/{id}/deliver", transferredItemDeal.transactionId())
+                .then().statusCode(200);
+        String transferredReqId = given().auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON).body(Map.of("reasonCode", "MUTUAL_AGREEMENT"))
+                .post("/api/v1/transactions/{id}/cancel-requests", transferredItemDeal.transactionId())
+                .then().statusCode(201)
+                .extract().jsonPath().getString("cancellationRequest.id");
+        db.update("UPDATE tin_dangs SET trang_thai = 'KET_THUC' WHERE ma_tin = ?", transferredItemDeal.listingId());
+        db.update("UPDATE do_vats SET trang_thai = 'DA_CHUYEN_GIAO' WHERE ma_vat = ?", transferredItemDeal.itemIds().getFirst());
+        long itemVersionBefore = db.queryForObject(
+                "SELECT version FROM do_vats WHERE ma_vat = ?",
+                Long.class, transferredItemDeal.itemIds().getFirst());
+
+        given().auth().oauth2(seller.token())
+                .contentType(ContentType.JSON).body(Map.of("decision", "AGREE"))
+                .post("/api/v1/transactions/{id}/cancel-requests/{reqId}/respond", transferredItemDeal.transactionId(), transferredReqId)
+                .then().statusCode(200)
+                .body("status", equalTo("HUY"))
+                .body("listing.status", equalTo("KET_THUC"))
+                .body("items[0].status", equalTo("DA_CHUYEN_GIAO"));
+        assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, transferredItemDeal.itemIds().getFirst()))
+                .isEqualTo(itemVersionBefore);
     }
 }

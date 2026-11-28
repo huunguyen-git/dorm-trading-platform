@@ -3,6 +3,7 @@ package com.dormtrading.order;
 import com.dormtrading.common.BaseIntegrationTest;
 import com.dormtrading.iam.auth.AuthService;
 import io.restassured.http.ContentType;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -54,10 +56,13 @@ class DemoHandoverDataSeederTest extends BaseIntegrationTest {
             DemoHandoverDataSeeder.TX_COMPLETED_RECEIPT_ID
     );
 
+    private static final UUID COLLIDING_MSSV_VICTIM_ID = UUID.fromString("11111111-2222-4333-8444-555555550099");
+
     private static final List<UUID> DEMO_USER_IDS = List.of(
             DemoHandoverDataSeeder.SELLER_ID,
             DemoHandoverDataSeeder.BUYER_ID,
-            DemoHandoverDataSeeder.MODERATOR_ID
+            DemoHandoverDataSeeder.MODERATOR_ID,
+            COLLIDING_MSSV_VICTIM_ID
     );
 
     @AfterEach
@@ -91,9 +96,23 @@ class DemoHandoverDataSeederTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("Bean seeder không được Spring nạp trong profile test/mặc định; khi chạy tay lũy đẳng và đủ 6 giao dịch mẫu UIT KTX")
+    @DisplayName("Bean seeder bị chặn ở profile test/prod, không nâng quyền nhầm qua MSSV, bảo mật ma_otp=NULL/ảnh sạch, và lũy đẳng")
     void seederIsDisabledInTestProfileAndIdempotentWhenExecuted() {
         assertThat(applicationContext.getBeansOfType(DemoHandoverDataSeeder.class)).isEmpty();
+        Profile profileAnn = DemoHandoverDataSeeder.class.getAnnotation(Profile.class);
+        assertThat(profileAnn).isNotNull();
+        assertThat(profileAnn.value()).containsExactly("(dev | demo) & !prod");
+
+        // Pre-existing regular member sharing MODERATOR's MSSV ("21520003") MUST NOT be hijacked or granted KIEM_DUYET_VIEN!
+        db.update(
+                """
+                INSERT INTO thanh_viens(
+                    user_id, email, mat_khau_hash, ho_ten, mssv, truong, trang_thai_tai_khoan,
+                    email_verified, profile_approved
+                ) VALUES (?, 'victim.student@gm.uit.edu.vn', 'hash', 'Sinh viên trùng MSSV', '21520003', 'UIT', 'HOAT_DONG', TRUE, TRUE)
+                """,
+                COLLIDING_MSSV_VICTIM_ID
+        );
 
         DemoHandoverDataSeeder seeder = new DemoHandoverDataSeeder(
                 db, passwordEncoder, proofStorage, otpCrypto, clock
@@ -103,12 +122,42 @@ class DemoHandoverDataSeederTest extends BaseIntegrationTest {
         seeder.seedIfAbsent();
         seeder.seedIfAbsent();
 
+        Integer victimAdminRoles = db.queryForObject(
+                "SELECT COUNT(*) FROM vai_tro_quan_tri WHERE user_id = ?",
+                Integer.class,
+                COLLIDING_MSSV_VICTIM_ID
+        );
+        assertThat(victimAdminRoles).isZero();
+        Integer victimDeals = db.queryForObject(
+                "SELECT COUNT(*) FROM giao_dichs WHERE nguoi_ban_id = ? OR nguoi_mua_id = ?",
+                Integer.class,
+                COLLIDING_MSSV_VICTIM_ID,
+                COLLIDING_MSSV_VICTIM_ID
+        );
+        assertThat(victimDeals).isZero();
+
         Integer seededTxCount = db.queryForObject(
                 "SELECT COUNT(*) FROM giao_dichs WHERE nguoi_ban_id = ?",
                 Integer.class,
                 DemoHandoverDataSeeder.SELLER_ID
         );
         assertThat(seededTxCount).isEqualTo(6);
+
+        // Verify ALL seeded OTP rows keep plaintext ma_otp = NULL and store 64-char HMAC hash
+        List<Map<String, Object>> seededOtpRows = db.queryForList(
+                """
+                SELECT o.ma_otp, o.otp_hash
+                FROM ma_xac_nhan_otp o
+                JOIN giao_dichs g ON g.ma_giao_dich = o.ma_giao_dich
+                WHERE g.nguoi_ban_id = ?
+                """,
+                DemoHandoverDataSeeder.SELLER_ID
+        );
+        assertThat(seededOtpRows).isNotEmpty();
+        for (Map<String, Object> otpRow : seededOtpRows) {
+            assertThat(otpRow.get("ma_otp")).isNull();
+            assertThat(String.valueOf(otpRow.get("otp_hash")).strip()).hasSize(64);
+        }
 
         // Verify all 3 demo accounts can authenticate cleanly
         String sellerToken = authService.login(DemoHandoverDataSeeder.SELLER_EMAIL, DemoHandoverDataSeeder.DEMO_PASSWORD, "mobile", "10.20.0.1").token();
@@ -145,10 +194,24 @@ class DemoHandoverDataSeederTest extends BaseIntegrationTest {
                 .extract().jsonPath().getString("otp.inAppCode");
         assertThat(otpCode).matches("[0-9]{6}");
 
-        given().auth().oauth2(buyerToken)
+        byte[] proofBytes = given().auth().oauth2(buyerToken)
                 .get("/api/v1/transactions/{id}/handover-photo", DemoHandoverDataSeeder.TX_OTP_CHO_XAC_NHAN_ID)
                 .then().statusCode(200)
-                .contentType("image/jpeg");
+                .contentType("image/jpeg")
+                .extract().asByteArray();
+        assertThat(proofBytes.length).isGreaterThan(3);
+        assertThat(proofBytes[0]).isEqualTo((byte) 0xFF);
+        assertThat(proofBytes[1]).isEqualTo((byte) 0xD8);
+        assertThat(proofBytes[2]).isEqualTo((byte) 0xFF);
+        assertThat(new String(proofBytes, StandardCharsets.ISO_8859_1)).doesNotContain("Exif");
+        Integer mediaRows = db.queryForObject(
+                "SELECT COUNT(*) FROM media_files WHERE owner_id IN (?, ?, ?)",
+                Integer.class,
+                DemoHandoverDataSeeder.SELLER_ID,
+                DemoHandoverDataSeeder.BUYER_ID,
+                DemoHandoverDataSeeder.MODERATOR_ID
+        );
+        assertThat(mediaRows).isZero();
 
         // Moderator can inspect dispute deal #5 cleanly with both seller and buyer summaries
         given().auth().oauth2(modToken)
