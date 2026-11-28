@@ -76,7 +76,7 @@ Nghiệm thu từ báo giao qua xác nhận hoặc tranh chấp tới đánh gi�
 | P3-03 | Xử lý Giao dịch Quá hạn / Tranh chấp ([UC-29](use-cases/UC-29.md)) | — | 08/12 | Chưa thực hiện | — |
 | P3-04 | Đánh giá, Sửa & Xóa Đánh giá ([UC-30](use-cases/UC-30.md), [UC-31](use-cases/UC-31.md), [UC-32](use-cases/UC-32.md)) | — | 10/12 | Chưa thực hiện | — |
 | P3-05 | Khiếu nại & Kiểm duyệt Đánh giá ([UC-33](use-cases/UC-33.md), [UC-34](use-cases/UC-34.md)) | — | 12/12 | Chưa thực hiện | — |
-| P3-06 | Kiểm duyệt Báo cáo & Xem Thống kê ([UC-37](use-cases/UC-37.md), [UC-38](use-cases/UC-38.md)) | — | 12/12 | Chưa thực hiện | — |
+| P3-06 | Kiểm duyệt Báo cáo & Xem Thống kê ([UC-37](use-cases/UC-37.md), [UC-38](use-cases/UC-38.md)) | — | 12/12 | Chờ review | [Spec P3-06](specs/P3-06.md) · Backend unit + Testcontainers IT 9/9, `admin-web` 69/69 + build pass |
 
 ## PHASE 4 Kiểm thử & triển khai · 13/12/2026 – 19/12/2026
 
