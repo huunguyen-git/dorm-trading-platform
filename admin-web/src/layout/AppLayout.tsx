@@ -7,6 +7,8 @@ import type { User } from '../auth/session';
 import { rolePages } from '../config/rolePages';
 import ModeratorsPage from '../gov/ModeratorsPage';
 import PenaltiesPage from '../gov/PenaltiesPage';
+import ReportsModerationPage from '../gov/ReportsModerationPage';
+import StatisticsPage from '../gov/StatisticsPage';
 import RolePage from '../pages/RolePage';
 import PendingProfilesPage from '../profiles/PendingProfilesPage';
 import ProfileDetailPage from '../profiles/ProfileDetailPage';
@@ -18,6 +20,8 @@ function ProtectedPage({ user, permission, detail = false }: { user: User; permi
   if (permission === 'users') return <UsersManagementPage />;
   if (permission === 'moderators') return <ModeratorsPage />;
   if (permission === 'penalties') return <PenaltiesPage />;
+  if (permission === 'reports') return <ReportsModerationPage />;
+  if (permission === 'statistics') return <StatisticsPage />;
   return <RolePage permission={permission} role={user.role} />;
 }
 export default function AppLayout() {
