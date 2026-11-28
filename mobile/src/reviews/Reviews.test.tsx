@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { api, ApiError } from '../api/client';
+import { api, apiMultipart, ApiError, attachment, RestrictedAccountError } from '../api/client';
 import { useSession, type User } from '../auth/session';
 import { useDiscovery } from '../listings/discoveryStore';
 import { useSellerListings } from '../listings/sellerStore';
@@ -75,11 +75,23 @@ jest.mock('../api/client', () => {
   return {
     ...actual,
     api: jest.fn(),
+    apiMultipart: jest.fn(),
+    attachment: jest.fn(),
   };
 });
 
 const mockedApi = api as unknown as jest.Mock<
   (path: string, init?: RequestInit) => Promise<unknown>
+>;
+const mockedApiMultipart = apiMultipart as unknown as jest.Mock<
+  (
+    path: string,
+    buildFormData: () => FormData | Promise<FormData>,
+    init?: Omit<RequestInit, 'body'>,
+  ) => Promise<unknown>
+>;
+const mockedAttachment = attachment as unknown as jest.Mock<
+  (path: string) => Promise<{ type: string; bytes: ArrayBuffer } | null>
 >;
 
 const buyerUser: User = {
@@ -240,7 +252,6 @@ function makeSellerReviewsResponse(
     items: [
       {
         id: 'pub-rev-1',
-        orderId: 'order-done-1',
         listingId: 'listing-1',
         listingTitle: 'Giáo trình Nhập môn CNPM SE100',
         buyerDisplayName: 'Nguyễn Minh Quân',
@@ -253,7 +264,6 @@ function makeSellerReviewsResponse(
       },
       {
         id: 'pub-rev-2',
-        orderId: 'order-done-2',
         listingId: 'listing-2',
         listingTitle: 'Đèn bàn LED chống cận',
         buyerDisplayName: 'Lê Hoàng Nam',
@@ -277,6 +287,12 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
   beforeEach(() => {
     jest.clearAllMocks();
     mockedApi.mockReset();
+    mockedApiMultipart.mockReset();
+    mockedAttachment.mockReset();
+    mockedAttachment.mockResolvedValue({
+      type: 'image/jpeg',
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+    });
     focusListeners.clear();
     blurListeners.clear();
     mockRouteParams = {};
@@ -431,6 +447,7 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
     });
     expect(normalized?.items[0]).not.toHaveProperty('evidence');
     expect(normalized?.items[0]).not.toHaveProperty('buyerEmail');
+    expect(normalized?.items[0]).not.toHaveProperty('orderId');
   });
 
   test('UC-30 Basic Flow: buyer sees 15-day eligibility, submits 5-star review with idempotency key, and sees public review card', async () => {
@@ -493,6 +510,10 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
 
     expect(await screen.findByTestId('order-review-card')).toBeTruthy();
     expect(screen.getByTestId('order-review-score-delta').props.children).toBe('+2 điểm uy tín');
+    // Verify no duplicated "để đánh giá để chỉnh sửa" phrase
+    expect(screen.getByTestId('order-review-edit-window-hint').props.children).toBe(
+      'Còn 12 ngày để chỉnh sửa (tính từ ngày hoàn tất giao dịch).',
+    );
     expect(screen.getByTestId('open-edit-review-button')).toBeTruthy();
     expect(screen.getByTestId('open-delete-review-button')).toBeTruthy();
   });
@@ -538,12 +559,18 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
     let resolveSecondPost!: (value: unknown) => void;
     const idempKeys: string[] = [];
 
+    mockedApiMultipart.mockImplementation(async (path: string, buildFormData) => {
+      if (path === '/orders/order-done-1/review/evidence') {
+        const built = await buildFormData();
+        expect(built).toBeInstanceOf(FormData);
+        return { items: [uploadedEvidence] };
+      }
+      return {};
+    });
+
     mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/orders/order-done-1' && !init?.method) return order;
       if (path === '/orders/order-done-1/review' && !init?.method) return eligibleState;
-      if (path === '/orders/order-done-1/review/evidence' && init?.method === 'POST') {
-        return { items: [uploadedEvidence] };
-      }
       if (path === '/orders/order-done-1/review' && init?.method === 'POST') {
         postAttempt += 1;
         const body = JSON.parse(String(init.body ?? '{}'));
@@ -582,14 +609,12 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
     ).toBeTruthy();
     expect(postAttempt).toBe(0);
 
-    // Upload private evidence image (satisfies 1-3★ requirement without comment)
+    // Upload private evidence image (satisfies 1-3★ requirement without comment) and loads via attachment()
     fireEvent.press(screen.getByTestId('review-evidence-pick-library'));
     expect(await screen.findByTestId(`review-evidence-item-${EVIDENCE_UUID_1}`)).toBeTruthy();
-    const previewImg = screen.getByTestId('review-evidence-image-0');
-    expect(previewImg.props.source).toEqual({
-      uri: `https://api.dormtrading.vn/api/v1/reviews/evidence/${EVIDENCE_UUID_1}`,
-      headers: { Authorization: 'Bearer buyer-jwt-token' },
-    });
+    const previewImg = await screen.findByTestId('review-evidence-image-0');
+    expect(mockedAttachment).toHaveBeenCalledWith(`/reviews/evidence/${EVIDENCE_UUID_1}`);
+    expect(previewImg.props.source.uri).toMatch(/^data:image\/jpeg;base64,/);
 
     // First submit fails (500) -> form stays open and preserves 2 stars + evidence (UC-30 E5)
     fireEvent.press(screen.getByTestId('review-form-submit-button'));
@@ -898,20 +923,16 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
 
     render(<OrderDetailScreen />);
     const evImg = await screen.findByTestId('order-review-evidence-img-0');
-    expect(evImg.props.source).toEqual({
-      uri: `https://api.dormtrading.vn/api/v1/reviews/evidence/${EVIDENCE_UUID_2}`,
-      headers: { Authorization: 'Bearer seller-jwt-token' },
-    });
+    expect(mockedAttachment).toHaveBeenCalledWith(`/reviews/evidence/${EVIDENCE_UUID_2}`);
+    expect(evImg.props.source.uri).toMatch(/^data:image\/jpeg;base64,/);
     expect(screen.queryByTestId('open-edit-review-button')).toBeNull();
     expect(screen.queryByTestId('open-delete-review-button')).toBeNull();
 
-    // Tapping evidence thumbnail opens authenticated lightbox
+    // Tapping evidence thumbnail opens authenticated lightbox backed by attachment()
     fireEvent.press(screen.getByTestId('order-review-evidence-thumb-0'));
     expect(screen.getByTestId('review-evidence-lightbox')).toBeTruthy();
-    expect(screen.getByTestId('review-evidence-lightbox-image').props.source).toEqual({
-      uri: `https://api.dormtrading.vn/api/v1/reviews/evidence/${EVIDENCE_UUID_2}`,
-      headers: { Authorization: 'Bearer seller-jwt-token' },
-    });
+    const lightboxImg = await screen.findByTestId('review-evidence-lightbox-image');
+    expect(lightboxImg.props.source.uri).toMatch(/^data:image\/jpeg;base64,/);
   });
 
   test('SellerReviewsScreen renders public accepted reviews, filters by stars, and integrates with ListingScreen & ProfileScreen', async () => {
@@ -1142,12 +1163,15 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
         fileSize: 2_000_000,
       },
     ]);
+    mockedApiMultipart.mockImplementation(async (path: string) => {
+      if (path === '/orders/order-done-1/review/evidence') {
+        throw new ApiError(413, 'Kích thước ảnh vượt quá 5MB.', 'FILE_TOO_LARGE');
+      }
+      return {};
+    });
     mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/orders/order-done-1' && !init?.method) return order;
       if (path === '/orders/order-done-1/review' && !init?.method) return makeOrderReviewState();
-      if (path === '/orders/order-done-1/review/evidence' && init?.method === 'POST') {
-        throw new ApiError(413, 'Kích thước ảnh vượt quá 5MB.', 'FILE_TOO_LARGE');
-      }
       if (path === '/orders/order-done-1/review' && init?.method === 'POST') {
         throw new ApiError(
           409,
@@ -1227,12 +1251,15 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
     ]);
 
     let capturedPutBody: Record<string, unknown> | null = null;
+    mockedApiMultipart.mockImplementation(async (path: string) => {
+      if (path === '/orders/order-done-1/review/evidence') {
+        return { items: [newEvidence] };
+      }
+      return {};
+    });
     mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/orders/order-done-1' && !init?.method) return order;
       if (path === '/orders/order-done-1/review' && !init?.method) return pendingState;
-      if (path === '/orders/order-done-1/review/evidence' && init?.method === 'POST') {
-        return { items: [newEvidence] };
-      }
       if (path === '/reviews/rev-1' && init?.method === 'PUT') {
         capturedPutBody = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
         return {
@@ -1253,10 +1280,15 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
     const { unmount } = render(<OrderDetailScreen />);
     await screen.findByTestId('open-edit-review-button');
 
-    // Open CHO_XET edit: verifies queue-preserved note, removes old evidence, adds new evidence
+    // Open CHO_XET edit: verifies queue-preserved note, removes persisted old evidence (NO draft delete!), adds new draft evidence
     fireEvent.press(screen.getByTestId('open-edit-review-button'));
     expect(screen.getByTestId('review-edit-transition-note')).toBeTruthy();
     fireEvent.press(screen.getByTestId(`review-evidence-remove-${EVIDENCE_UUID_1}`));
+    expect(
+      mockedApi.mock.calls.some(
+        ([p, i]) => p.includes('/review/evidence/') && i?.method === 'DELETE',
+      ),
+    ).toBe(false);
     fireEvent.press(screen.getByTestId('review-evidence-pick-library'));
     expect(await screen.findByTestId(`review-evidence-item-${EVIDENCE_UUID_2}`)).toBeTruthy();
 
@@ -1306,8 +1338,8 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
             agreedPriceVnd: 100000,
             status: 'HOAN_TAT',
             scheduleConfirmed: true,
-            meetingTime: null,
-            meetingLocation: null,
+            meetingTime: '2026-11-24T09:00:00Z',
+            meetingLocation: 'Cổng KTX Khu A ĐHQG-HCM',
             proposedMeetingTime: null,
             proposedMeetingLocation: null,
             hasPendingScheduleProposal: false,
@@ -1339,8 +1371,8 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
             agreedPriceVnd: 60000,
             status: 'HOAN_TAT',
             scheduleConfirmed: true,
-            meetingTime: null,
-            meetingLocation: null,
+            meetingTime: '2026-11-05T09:00:00Z',
+            meetingLocation: 'Cổng KTX Khu A ĐHQG-HCM',
             proposedMeetingTime: null,
             proposedMeetingLocation: null,
             hasPendingScheduleProposal: false,
@@ -1372,8 +1404,8 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
             agreedPriceVnd: 80000,
             status: 'HOAN_TAT',
             scheduleConfirmed: true,
-            meetingTime: null,
-            meetingLocation: null,
+            meetingTime: '2026-11-24T11:00:00Z',
+            meetingLocation: 'Cổng KTX Khu B ĐHQG-HCM',
             proposedMeetingTime: null,
             proposedMeetingLocation: null,
             hasPendingScheduleProposal: false,
@@ -1397,7 +1429,271 @@ describe('P3-04 Mobile Reviews (UC-30, UC-31, UC-32, FR-10, NFR-01, NFR-03)', ()
 
     render(<OrdersScreen />);
     expect(await screen.findByText('Quạt mini để bàn')).toBeTruthy();
+    // HOAN_TAT review cues MUST take precedence over confirmed schedule ("Đã hẹn: ...")
     expect(screen.getAllByText('Chạm để đánh giá người bán')).toHaveLength(1);
     expect(screen.getByText('Đánh giá đang chờ kiểm duyệt')).toBeTruthy();
+    expect(screen.queryByText(/Đã hẹn:/)).toBeNull();
+  });
+
+  test('PR #40 review fixes: BI_KHOA closes sheets cleanly, draft delete frees quota, refresh failure keeps sheet open, and AuthorizedEvidenceImage handles retry', async () => {
+    mockRouteParams = { id: 'order-done-1' };
+    const order = makeCompletedOrder();
+    const restriction = {
+      accountStatus: 'BI_KHOA',
+      lockType: 'KHOA_TAM_THOI',
+      reason: 'Vi phạm nội quy',
+      lockedUntil: '2026-12-15T00:00:00Z',
+      appealable: false,
+      reputationScore: 45,
+      message: 'Tài khoản của bạn đang bị khóa tạm thời.',
+    };
+
+    const draftEvidence = {
+      id: EVIDENCE_UUID_1,
+      url: `/api/v1/reviews/evidence/${EVIDENCE_UUID_1}`,
+      contentType: 'image/jpeg',
+      sizeBytes: 11000,
+      originalFilename: 'draft.jpg',
+      createdAt: '2026-11-28T10:00:00Z',
+    };
+
+    jest.spyOn(imagePicker, 'pickImagesFromLibrary').mockResolvedValue([
+      { uri: 'file:///draft.jpg', fileName: 'draft.jpg', mimeType: 'image/jpeg', fileSize: 11000 },
+    ]);
+
+    // 1. Draft evidence upload -> AuthorizedEvidenceImage fails once then retries cleanly -> removing draft calls DELETE /orders/{id}/review/evidence/{evId}
+    mockedAttachment
+      .mockRejectedValueOnce(new Error('Tạm thời mất mạng'))
+      .mockResolvedValue({
+        type: 'image/jpeg',
+        bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+      });
+    mockedApiMultipart.mockResolvedValueOnce({ items: [draftEvidence] });
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/orders/order-done-1' && !init?.method) return order;
+      if (path === '/orders/order-done-1/review' && !init?.method) return makeOrderReviewState();
+      if (
+        path === `/orders/order-done-1/review/evidence/${EVIDENCE_UUID_1}` &&
+        init?.method === 'DELETE'
+      ) {
+        return undefined;
+      }
+      if (path === '/orders/order-done-1/review' && init?.method === 'POST') {
+        throw new RestrictedAccountError(restriction.message, restriction);
+      }
+      return {};
+    });
+
+    const { unmount: unmountDraft } = render(<OrderDetailScreen />);
+    await screen.findByTestId('open-create-review-button');
+    fireEvent.press(screen.getByTestId('open-create-review-button'));
+
+    fireEvent.press(screen.getByTestId('review-evidence-pick-library'));
+    expect(await screen.findByTestId('review-evidence-image-0-error')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('review-evidence-image-0-retry'));
+    expect(await screen.findByTestId('review-evidence-image-0')).toBeTruthy();
+
+    // Removing unattached draft MUST call backend draft-delete endpoint to free quota
+    fireEvent.press(screen.getByTestId(`review-evidence-remove-${EVIDENCE_UUID_1}`));
+    await waitFor(() => {
+      expect(mockedApi).toHaveBeenCalledWith(
+        `/orders/order-done-1/review/evidence/${EVIDENCE_UUID_1}`,
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+      expect(screen.queryByTestId(`review-evidence-item-${EVIDENCE_UUID_1}`) === null).toBe(true);
+    });
+
+    // BI_KHOA (RestrictedAccountError) on submit closes ReviewFormSheet instead of silent dead button
+    fireEvent.press(screen.getByTestId('review-form-submit-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('create-review-sheet') === null).toBe(true);
+    });
+    expect(useSession.getState().restriction?.accountStatus).toBe('BI_KHOA');
+    unmountDraft();
+
+    // 2. BI_KHOA on ReviewEvidenceManager upload closes ReviewFormSheet & BI_KHOA on DeleteReviewSheet closes DeleteReviewSheet
+    useOrders.getState().reset();
+    useReviews.getState().reset();
+    useSession.setState({
+      token: 'buyer-jwt-token',
+      user: buyerUser,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
+    const editableState = makeOrderReviewState({
+      canReview: false,
+      canEdit: true,
+      canDelete: true,
+      review: makeReviewDetail({ version: 1 }),
+    });
+    let reviewGetCount = 0;
+    mockedApiMultipart.mockRejectedValueOnce(
+      new RestrictedAccountError(restriction.message, restriction),
+    );
+    mockedApi.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/orders/order-done-1' && !init?.method) return order;
+      if (path === '/orders/order-done-1/review' && !init?.method) {
+        reviewGetCount += 1;
+        // First mount succeeds; conflict refresh fails with network error
+        if (reviewGetCount > 1) {
+          throw new Error('Mất kết nối mạng');
+        }
+        return editableState;
+      }
+      if (path === '/reviews/rev-1' && init?.method === 'PUT') {
+        throw new ApiError(409, 'Version cũ', 'VERSION_CONFLICT');
+      }
+      if (path.startsWith('/reviews/rev-1') && init?.method === 'DELETE') {
+        throw new RestrictedAccountError(restriction.message, restriction);
+      }
+      return {};
+    });
+
+    const { unmount: unmountLocked } = render(<OrderDetailScreen />);
+    await screen.findByTestId('open-edit-review-button');
+
+    // Trigger 409 conflict then network error on refresh -> sheet MUST stay open (no false onClose)
+    fireEvent.press(screen.getByTestId('open-edit-review-button'));
+    fireEvent.changeText(screen.getByTestId('review-comment-input'), 'Cập nhật mới');
+    fireEvent.press(screen.getByTestId('review-form-submit-button'));
+    expect(await screen.findByTestId('review-form-refresh-conflict')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('review-form-refresh-conflict'));
+    expect(
+      await screen.findByText(
+        'Không thể tải lại trạng thái mới nhất do lỗi kết nối. Vui lòng thử lại.',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByTestId('edit-review-sheet')).toBeTruthy();
+
+    // RestrictedAccountError on evidence upload closes edit sheet cleanly
+    fireEvent.press(screen.getByTestId('review-evidence-pick-library'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('edit-review-sheet') === null).toBe(true);
+    });
+
+    // RestrictedAccountError on DeleteReviewSheet closes delete sheet cleanly
+    useSession.setState({ restriction: null, restrictionDismissed: false });
+    fireEvent.press(screen.getByTestId('open-delete-review-button'));
+    expect(screen.getByTestId('delete-review-sheet')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('delete-review-confirm-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('delete-review-sheet') === null).toBe(true);
+    });
+    expect(useSession.getState().restriction?.accountStatus).toBe('BI_KHOA');
+    unmountLocked();
+
+    // 3. GET /orders/{id}/review returning lockReason=ACCOUNT_RESTRICTED shows danger lock banner
+    useOrders.getState().reset();
+    useReviews.getState().reset();
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path === '/orders/order-done-1') return order;
+      if (path === '/orders/order-done-1/review') {
+        return makeOrderReviewState({
+          canReview: false,
+          canEdit: false,
+          canDelete: false,
+          lockReason: 'ACCOUNT_RESTRICTED',
+          lockMessage:
+            'Tài khoản của bạn hiện đang bị hạn chế nên không thể gửi, chỉnh sửa hoặc xóa đánh giá.',
+          review: null,
+        });
+      }
+      return {};
+    });
+    render(<OrderDetailScreen />);
+    expect(await screen.findByText('Tài khoản đang bị hạn chế')).toBeTruthy();
+    expect(screen.queryByTestId('open-create-review-button')).toBeNull();
+  });
+
+  test('useReviews & SellerReviewsScreen: dedupes OFFSET pagination, blocks load-more while refreshing, clears old filter on error, and resets orderReviewLoading on mutation', async () => {
+    // 1. Mutation superseding an in-flight loadOrderReview MUST reset orderReviewLoading=false
+    let resolveStaleLoad!: (v: unknown) => void;
+    mockedApi
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStaleLoad = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        review: makeReviewDetail({ rating: 5 }),
+        orderReviewState: makeOrderReviewState({
+          canReview: false,
+          canEdit: true,
+          canDelete: true,
+          review: makeReviewDetail({ rating: 5 }),
+        }),
+        idempotentReplay: false,
+      });
+
+    const staleReq = useReviews.getState().loadOrderReview('order-done-1');
+    expect(useReviews.getState().orderReviewLoading).toBe(true);
+    await useReviews.getState().createReview('order-done-1', { rating: 5 });
+    expect(useReviews.getState().orderReviewLoading).toBe(false);
+    resolveStaleLoad(makeOrderReviewState());
+    await staleReq;
+    expect(useReviews.getState().orderReviewLoading).toBe(false);
+
+    // 2. OFFSET pagination dedupes overlapping item IDs & filter change error does NOT leak old filter items
+    useReviews.getState().reset();
+    mockRouteParams = { sellerId: 'seller-1', sellerName: 'Trần Lan Anh', reputationScore: 125 };
+    mockedApi.mockImplementation(async (path: string) => {
+      if (path.includes('rating=1')) {
+        throw new ApiError(500, 'Máy chủ bận.');
+      }
+      if (path.includes('page=1')) {
+        return makeSellerReviewsResponse({
+          items: [
+            // Overlapping pub-rev-2 from page 0 + new pub-rev-3
+            makeSellerReviewsResponse().items[1],
+            {
+              id: 'pub-rev-3',
+              listingId: 'listing-3',
+              listingTitle: 'Quạt đứng Senko',
+              buyerDisplayName: 'Phạm Gia Huy',
+              rating: 5,
+              comment: 'Quạt chạy êm.',
+              edited: false,
+              publishedAt: '2026-11-23T09:00:00Z',
+              createdAt: '2026-11-23T09:00:00Z',
+              updatedAt: '2026-11-23T09:00:00Z',
+            },
+          ],
+          page: 1,
+          size: 2,
+          totalElements: 3,
+          totalPages: 2,
+        });
+      }
+      return makeSellerReviewsResponse({ page: 0, size: 2, totalElements: 3, totalPages: 2 });
+    });
+
+    render(<SellerReviewsScreen />);
+    expect(await screen.findByTestId('public-review-card-pub-rev-1')).toBeTruthy();
+    expect(screen.getByTestId('seller-reviews-load-more')).toBeTruthy();
+
+    // Block handleLoadMore while sellerReviewsRefreshing is true
+    act(() => {
+      useReviews.setState({ sellerReviewsRefreshing: true });
+    });
+    const callsBeforeBlockedLoadMore = mockedApi.mock.calls.length;
+    fireEvent.press(screen.getByTestId('seller-reviews-load-more'));
+    expect(mockedApi.mock.calls.length).toBe(callsBeforeBlockedLoadMore);
+
+    // Allow load-more -> page 1 overlaps pub-rev-2; store must dedupe to [pub-rev-1, pub-rev-2, pub-rev-3]
+    act(() => {
+      useReviews.setState({ sellerReviewsRefreshing: false });
+    });
+    fireEvent.press(screen.getByTestId('seller-reviews-load-more'));
+    expect(await screen.findByTestId('public-review-card-pub-rev-3')).toBeTruthy();
+    const mergedIds = useReviews.getState().sellerReviews?.items.map((it) => it.id);
+    expect(mergedIds).toEqual(['pub-rev-1', 'pub-rev-2', 'pub-rev-3']);
+
+    // Switching star filter to 1★ which fails -> MUST NOT leak items from previous filter
+    fireEvent.press(screen.getByTestId('seller-reviews-filter-1'));
+    expect(await screen.findByTestId('seller-reviews-error')).toBeTruthy();
+    expect(screen.queryByTestId('public-review-card-pub-rev-1')).toBeNull();
+    expect(screen.queryByTestId('public-review-card-pub-rev-3')).toBeNull();
   });
 });

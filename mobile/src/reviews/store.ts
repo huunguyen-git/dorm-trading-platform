@@ -66,6 +66,25 @@ function markCatalogStale() {
   }
 }
 
+function mergeUniqueReviews(
+  existing: PublicReviewItem[],
+  incoming: PublicReviewItem[],
+): PublicReviewItem[] {
+  const seen = new Set<string>();
+  const merged: PublicReviewItem[] = [];
+  for (const item of existing) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  for (const item of incoming) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+}
+
 let orderReviewSeq = 0;
 let sellerReviewsSeq = 0;
 let myReceivedSeq = 0;
@@ -126,6 +145,7 @@ export const useReviews = create<ReviewsState>((set, get) => ({
             ...prev.orderReviewByOrderId,
             [orderId]: res.orderReviewState,
           },
+          orderReviewLoading: false,
           orderReviewError: null,
           submitting: false,
         }));
@@ -152,6 +172,7 @@ export const useReviews = create<ReviewsState>((set, get) => ({
             ...prev.orderReviewByOrderId,
             [orderId]: res.orderReviewState,
           },
+          orderReviewLoading: false,
           orderReviewError: null,
           submitting: false,
         }));
@@ -178,6 +199,7 @@ export const useReviews = create<ReviewsState>((set, get) => ({
             ...prev.orderReviewByOrderId,
             [orderId]: res.orderReviewState,
           },
+          orderReviewLoading: false,
           orderReviewError: null,
           submitting: false,
         }));
@@ -201,6 +223,7 @@ export const useReviews = create<ReviewsState>((set, get) => ({
         : isSameSeller
           ? state.sellerReviewsRatingFilter
           : null;
+    const isFilterChanged = isSameSeller && rating !== state.sellerReviewsRatingFilter;
     const targetPage = opts?.page ?? 0;
     const size = opts?.size ?? 20;
     const isRefresh = Boolean(opts?.refresh);
@@ -208,14 +231,25 @@ export const useReviews = create<ReviewsState>((set, get) => ({
     const seq = ++sellerReviewsSeq;
     const epoch = sessionEpoch;
 
-    set({
+    set((prev) => ({
       sellerReviewsSellerId: sellerId,
       sellerReviewsRatingFilter: rating,
       sellerReviewsLoading: !isRefresh,
       sellerReviewsRefreshing: isRefresh,
       sellerReviewsError: null,
-      ...(isSameSeller ? {} : { sellerReviews: null }),
-    });
+      // Xóa item cũ ngay khi đổi người bán hoặc đổi bộ lọc sao để tránh lộ item bộ lọc cũ nếu yêu cầu mới lỗi.
+      sellerReviews: !isSameSeller
+        ? null
+        : isFilterChanged && targetPage === 0 && prev.sellerReviews
+          ? {
+              ...prev.sellerReviews,
+              items: [],
+              page: 0,
+              totalElements: 0,
+              totalPages: 0,
+            }
+          : prev.sellerReviews,
+    }));
 
     try {
       const res = await reviewApi.fetchSellerReviews(sellerId, {
@@ -235,8 +269,8 @@ export const useReviews = create<ReviewsState>((set, get) => ({
       set((prev) => {
         const mergedItems =
           targetPage > 0 && prev.sellerReviews && prev.sellerReviewsSellerId === sellerId
-            ? [...prev.sellerReviews.items, ...res.items]
-            : res.items;
+            ? mergeUniqueReviews(prev.sellerReviews.items, res.items)
+            : mergeUniqueReviews([], res.items);
         return {
           sellerReviews: {
             ...res,
@@ -292,6 +326,7 @@ export const useReviews = create<ReviewsState>((set, get) => ({
     orderReviewSeq += 1;
     sellerReviewsSeq += 1;
     myReceivedSeq += 1;
+    reviewApi.clearReviewEvidenceCache();
     set({
       orderReviewByOrderId: {},
       orderReviewLoading: false,

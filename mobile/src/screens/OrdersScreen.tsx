@@ -350,28 +350,7 @@ export default function OrdersScreen() {
               {counterparty.reputationScore}
             </Text>
 
-            {order.scheduleConfirmed && order.meetingTime && order.meetingLocation ? (
-              <View style={styles.cueLine}>
-                <Icon name="calendar" size={13} color={semantic.color.freeFg} />
-                <Text style={styles.scheduleConfirmedText} numberOfLines={1}>
-                  Đã hẹn: {formatOrderDateTime(order.meetingTime)} · {order.meetingLocation}
-                </Text>
-              </View>
-            ) : order.hasPendingScheduleProposal ? (
-              <View style={styles.cueLine}>
-                <Icon name="clock" size={13} color={semantic.color.warning} />
-                <Text style={styles.schedulePendingText} numberOfLines={1}>
-                  Có đề xuất lịch hẹn đang chờ xác nhận
-                </Text>
-              </View>
-            ) : isSeller && order.status === 'YEU_CAU' ? (
-              <View style={styles.cueLine}>
-                <Icon name="inbox" size={13} color={semantic.color.accent} />
-                <Text style={styles.actionNeededText} numberOfLines={1}>
-                  Nhấn để xem và phản hồi yêu cầu giữ chỗ
-                </Text>
-              </View>
-            ) : order.status === 'HOAN_TAT' ? (
+            {order.status === 'HOAN_TAT' ? (
               order.reviewStatus === 'CHAP_NHAN' ? (
                 <View style={styles.cueLine}>
                   <Icon name="star" size={13} color={semantic.color.ratingStar} />
@@ -396,6 +375,27 @@ export default function OrdersScreen() {
                   </Text>
                 </View>
               ) : null
+            ) : order.scheduleConfirmed && order.meetingTime && order.meetingLocation ? (
+              <View style={styles.cueLine}>
+                <Icon name="calendar" size={13} color={semantic.color.freeFg} />
+                <Text style={styles.scheduleConfirmedText} numberOfLines={1}>
+                  Đã hẹn: {formatOrderDateTime(order.meetingTime)} · {order.meetingLocation}
+                </Text>
+              </View>
+            ) : order.hasPendingScheduleProposal ? (
+              <View style={styles.cueLine}>
+                <Icon name="clock" size={13} color={semantic.color.warning} />
+                <Text style={styles.schedulePendingText} numberOfLines={1}>
+                  Có đề xuất lịch hẹn đang chờ xác nhận
+                </Text>
+              </View>
+            ) : isSeller && order.status === 'YEU_CAU' ? (
+              <View style={styles.cueLine}>
+                <Icon name="inbox" size={13} color={semantic.color.accent} />
+                <Text style={styles.actionNeededText} numberOfLines={1}>
+                  Nhấn để xem và phản hồi yêu cầu giữ chỗ
+                </Text>
+              </View>
             ) : null}
           </View>
 

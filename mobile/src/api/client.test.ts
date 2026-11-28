@@ -1,6 +1,8 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
 import {
   api,
+  apiMultipart,
+  appendMultipartFile,
   attachment,
   buildMediaImageSource,
   buildReviewEvidenceImageSource,
@@ -10,6 +12,7 @@ import {
   toPersistableMediaUrl,
   upload,
 } from './client';
+import { uploadReviewEvidence } from '../reviews/api';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -822,4 +825,105 @@ test('refreshes then retries a protected attachment download, clears the session
   fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired());
   await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
   expect(store.clear).toHaveBeenCalled();
+});
+
+test('apiMultipart and uploadReviewEvidence build a fresh FormData instance on 401 Bearer refresh retry and succeed', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'https://api.dormtrading.vn/api/v1';
+  let access: string | null = 'expired-access';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('valid-refresh');
+  store.save.mockImplementation(async (value) => {
+    access = value;
+  });
+
+  const evId = '33333333-3333-4333-8333-333333333333';
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: { get: (name: string) => (name.toLowerCase() === 'www-authenticate' ? 'Bearer error="invalid_token"' : null) },
+      text: async () => '',
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        token: 'refreshed-access',
+        refreshToken: 'next-refresh',
+        user: activeUser,
+      }),
+    })
+    .mockResolvedValueOnce({
+      status: 201,
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: evId,
+            url: `/api/v1/reviews/evidence/${evId}`,
+            contentType: 'image/jpeg',
+            sizeBytes: 4096,
+            originalFilename: 'proof.jpg',
+            createdAt: '2026-11-28T10:00:00Z',
+          },
+        ],
+      }),
+    });
+
+  const uploaded = await uploadReviewEvidence('order-401-retry', [
+    {
+      uri: 'file:///proof.jpg',
+      fileName: 'proof.jpg',
+      mimeType: 'image/jpeg',
+      fileSize: 4096,
+    },
+  ]);
+
+  expect(uploaded).toHaveLength(1);
+  expect(uploaded[0].id).toBe(evId);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+
+  const [firstUrl, firstInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  const [refreshUrl] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+  const [retryUrl, retryInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+
+  expect(firstUrl).toBe('https://api.dormtrading.vn/api/v1/orders/order-401-retry/review/evidence');
+  expect(refreshUrl).toContain('/auth/refresh');
+  expect(retryUrl).toBe('https://api.dormtrading.vn/api/v1/orders/order-401-retry/review/evidence');
+  expect(firstInit.body).toBeInstanceOf(FormData);
+  expect(retryInit.body).toBeInstanceOf(FormData);
+  // Critical: retry MUST use a freshly constructed FormData instance, never reusing the consumed one!
+  expect(retryInit.body).not.toBe(firstInit.body);
+  expect((retryInit.headers as Record<string, string>).Authorization).toBe('Bearer refreshed-access');
+  expect((retryInit.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+
+  // Also verify appendMultipartFile supports File/Blob & data URI cleanly without throwing
+  const webForm = new FormData();
+  const blob = new Blob(['abc'], { type: 'image/png' });
+  appendMultipartFile(webForm, 'files', {
+    uri: 'blob:http://localhost/1',
+    name: 'web.png',
+    type: 'image/png',
+    file: blob,
+  });
+  appendMultipartFile(webForm, 'files', {
+    uri: 'data:image/png;base64,iVBORw0KGgo=',
+    name: 'data.png',
+    type: 'image/png',
+  });
+  expect(webForm).toBeInstanceOf(FormData);
+
+  // Verify apiMultipart strips manual Content-Type headers if caller accidentally passes one
+  fetchMock.mockResolvedValueOnce({
+    status: 200,
+    ok: true,
+    json: async () => ({ ok: true }),
+  });
+  await expect(
+    apiMultipart('/orders/o-1/review/evidence', () => new FormData(), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  ).resolves.toEqual({ ok: true });
+  const [, cleanInit] = fetchMock.mock.calls[3] as unknown as [string, RequestInit];
+  expect((cleanInit.headers as Record<string, string>)['Content-Type']).toBeUndefined();
 });

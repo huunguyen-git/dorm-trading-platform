@@ -1,5 +1,9 @@
 export { StarRatingRow, type StarRatingRowProps } from './StarRatingRow';
 export {
+  AuthorizedEvidenceImage,
+  type AuthorizedEvidenceImageProps,
+} from './AuthorizedEvidenceImage';
+export {
   ReviewEvidenceLightbox,
   type ReviewEvidenceLightboxProps,
 } from './ReviewEvidenceLightbox';

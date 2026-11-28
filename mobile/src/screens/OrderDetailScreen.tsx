@@ -200,9 +200,13 @@ export default function OrderDetailScreen() {
     void loadOrderDetail(order.id);
   };
 
-  const handleRefreshReviewState = async () => {
-    if (!order) return;
-    await Promise.all([loadOrderReview(order.id), loadOrderDetail(order.id)]);
+  const handleRefreshReviewState = async (): Promise<boolean> => {
+    if (!order) return false;
+    const [freshReview] = await Promise.all([
+      loadOrderReview(order.id),
+      loadOrderDetail(order.id),
+    ]);
+    return Boolean(freshReview);
   };
 
   const runAction = async (fn: () => Promise<void>, successMessage: string): Promise<boolean> => {

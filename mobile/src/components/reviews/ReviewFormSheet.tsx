@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSession } from '../../auth/session';
 import { isRestrictedError } from '../../listings/sellerApi';
 import { formatOrderDateTime } from '../../orders/types';
 import { extractReviewApiError } from '../../reviews/api';
@@ -27,7 +28,7 @@ export interface ReviewFormSheetProps {
   onClose: () => void;
   onSubmitCreate: (payload: CreateReviewPayload) => Promise<void>;
   onSubmitEdit: (reviewId: string, payload: UpdateReviewPayload) => Promise<void>;
-  onRefreshState: () => Promise<void>;
+  onRefreshState: () => Promise<boolean>;
 }
 
 export function ReviewFormSheet({
@@ -42,6 +43,9 @@ export function ReviewFormSheet({
 }: ReviewFormSheetProps) {
   const existingReview = orderReviewState.review;
   const wasVisibleRef = useRef(false);
+  const mountedRef = useRef(true);
+  const activeOrderIdRef = useRef(orderReviewState.orderId);
+  activeOrderIdRef.current = orderReviewState.orderId;
   const submitGuardRef = useRef(false);
 
   const [rating, setRating] = useState<number>(5);
@@ -55,6 +59,13 @@ export function ReviewFormSheet({
   const [submitError, setSubmitError] = useState('');
   const [submitErrorCode, setSubmitErrorCode] = useState<string | undefined>(undefined);
   const [refreshingConflict, setRefreshingConflict] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const syncFromSource = () => {
     setRatingError('');
@@ -89,6 +100,11 @@ export function ReviewFormSheet({
       comment: existingReview.comment ?? '',
       evidenceIds: existingReview.evidence.map((ev) => ev.id),
     };
+  }, [mode, existingReview]);
+
+  const persistedEvidenceIds = useMemo<ReadonlySet<string>>(() => {
+    if (mode !== 'edit' || !existingReview) return new Set<string>();
+    return new Set(existingReview.evidence.map((ev) => ev.id));
   }, [mode, existingReview]);
 
   const ratingMeta = REVIEW_RATING_META[rating] ?? REVIEW_RATING_META[5];
@@ -132,10 +148,11 @@ export function ReviewFormSheet({
       return;
     }
 
+    const targetOrderId = orderReviewState.orderId;
     submitGuardRef.current = true;
     try {
       if (mode === 'create') {
-        const key = idempotencyKey || generateReviewIdempotencyKey(orderReviewState.orderId);
+        const key = idempotencyKey || generateReviewIdempotencyKey(targetOrderId);
         if (!idempotencyKey) setIdempotencyKey(key);
         await onSubmitCreate({
           rating,
@@ -151,19 +168,27 @@ export function ReviewFormSheet({
           expectedVersion: existingReview.version,
         });
       }
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       onClose();
     } catch (err) {
-      // UC-30 E5 & UC-31 E5: preserve all entered form data on failure so buyer can retry.
-      if (!isRestrictedError(err)) {
-        const parsed = extractReviewApiError(
-          err,
-          mode === 'create'
-            ? 'Không thể gửi đánh giá lúc này. Dữ liệu đã nhập vẫn được giữ lại để bạn thử lại.'
-            : 'Không thể lưu thay đổi đánh giá. Dữ liệu đã nhập vẫn được giữ lại để bạn thử lại.',
-        );
-        setSubmitError(parsed.message);
-        setSubmitErrorCode(parsed.code);
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      // BI_KHOA (403 ACCOUNT_RESTRICTED): đóng sheet ngay để <RestrictedAccountNotice /> hiển thị rõ.
+      if (isRestrictedError(err)) {
+        if (!useSession.getState().restriction) {
+          useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
+        }
+        onClose();
+        return;
       }
+      // UC-30 E5 & UC-31 E5: preserve all entered form data on failure so buyer can retry.
+      const parsed = extractReviewApiError(
+        err,
+        mode === 'create'
+          ? 'Không thể gửi đánh giá lúc này. Dữ liệu đã nhập vẫn được giữ lại để bạn thử lại.'
+          : 'Không thể lưu thay đổi đánh giá. Dữ liệu đã nhập vẫn được giữ lại để bạn thử lại.',
+      );
+      setSubmitError(parsed.message);
+      setSubmitErrorCode(parsed.code);
     } finally {
       submitGuardRef.current = false;
     }
@@ -171,12 +196,36 @@ export function ReviewFormSheet({
 
   const handleRefreshAfterConflict = async () => {
     if (refreshingConflict) return;
+    const targetOrderId = orderReviewState.orderId;
     setRefreshingConflict(true);
     try {
-      await onRefreshState();
-      onClose();
+      const ok = await onRefreshState();
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      if (ok) {
+        onClose();
+      } else {
+        setSubmitError(
+          'Không thể tải lại trạng thái mới nhất do lỗi kết nối. Vui lòng thử lại.',
+        );
+      }
+    } catch (err) {
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      if (isRestrictedError(err)) {
+        if (!useSession.getState().restriction) {
+          useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
+        }
+        onClose();
+        return;
+      }
+      const parsed = extractReviewApiError(
+        err,
+        'Không thể tải lại trạng thái mới nhất. Vui lòng thử lại.',
+      );
+      setSubmitError(parsed.message);
     } finally {
-      setRefreshingConflict(false);
+      if (mountedRef.current) {
+        setRefreshingConflict(false);
+      }
     }
   };
 
@@ -405,7 +454,10 @@ export function ReviewFormSheet({
           }}
           required={requiresDetails}
           disabled={isBusy}
+          resetSignal={visible}
+          persistedEvidenceIds={persistedEvidenceIds}
           onUploadingChange={setUploadingEvidence}
+          onRestricted={onClose}
         />
       </View>
     </BottomSheet>

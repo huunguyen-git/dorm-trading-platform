@@ -1,25 +1,24 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { buildReviewEvidenceImageSource } from '../../api/client';
-import { useSession } from '../../auth/session';
 import { formatOrderDateTime } from '../../orders/types';
 import {
   formatAppliedScoreDelta,
   formatDaysRemainingLabel,
+  formatEditDaysRemainingLabel,
   getReviewLockExplanation,
   REVIEW_RATING_META,
   REVIEW_STATUS_META,
   type OrderReviewState,
 } from '../../reviews/types';
 import { HairlineDivider, Icon, InlineBanner, SectionHeading, StatusIndicator } from '../ui';
+import { AuthorizedEvidenceImage } from './AuthorizedEvidenceImage';
 import { ReviewEvidenceLightbox } from './ReviewEvidenceLightbox';
 import { StarRatingRow } from './StarRatingRow';
 import { component, primitive, semantic } from '../../theme';
@@ -51,7 +50,6 @@ export function OrderReviewSection({
   onOpenDelete,
   onViewSellerReviews,
 }: OrderReviewSectionProps) {
-  const token = useSession((s) => s.token);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   if (loading && !reviewState) {
@@ -90,6 +88,13 @@ export function OrderReviewSection({
     reviewState.daysRemaining,
     reviewState.withinReviewWindow,
   );
+  const editDaysLabel = formatEditDaysRemainingLabel(
+    reviewState.daysRemaining,
+    reviewState.withinReviewWindow,
+  );
+  const isAccountLocked =
+    reviewState.lockReason === 'ACCOUNT_RESTRICTED' ||
+    reviewState.lockReason === 'ACCOUNT_NOT_ACTIVE';
   const lockExplanation = getReviewLockExplanation(
     reviewState.lockReason,
     reviewState.lockMessage,
@@ -190,11 +195,12 @@ export function OrderReviewSection({
                     onPress={() => setLightboxIndex(idx)}
                     style={({ pressed }) => [styles.evidenceThumbWrap, pressed && styles.pressed]}
                   >
-                    <Image
+                    <AuthorizedEvidenceImage
                       testID={`order-review-evidence-img-${idx}`}
-                      source={buildReviewEvidenceImageSource(ev.url, token)}
+                      evidence={ev}
                       style={styles.evidenceThumb}
                       resizeMode="cover"
+                      compact
                     />
                   </Pressable>
                 ))}
@@ -250,7 +256,7 @@ export function OrderReviewSection({
                   ) : null}
                   {reviewState.canEdit && reviewState.withinReviewWindow ? (
                     <Text style={styles.windowHintText} testID="order-review-edit-window-hint">
-                      {daysLabel} để chỉnh sửa (tính từ ngày hoàn tất giao dịch).
+                      {editDaysLabel}
                     </Text>
                   ) : null}
                   <View style={styles.actionsRow}>
@@ -356,12 +362,14 @@ export function OrderReviewSection({
         ) : (
           <InlineBanner
             testID="order-review-expired-banner"
-            tone="neutral"
-            icon="clock"
+            tone={isAccountLocked ? 'danger' : 'neutral'}
+            icon={isAccountLocked ? 'lock' : 'clock'}
             title={
-              reviewState.noReviewBonusApplied
-                ? 'Đã đóng quyền đánh giá (+1 điểm cho người bán)'
-                : 'Đã hết thời hạn đánh giá'
+              isAccountLocked
+                ? 'Tài khoản đang bị hạn chế'
+                : reviewState.noReviewBonusApplied
+                  ? 'Đã đóng quyền đánh giá (+1 điểm cho người bán)'
+                  : 'Đã hết thời hạn đánh giá'
             }
             message={
               lockExplanation ||

@@ -74,7 +74,12 @@ export default function SellerReviewsScreen() {
   };
 
   const handleLoadMore = () => {
-    if (!activeData || sellerReviewsLoading || activeData.page + 1 >= activeData.totalPages) {
+    if (
+      !activeData ||
+      sellerReviewsLoading ||
+      sellerReviewsRefreshing ||
+      activeData.page + 1 >= activeData.totalPages
+    ) {
       return;
     }
     void loadSellerReviews(sellerId, {

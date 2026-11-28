@@ -1,4 +1,10 @@
-import { api } from '../api/client';
+import {
+  api,
+  apiMultipart,
+  appendMultipartFile,
+  attachment,
+} from '../api/client';
+import { useSession } from '../auth/session';
 import {
   extractApiError,
   isRestrictedError,
@@ -29,6 +35,94 @@ const MIME_TO_EXT: Record<AllowedImageMimeType, string> = {
   'image/webp': 'webp',
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EVIDENCE_URL_UUID_RE =
+  /\/api\/v1\/reviews\/evidence\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+const MAX_EVIDENCE_CACHE_ENTRIES = 32;
+const evidenceDataUriCache = new Map<string, string>();
+
+const BASE64_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof globalThis.btoa === 'function') {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return globalThis.btoa(binary);
+  }
+  let output = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i] ?? 0;
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const triplet = (a << 16) | (b << 8) | c;
+    output += BASE64_ALPHABET[(triplet >> 18) & 63];
+    output += BASE64_ALPHABET[(triplet >> 12) & 63];
+    output += i + 1 < bytes.length ? BASE64_ALPHABET[(triplet >> 6) & 63] : '=';
+    output += i + 2 < bytes.length ? BASE64_ALPHABET[triplet & 63] : '=';
+  }
+  return output;
+}
+
+export function clearReviewEvidenceCache(): void {
+  evidenceDataUriCache.clear();
+}
+
+export function toReviewEvidenceApiPath(evidence: {
+  id?: string | null;
+  url?: string | null;
+}): string | null {
+  const id = typeof evidence.id === 'string' ? evidence.id.trim() : '';
+  if (UUID_RE.test(id)) {
+    return `/reviews/evidence/${id}`;
+  }
+  const rawUrl = typeof evidence.url === 'string' ? evidence.url.trim() : '';
+  if (!rawUrl) return null;
+  const cleanedPath = rawUrl.split('?')[0]?.split('#')[0] ?? '';
+  const match = EVIDENCE_URL_UUID_RE.exec(cleanedPath);
+  if (match?.[1]) {
+    return `/reviews/evidence/${match[1]}`;
+  }
+  return null;
+}
+
+/**
+ * Tải ảnh bằng chứng riêng tư qua `attachment()` (tự động gửi Bearer token + refresh/retry 401)
+ * và chuyển sang data URI để hiển thị nhất quán trên cả Native (iOS/Android), Expo Web và Jest.
+ */
+export async function loadReviewEvidenceDataUri(
+  evidence: { id?: string | null; url?: string | null },
+  options?: { force?: boolean },
+): Promise<string | null> {
+  const path = toReviewEvidenceApiPath(evidence);
+  if (!path) {
+    return null;
+  }
+  const viewerScope = useSession.getState().user?.id ?? 'anon';
+  const cacheKey = `${viewerScope}:${path}`;
+  if (!options?.force && evidenceDataUriCache.has(cacheKey)) {
+    return evidenceDataUriCache.get(cacheKey) ?? null;
+  }
+
+  const file = await attachment(path);
+  if (!file) {
+    evidenceDataUriCache.delete(cacheKey);
+    return null;
+  }
+  const bytes = new Uint8Array(file.bytes);
+  const dataUri = `data:${file.type};base64,${bytesToBase64(bytes)}`;
+
+  if (evidenceDataUriCache.size >= MAX_EVIDENCE_CACHE_ENTRIES) {
+    const oldestKey = evidenceDataUriCache.keys().next().value;
+    if (oldestKey) evidenceDataUriCache.delete(oldestKey);
+  }
+  evidenceDataUriCache.set(cacheKey, dataUri);
+  return dataUri;
+}
+
 function resolveEvidenceFileName(
   asset: PickableImageAsset,
   mimeType: AllowedImageMimeType,
@@ -45,6 +139,10 @@ function resolveEvidenceFileName(
 }
 
 const REVIEW_FRIENDLY_ERRORS: Record<string, string> = {
+  ACCOUNT_RESTRICTED:
+    'Tài khoản của bạn đang bị hạn chế nên không thể thực hiện thao tác đánh giá.',
+  ACCOUNT_NOT_ACTIVE:
+    'Tài khoản cần được kích hoạt hoàn tất trước khi thực hiện thao tác đánh giá.',
   REVIEW_DETAILS_REQUIRED:
     'Đánh giá 1–3 sao bắt buộc nhập nhận xét hoặc đính kèm ít nhất 1 ảnh bằng chứng.',
   REVIEW_NO_CHANGES: 'Bạn chưa thay đổi số sao, nhận xét hoặc bằng chứng nào so với phiên bản cũ.',
@@ -66,6 +164,9 @@ const REVIEW_FRIENDLY_ERRORS: Record<string, string> = {
   ORDER_NOT_COMPLETED: 'Chỉ có thể đánh giá sau khi giao dịch chuyển sang trạng thái Hoàn tất.',
   ORDER_NOT_FOUND: 'Không tìm thấy giao dịch yêu cầu.',
   REVIEW_NOT_FOUND: 'Không tìm thấy đánh giá yêu cầu.',
+  EVIDENCE_NOT_FOUND: 'Không tìm thấy ảnh bằng chứng yêu cầu.',
+  EVIDENCE_ALREADY_ATTACHED:
+    'Ảnh bằng chứng này đã được gắn vào đánh giá nên không thể xóa trực tiếp ở bước nháp.',
   SELLER_NOT_FOUND: 'Không tìm thấy hồ sơ người bán.',
   INVALID_MEDIA: 'Tệp bằng chứng không hợp lệ. Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.',
   FILE_TOO_LARGE: 'Kích thước mỗi ảnh bằng chứng không được vượt quá 5MB.',
@@ -117,33 +218,38 @@ export async function uploadReviewEvidence(
     validated.push({ asset, mimeType: check.mimeType });
   }
 
-  const formData = new FormData();
-  validated.forEach(({ asset, mimeType }, index) => {
-    const fileName = resolveEvidenceFileName(asset, mimeType, index);
-    if (asset.file) {
-      formData.append('files', asset.file, fileName);
-    } else {
-      formData.append(
-        'files',
-        {
+  // Dùng apiMultipart với factory dựng FormData mới mỗi lần gửi để retry sau 401 luôn sạch.
+  const response = await apiMultipart<{ items?: unknown[] }>(
+    `/orders/${encodeURIComponent(orderId)}/review/evidence`,
+    () => {
+      const formData = new FormData();
+      validated.forEach(({ asset, mimeType }, index) => {
+        const fileName = resolveEvidenceFileName(asset, mimeType, index);
+        appendMultipartFile(formData, 'files', {
           uri: asset.uri,
           name: fileName,
           type: mimeType,
-        } as unknown as Blob,
-      );
-    }
-  });
-
-  const response = await api<{ items?: unknown[] }>(
-    `/orders/${encodeURIComponent(orderId)}/review/evidence`,
-    {
-      method: 'POST',
-      body: formData,
+          file: asset.file,
+        });
+      });
+      return formData;
     },
   );
 
   const items = Array.isArray(response?.items) ? response.items : [];
   return items.map(normalizeReviewEvidenceItem).filter((item) => Boolean(item.id && item.url));
+}
+
+export async function deleteReviewEvidenceDraft(
+  orderId: string,
+  evidenceId: string,
+): Promise<void> {
+  await api<void>(
+    `/orders/${encodeURIComponent(orderId)}/review/evidence/${encodeURIComponent(evidenceId)}`,
+    { method: 'DELETE' },
+  );
+  const viewerScope = useSession.getState().user?.id ?? 'anon';
+  evidenceDataUriCache.delete(`${viewerScope}:/reviews/evidence/${evidenceId.trim()}`);
 }
 
 function dedupeEvidenceIds(ids?: string[]): string[] {

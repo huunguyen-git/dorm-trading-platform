@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSession } from '../../auth/session';
 import { isRestrictedError } from '../../listings/sellerApi';
 import { extractReviewApiError } from '../../reviews/api';
 import {
@@ -18,7 +19,7 @@ export interface DeleteReviewSheetProps {
   submitting: boolean;
   onClose: () => void;
   onConfirmDelete: (reviewId: string, expectedVersion: number) => Promise<void>;
-  onRefreshState: () => Promise<void>;
+  onRefreshState: () => Promise<boolean>;
 }
 
 export function DeleteReviewSheet({
@@ -31,17 +32,27 @@ export function DeleteReviewSheet({
   onConfirmDelete,
   onRefreshState,
 }: DeleteReviewSheetProps) {
+  const mountedRef = useRef(true);
+  const activeReviewIdRef = useRef(review.id);
+  activeReviewIdRef.current = review.id;
   const submitGuardRef = useRef(false);
   const [deleteError, setDeleteError] = useState('');
   const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (visible) {
       setDeleteError('');
       setErrorCode(undefined);
     }
-  }, [visible]);
+  }, [visible, review.id]);
 
   const isBusy = submitting || refreshing;
 
@@ -49,19 +60,28 @@ export function DeleteReviewSheet({
     if (submitGuardRef.current || isBusy) return;
     setDeleteError('');
     setErrorCode(undefined);
+    const targetReviewId = review.id;
     submitGuardRef.current = true;
     try {
-      await onConfirmDelete(review.id, review.version);
+      await onConfirmDelete(targetReviewId, review.version);
+      if (!mountedRef.current || activeReviewIdRef.current !== targetReviewId) return;
       onClose();
     } catch (err) {
-      if (!isRestrictedError(err)) {
-        const parsed = extractReviewApiError(
-          err,
-          'Không thể xóa đánh giá lúc này. Đánh giá và điểm uy tín vẫn được giữ nguyên để bạn thử lại.',
-        );
-        setDeleteError(parsed.message);
-        setErrorCode(parsed.code);
+      if (!mountedRef.current || activeReviewIdRef.current !== targetReviewId) return;
+      // BI_KHOA (403 ACCOUNT_RESTRICTED): đóng sheet để <RestrictedAccountNotice /> hiển thị rõ.
+      if (isRestrictedError(err)) {
+        if (!useSession.getState().restriction) {
+          useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
+        }
+        onClose();
+        return;
       }
+      const parsed = extractReviewApiError(
+        err,
+        'Không thể xóa đánh giá lúc này. Đánh giá và điểm uy tín vẫn được giữ nguyên để bạn thử lại.',
+      );
+      setDeleteError(parsed.message);
+      setErrorCode(parsed.code);
     } finally {
       submitGuardRef.current = false;
     }
@@ -69,12 +89,36 @@ export function DeleteReviewSheet({
 
   const handleRefresh = async () => {
     if (refreshing) return;
+    const targetReviewId = review.id;
     setRefreshing(true);
     try {
-      await onRefreshState();
-      onClose();
+      const ok = await onRefreshState();
+      if (!mountedRef.current || activeReviewIdRef.current !== targetReviewId) return;
+      if (ok) {
+        onClose();
+      } else {
+        setDeleteError(
+          'Không thể tải lại trạng thái mới nhất do lỗi kết nối. Vui lòng thử lại.',
+        );
+      }
+    } catch (err) {
+      if (!mountedRef.current || activeReviewIdRef.current !== targetReviewId) return;
+      if (isRestrictedError(err)) {
+        if (!useSession.getState().restriction) {
+          useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
+        }
+        onClose();
+        return;
+      }
+      const parsed = extractReviewApiError(
+        err,
+        'Không thể tải lại trạng thái mới nhất. Vui lòng thử lại.',
+      );
+      setDeleteError(parsed.message);
     } finally {
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setRefreshing(false);
+      }
     }
   };
 
@@ -147,7 +191,8 @@ export function DeleteReviewSheet({
 
         <View style={styles.previewBox}>
           <Text style={styles.previewTitle}>
-            Đánh giá {review.rating} sao · {formatAppliedScoreDelta(review.appliedScoreDelta, review.status)}
+            Đánh giá {review.rating} sao ·{' '}
+            {formatAppliedScoreDelta(review.appliedScoreDelta, review.status)}
           </Text>
           {review.comment ? (
             <Text style={styles.previewComment} numberOfLines={3}>

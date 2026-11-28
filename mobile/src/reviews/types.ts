@@ -7,6 +7,8 @@ export type ReviewStatus = 'CHO_XET' | 'CHAP_NHAN' | 'BI_BAC' | 'DA_GO' | 'DA_XO
 export type ReviewLockReason =
   | 'ORDER_NOT_COMPLETED'
   | 'NOT_BUYER'
+  | 'ACCOUNT_RESTRICTED'
+  | 'ACCOUNT_NOT_ACTIVE'
   | 'REVIEW_WINDOW_EXPIRED'
   | 'NO_REVIEW_BONUS_APPLIED'
   | 'REVIEW_MODERATED'
@@ -118,11 +120,10 @@ export interface ReviewMutationResponse {
 }
 
 /**
- * Công khai đánh giá người bán (NFR-01): tuyệt đối không có URL/ID bằng chứng và không có PII.
+ * Công khai đánh giá người bán (NFR-01): tuyệt đối không có URL/ID bằng chứng, không có orderId nội bộ và không có PII.
  */
 export interface PublicReviewItem {
   id: string;
-  orderId: string;
   listingId: string | null;
   listingTitle: string | null;
   buyerDisplayName: string;
@@ -262,6 +263,20 @@ export function formatDaysRemainingLabel(
   return `Còn ${safeDays} ngày để đánh giá`;
 }
 
+export function formatEditDaysRemainingLabel(
+  daysRemaining: number,
+  withinReviewWindow: boolean,
+): string {
+  if (!withinReviewWindow) {
+    return 'Đã hết hạn chỉnh sửa 15 ngày';
+  }
+  const safeDays = Number.isFinite(daysRemaining) ? Math.max(0, Math.floor(daysRemaining)) : 0;
+  if (safeDays <= 0) {
+    return 'Còn dưới 1 ngày để chỉnh sửa (tính từ ngày hoàn tất giao dịch).';
+  }
+  return `Còn ${safeDays} ngày để chỉnh sửa (tính từ ngày hoàn tất giao dịch).`;
+}
+
 export function getReviewLockExplanation(
   lockReason: ReviewLockReason | null | undefined,
   lockMessage?: string | null,
@@ -270,6 +285,10 @@ export function getReviewLockExplanation(
   if (cleanedMessage) return cleanedMessage;
 
   switch (lockReason) {
+    case 'ACCOUNT_RESTRICTED':
+      return 'Tài khoản của bạn đang bị hạn chế hoặc khóa nên không thể gửi, chỉnh sửa hay xóa đánh giá.';
+    case 'ACCOUNT_NOT_ACTIVE':
+      return 'Tài khoản cần được kích hoạt hoàn tất trước khi gửi, chỉnh sửa hoặc xóa đánh giá.';
     case 'REVIEW_WINDOW_EXPIRED':
       return 'Giao dịch đã quá thời hạn 15 ngày kể từ lúc hoàn tất nên không thể tạo hoặc chỉnh sửa đánh giá.';
     case 'NO_REVIEW_BONUS_APPLIED':
@@ -579,7 +598,6 @@ export function normalizePublicReviewItem(raw: unknown): PublicReviewItem {
   const rec = asRecord(raw);
   return {
     id: asString(rec.id),
-    orderId: asString(rec.orderId),
     listingId: asNullableString(rec.listingId),
     listingTitle: asNullableString(rec.listingTitle),
     buyerDisplayName: asString(rec.buyerDisplayName, 'Thành viên').trim() || 'Thành viên',

@@ -1,20 +1,23 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { buildReviewEvidenceImageSource } from '../../api/client';
 import { useSession } from '../../auth/session';
 import { isRestrictedError } from '../../listings/sellerApi';
 import { pickImagesFromLibrary, takePhotoWithCamera } from '../../media/imagePicker';
-import { extractReviewApiError, uploadReviewEvidence } from '../../reviews/api';
+import {
+  deleteReviewEvidenceDraft,
+  extractReviewApiError,
+  uploadReviewEvidence,
+} from '../../reviews/api';
 import { MAX_REVIEW_EVIDENCE, type ReviewEvidenceItem } from '../../reviews/types';
 import { Icon, InlineBanner } from '../ui';
+import { AuthorizedEvidenceImage } from './AuthorizedEvidenceImage';
 import { ReviewEvidenceLightbox } from './ReviewEvidenceLightbox';
 import { component, primitive, semantic } from '../../theme';
 
@@ -24,7 +27,10 @@ export interface ReviewEvidenceManagerProps {
   onChange: (nextItems: ReviewEvidenceItem[]) => void;
   required?: boolean;
   disabled?: boolean;
+  resetSignal?: boolean | number;
+  persistedEvidenceIds?: ReadonlySet<string>;
   onUploadingChange?: (uploading: boolean) => void;
+  onRestricted?: () => void;
 }
 
 export function ReviewEvidenceManager({
@@ -33,22 +39,45 @@ export function ReviewEvidenceManager({
   onChange,
   required = false,
   disabled = false,
+  resetSignal,
+  persistedEvidenceIds,
   onUploadingChange,
+  onRestricted,
 }: ReviewEvidenceManagerProps) {
-  const token = useSession((s) => s.token);
   const [uploading, setUploading] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  const mountedRef = useRef(true);
+  const activeOrderIdRef = useRef(orderId);
+  activeOrderIdRef.current = orderId;
   const pickerInFlightRef = useRef(false);
   const latestItemsRef = useRef(items);
   latestItemsRef.current = items;
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Reset lỗi cũ & lightbox mỗi khi đóng/mở lại BottomSheet hoặc đổi đơn hàng.
+  useEffect(() => {
+    setError('');
+    setLightboxIndex(null);
+    setRemovingId(null);
+  }, [resetSignal, orderId]);
+
   const remainingSlots = Math.max(0, MAX_REVIEW_EVIDENCE - items.length);
-  const busyOrDisabled = disabled || uploading;
+  const busyOrDisabled = disabled || uploading || removingId !== null;
   const canAddMore = !busyOrDisabled && remainingSlots > 0;
 
   const setUploadFlag = (next: boolean) => {
-    setUploading(next);
+    if (mountedRef.current) {
+      setUploading(next);
+    }
     onUploadingChange?.(next);
   };
 
@@ -57,9 +86,11 @@ export function ReviewEvidenceManager({
       if (!useSession.getState().restriction) {
         useSession.setState({ restriction: err.restriction, restrictionDismissed: false });
       }
-      setError('');
+      if (mountedRef.current) setError('');
+      onRestricted?.();
       return;
     }
+    if (!mountedRef.current) return;
     const parsed = extractReviewApiError(err, fallback);
     setError(parsed.message);
   };
@@ -79,6 +110,7 @@ export function ReviewEvidenceManager({
   const handlePickLibrary = async () => {
     if (pickerInFlightRef.current || busyOrDisabled) return;
     setError('');
+    const targetOrderId = orderId;
     const slots = Math.max(0, MAX_REVIEW_EVIDENCE - latestItemsRef.current.length);
     if (slots <= 0) {
       setError(`Bạn chỉ có thể đính kèm tối đa ${MAX_REVIEW_EVIDENCE} ảnh bằng chứng.`);
@@ -88,16 +120,19 @@ export function ReviewEvidenceManager({
     pickerInFlightRef.current = true;
     try {
       const picked = await pickImagesFromLibrary(slots);
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       if (picked.length === 0) return;
 
       setUploadFlag(true);
-      const uploaded = await uploadReviewEvidence(orderId, picked);
+      const uploaded = await uploadReviewEvidence(targetOrderId, picked);
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       if (uploaded.length === 0) {
         setError('Không nhận được thông tin tệp bằng chứng sau khi tải lên. Vui lòng thử lại.');
         return;
       }
       appendUploaded(uploaded);
     } catch (err) {
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       handleFailure(err, 'Không thể tải ảnh bằng chứng lên máy chủ. Vui lòng chọn lại tệp hợp lệ.');
     } finally {
       pickerInFlightRef.current = false;
@@ -108,6 +143,7 @@ export function ReviewEvidenceManager({
   const handleTakePhoto = async () => {
     if (pickerInFlightRef.current || busyOrDisabled) return;
     setError('');
+    const targetOrderId = orderId;
     const slots = Math.max(0, MAX_REVIEW_EVIDENCE - latestItemsRef.current.length);
     if (slots <= 0) {
       setError(`Bạn chỉ có thể đính kèm tối đa ${MAX_REVIEW_EVIDENCE} ảnh bằng chứng.`);
@@ -117,16 +153,19 @@ export function ReviewEvidenceManager({
     pickerInFlightRef.current = true;
     try {
       const photo = await takePhotoWithCamera();
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       if (!photo) return;
 
       setUploadFlag(true);
-      const uploaded = await uploadReviewEvidence(orderId, [photo]);
+      const uploaded = await uploadReviewEvidence(targetOrderId, [photo]);
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       if (uploaded.length === 0) {
         setError('Không nhận được thông tin ảnh sau khi chụp. Vui lòng thử lại.');
         return;
       }
       appendUploaded(uploaded);
     } catch (err) {
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       handleFailure(err, 'Không thể chụp hoặc tải ảnh bằng chứng lên máy chủ.');
     } finally {
       pickerInFlightRef.current = false;
@@ -134,10 +173,40 @@ export function ReviewEvidenceManager({
     }
   };
 
-  const handleRemove = (id: string) => {
+  const handleRemove = async (id: string) => {
     if (busyOrDisabled) return;
     setError('');
-    onChange(items.filter((ev) => ev.id !== id));
+    const isPersistedAttached = Boolean(persistedEvidenceIds?.has(id));
+    if (isPersistedAttached) {
+      // Bằng chứng đã gắn vào đánh giá cũ sẽ được đánh dấu active=false khi lưu PUT; giữ lại đến khi lưu.
+      onChange(latestItemsRef.current.filter((ev) => ev.id !== id));
+      return;
+    }
+
+    const targetOrderId = orderId;
+    setRemovingId(id);
+    try {
+      await deleteReviewEvidenceDraft(targetOrderId, id);
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      onChange(latestItemsRef.current.filter((ev) => ev.id !== id));
+    } catch (err) {
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      if (isRestrictedError(err)) {
+        handleFailure(err, '');
+        return;
+      }
+      const parsed = extractReviewApiError(err, 'Không thể gỡ ảnh bằng chứng nháp.');
+      if (parsed.status === 404 || parsed.code === 'EVIDENCE_NOT_FOUND') {
+        // Đã bị dọn hoặc không còn tồn tại trên máy chủ -> gỡ khỏi danh sách hiện tại.
+        onChange(latestItemsRef.current.filter((ev) => ev.id !== id));
+        return;
+      }
+      setError(parsed.message);
+    } finally {
+      if (mountedRef.current) {
+        setRemovingId(null);
+      }
+    }
   };
 
   return (
@@ -187,11 +256,13 @@ export function ReviewEvidenceManager({
                 onPress={() => setLightboxIndex(idx)}
                 style={styles.thumbPress}
               >
-                <Image
+                <AuthorizedEvidenceImage
                   testID={`review-evidence-image-${idx}`}
-                  source={buildReviewEvidenceImageSource(item.url, token)}
+                  evidence={item}
                   style={styles.thumbImage}
                   resizeMode="cover"
+                  compact
+                  onRestricted={onRestricted}
                 />
               </Pressable>
               <Pressable
@@ -200,7 +271,7 @@ export function ReviewEvidenceManager({
                 hitSlop={6}
                 accessibilityRole="button"
                 accessibilityLabel={`Gỡ bằng chứng ${idx + 1}`}
-                onPress={() => handleRemove(item.id)}
+                onPress={() => void handleRemove(item.id)}
                 style={({ pressed }) => [
                   styles.removeBtn,
                   busyOrDisabled && styles.disabled,

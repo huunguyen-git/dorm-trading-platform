@@ -1,6 +1,5 @@
 import { useContext } from 'react';
 import {
-  Image,
   Modal,
   Pressable,
   StatusBar,
@@ -10,10 +9,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { buildReviewEvidenceImageSource } from '../../api/client';
-import { useSession } from '../../auth/session';
 import type { ReviewEvidenceItem } from '../../reviews/types';
 import { Icon } from '../ui';
+import { AuthorizedEvidenceImage } from './AuthorizedEvidenceImage';
 import { primitive, semantic } from '../../theme';
 
 export interface ReviewEvidenceLightboxProps {
@@ -31,7 +29,6 @@ export function ReviewEvidenceLightbox({
   onChangeIndex,
   onClose,
 }: ReviewEvidenceLightboxProps) {
-  const token = useSession((s) => s.token);
   const insets = useContext(SafeAreaInsetsContext);
   const { width } = useWindowDimensions();
   const stageWidth = Math.max(width || 375, 320);
@@ -74,12 +71,14 @@ export function ReviewEvidenceLightbox({
         </View>
 
         <View style={styles.stage}>
-          <Image
+          <AuthorizedEvidenceImage
             testID="review-evidence-lightbox-image"
-            source={buildReviewEvidenceImageSource(current.url, token)}
+            evidence={current}
             style={{ width: stageWidth, height: stageWidth }}
             resizeMode="contain"
+            darkSurface
             accessibilityLabel={current.originalFilename ?? `Ảnh bằng chứng ${safeIndex + 1}`}
+            onRestricted={onClose}
           />
 
           {items.length > 1 ? (

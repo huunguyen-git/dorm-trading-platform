@@ -408,15 +408,89 @@ async function errorOf(response: Response) {
   return new ApiError(response.status, message, code);
 }
 
+export interface MultipartFileInput {
+  uri: string;
+  name: string;
+  type: string;
+  file?: File | Blob | null;
+}
+
+function dataUriToBlob(dataUri: string, fallbackType: string): Blob | null {
+  if (typeof Blob === 'undefined' || typeof globalThis.atob !== 'function') {
+    return null;
+  }
+  const match = /^data:([^;,]+)?;base64,(.+)$/i.exec(dataUri);
+  if (!match) return null;
+  const mime = match[1]?.trim() || fallbackType;
+  const binary = globalThis.atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * Gắn tệp vào FormData tương thích cả Expo SDK 58 native (WinterCG fetch / RN FormData),
+ * Expo Web (File/Blob hoặc data URI) và môi trường Jest.
+ */
+export function appendMultipartFile(
+  form: FormData,
+  fieldName: string,
+  file: MultipartFileInput,
+): void {
+  if (file.file) {
+    form.append(fieldName, file.file, file.name);
+    return;
+  }
+  if (typeof file.uri === 'string' && file.uri.startsWith('data:')) {
+    const blob = dataUriToBlob(file.uri, file.type);
+    if (blob) {
+      form.append(fieldName, blob, file.name);
+      return;
+    }
+  }
+  form.append(
+    fieldName,
+    {
+      uri: file.uri,
+      name: file.name,
+      type: file.type,
+    } as unknown as Blob,
+  );
+}
+
 /** Upload multipart; không tự đặt Content-Type để fetch sinh boundary. */
-export async function upload(path: string, file: { uri: string; name: string; type: string }) {
+export async function upload(path: string, file: MultipartFileInput) {
   // FormData mới mỗi lần gọi để retry sau refresh không gửi lại body đã dùng.
   const response = await authorizedSend(path, () => {
     const form = new FormData();
-    form.append('file', file as unknown as Blob);
+    appendMultipartFile(form, 'file', file);
     return { method: 'POST', body: form };
   });
   if (!response.ok) throw await errorOf(response);
+}
+
+/**
+ * Gửi request multipart có factory dựng FormData mới cho mỗi lần gửi (đảm bảo retry sau 401 refresh
+ * không gửi lại FormData đã consume), tự động parse JSON và xử lý ApiError / RestrictedAccountError.
+ */
+export async function apiMultipart<T>(
+  path: string,
+  buildFormData: () => FormData | Promise<FormData>,
+  init: Omit<RequestInit, 'body'> = {},
+): Promise<T> {
+  const response = await authorizedSend(path, async () => {
+    const body = await buildFormData();
+    return {
+      ...init,
+      method: init.method ?? 'POST',
+      body,
+    };
+  });
+  if (!response.ok) throw await errorOf(response);
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 }
 
 /** Tải tệp nhị phân cần Authorization (ảnh thẻ). Trả null khi 404. */
@@ -478,12 +552,25 @@ function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
  * Gửi request cần Bearer token với cùng state machine của api(): 401 + thử thách Bearer thì refresh một lần rồi thử lại.
  * Chỉ refresh trả 401 mới xóa phiên; lỗi mạng/5xx giữ nguyên token để lần sau thử tiếp.
  */
-async function authorizedSend(path: string, build: () => RequestInit): Promise<Response> {
+async function authorizedSend(
+  path: string,
+  build: () => RequestInit | Promise<RequestInit>,
+): Promise<Response> {
   const send = async () => {
     const token = await tokenStore.get();
+    const built = await build();
+    const extraHeaders = normalizeHeaders(built.headers);
+    const mergedHeaders: Record<string, string> = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    };
+    if (typeof FormData !== 'undefined' && built.body instanceof FormData) {
+      delete mergedHeaders['Content-Type'];
+      delete mergedHeaders['content-type'];
+    }
     return fetch(apiUrl(path), {
-      ...build(),
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      ...built,
+      headers: mergedHeaders,
     });
   };
   const sentToken = await tokenStore.get();
