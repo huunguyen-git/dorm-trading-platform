@@ -108,7 +108,13 @@ class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/admin/senior/**").hasRole("SENIOR_ADMIN")
+                        .requestMatchers("/api/v1/admin/disputes/**").hasRole("MODERATOR")
                         .requestMatchers("/api/v1/admin/**").hasRole("MODERATOR")
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/orders/{id}/dispute",
+                                "/api/v1/orders/{id}/dispute/evidence/{attachmentId}")
+                        .authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/orders/{id}/dispute/**").hasRole("MEMBER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/listings/mine", "/api/v1/listings/quota")
                         .hasRole("MEMBER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/media/images").hasRole("MEMBER")
