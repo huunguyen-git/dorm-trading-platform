@@ -68,6 +68,7 @@ export default function OrderDetailScreen() {
     selectedOrder,
     detailLoading,
     detailError,
+    detailRestrictedOrderId,
     submitting,
     loadOrderDetail,
     accept,
@@ -111,14 +112,20 @@ export default function OrderDetailScreen() {
   );
 
   const skipInitialFocusRef = useRef(true);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
-  const refresh = useCallback(() => {
+  const refreshOrderOnly = useCallback(() => {
     void loadOrderDetail(orderId);
   }, [loadOrderDetail, orderId]);
 
+  const refresh = useCallback(() => {
+    void loadOrderDetail(orderId);
+    setRefreshNonce((prev) => prev + 1);
+  }, [loadOrderDetail, orderId]);
+
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void loadOrderDetail(orderId);
+  }, [loadOrderDetail, orderId]);
 
   useEffect(() => {
     if (typeof navigation?.addListener !== 'function') return;
@@ -300,6 +307,39 @@ export default function OrderDetailScreen() {
     );
   }
 
+  if (!order && detailRestrictedOrderId === orderId) {
+    return (
+      <View style={styles.container} testID="order-detail-restricted-fallback">
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.topNoticesWrap}>
+            <RestrictedAccountNotice />
+            <InlineBanner
+              testID="order-detail-restricted-readonly-banner"
+              tone="warning"
+              icon="lock"
+              title="Chế độ xem hồ sơ tranh chấp"
+              message="Tài khoản đang bị hạn chế nên không thể mở đầy đủ chi tiết giao dịch. Bạn vẫn có thể theo dõi trạng thái xử lý tranh chấp và quyết định của Kiểm duyệt viên."
+              actionLabel="Tải lại"
+              actionTestID="order-detail-restricted-retry"
+              onActionPress={refresh}
+            />
+          </View>
+          <OrderDisputeSection
+            orderId={orderId}
+            fallbackStatus="CHO_XU_LY"
+            isRestricted={true}
+            refreshNonce={refreshNonce}
+            emptyFallbackMessage="Giao dịch này chưa có hồ sơ tranh chấp hoặc quá hạn để hiển thị."
+          />
+        </ScrollView>
+      </View>
+    );
+  }
+
   if (detailError && !order) {
     return (
       <View style={styles.center}>
@@ -465,7 +505,8 @@ export default function OrderDetailScreen() {
             <OrderDisputeSection
               order={order}
               isRestricted={isRestricted}
-              onDisputeUpdated={refresh}
+              refreshNonce={refreshNonce}
+              onDisputeUpdated={refreshOrderOnly}
             />
           ) : null}
 

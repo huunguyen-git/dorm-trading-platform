@@ -1,4 +1,4 @@
-import { api, attachment } from '../api/client';
+import { api, apiMultipart, attachment } from '../api/client';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import {
   validateImageAsset,
@@ -287,30 +287,29 @@ export async function submitDisputeEvidenceResponse(
     validated.push({ asset, mimeType: check.mimeType });
   }
 
-  const formData = new FormData();
-  formData.append('note', trimmedNote);
-  validated.forEach(({ asset, mimeType }, index) => {
-    const fileName = resolveEvidenceFileName(asset, mimeType, index);
-    if (asset.file) {
-      formData.append('files', asset.file, fileName);
-    } else {
-      formData.append(
-        'files',
-        {
-          uri: asset.uri,
-          name: fileName,
-          type: mimeType,
-        } as unknown as Blob,
-      );
-    }
-  });
-
-  const raw = await api<unknown>(
+  const raw = await apiMultipart<unknown>(
     `/orders/${encodeURIComponent(cleanedOrderId)}/dispute/evidence-requests/${encodeURIComponent(cleanedRequestId)}/responses`,
-    {
-      method: 'POST',
-      body: formData,
+    () => {
+      const formData = new FormData();
+      formData.append('note', trimmedNote);
+      validated.forEach(({ asset, mimeType }, index) => {
+        const fileName = resolveEvidenceFileName(asset, mimeType, index);
+        if (asset.file) {
+          formData.append('files', asset.file, fileName);
+        } else {
+          formData.append(
+            'files',
+            {
+              uri: asset.uri,
+              name: fileName,
+              type: mimeType,
+            } as unknown as Blob,
+          );
+        }
+      });
+      return formData;
     },
+    { method: 'POST' },
   );
 
   const normalized = normalizeMemberDispute(raw);
@@ -338,7 +337,7 @@ export async function fetchDisputeEvidenceDataUri(rawUrl: string): Promise<strin
 
 const DISPUTE_FRIENDLY_ERRORS: Record<string, string> = {
   DISPUTE_ALREADY_RESOLVED:
-    'Giao dịch này đã có quyết định của Kiểm duyệt viên. Vui lòng tải lại để xem kết quả mới nhất.',
+    'Giao dịch này đã có quyết định của Kiểm duyệt viên. Hồ sơ đang được cập nhật kết quả mới nhất.',
   EVIDENCE_REQUEST_CLOSED: 'Yêu cầu bổ sung bằng chứng này đã đóng.',
   EVIDENCE_REQUEST_EXPIRED: 'Yêu cầu bổ sung bằng chứng này đã quá thời hạn nộp.',
   EVIDENCE_ALREADY_SUBMITTED: 'Bạn đã gửi phản hồi cho yêu cầu bổ sung này.',

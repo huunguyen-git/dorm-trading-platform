@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { useSessionStore } from '../auth/sessionStore';
 import type { AccountRestriction } from '../auth/sessionTypes';
 import { tokenStore } from '../auth/tokenStore';
@@ -39,17 +40,21 @@ export class ApiError extends Error {
 let refreshFlight: Promise<void> | null = null;
 
 const baseUrl = () => {
-  const url = process.env.EXPO_PUBLIC_API_URL;
+  const url = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
   if (!url) throw new Error('EXPO_PUBLIC_API_URL is required');
   return url;
 };
 
 export const apiUrl = (path: string) => `${baseUrl()}${path}`;
 
+function hasBearerChallengeHeader(header: string | null | undefined): boolean {
+  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+}
+
 function hasBearerChallenge(response: Response): boolean {
   const header =
     response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
-  return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());
+  return hasBearerChallengeHeader(header);
 }
 
 function isLocalOrPrivateHost(hostname: string): boolean {
@@ -263,7 +268,7 @@ function parseAccountRestriction(raw: string): AccountRestriction | null {
 }
 
 async function handleRestrictedResponse(
-  response: Response,
+  response: { status: number },
   raw: string,
   clearSession: boolean,
 ): Promise<void> {
@@ -490,4 +495,172 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+interface MultipartTransportResponse {
+  status: number;
+  ok: boolean;
+  wwwAuthenticate: string | null;
+  bodyText: string;
+}
+
+function stripContentTypeHeader(headers: Record<string, string>): Record<string, string> {
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === 'content-type') continue;
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+async function sendMultipartViaFetch(
+  url: string,
+  method: 'POST' | 'PUT' | 'PATCH',
+  headers: Record<string, string>,
+  body: FormData,
+): Promise<MultipartTransportResponse> {
+  const response = await fetch(url, {
+    method,
+    headers,
+    body,
+  });
+  const wwwAuthenticate =
+    response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate') ?? null;
+  const bodyText = response.status === 204 ? '' : await readResponseText(response);
+  return {
+    status: response.status,
+    ok: response.ok,
+    wwwAuthenticate,
+    bodyText,
+  };
+}
+
+function sendMultipartViaXhr(
+  url: string,
+  method: 'POST' | 'PUT' | 'PATCH',
+  headers: Record<string, string>,
+  body: FormData,
+): Promise<MultipartTransportResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === 'content-type') continue;
+      xhr.setRequestHeader(key, value);
+    }
+
+    xhr.onload = () => {
+      const status = typeof xhr.status === 'number' ? xhr.status : 0;
+      if (status === 0) {
+        reject(new TypeError('Network request failed'));
+        return;
+      }
+      const wwwAuthenticate =
+        typeof xhr.getResponseHeader === 'function'
+          ? (xhr.getResponseHeader('WWW-Authenticate') ??
+            xhr.getResponseHeader('www-authenticate'))
+          : null;
+      const bodyText =
+        typeof xhr.responseText === 'string'
+          ? xhr.responseText
+          : typeof xhr.response === 'string'
+            ? xhr.response
+            : '';
+      resolve({
+        status,
+        ok: status >= 200 && status < 300,
+        wwwAuthenticate: wwwAuthenticate ?? null,
+        bodyText,
+      });
+    };
+
+    xhr.onerror = () => {
+      reject(new TypeError('Network request failed'));
+    };
+
+    xhr.onabort = () => {
+      reject(new TypeError('Network request aborted'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new TypeError('Network request timed out'));
+    };
+
+    xhr.send(body);
+  });
+}
+
+/**
+ * Gửi request multipart/form-data an toàn trên cả native iOS/Android (Expo SDK 58+) và web:
+ * - Native dùng XMLHttpRequest (đi qua NetworkingModule của RN, hỗ trợ `{ uri, name, type }` cho `file://` và Android `content://` mà không bị `expo/fetch` ném `Unsupported FormDataPart implementation`).
+ * - Web dùng `fetch` không đặt Content-Type để trình duyệt tự sinh boundary.
+ * - Khi gặp 401 có thử thách Bearer: làm mới phiên một lần và gọi lại `buildFormData()` để tạo FormData mới cho lần thử lại.
+ */
+export async function apiMultipart<T>(
+  path: string,
+  buildFormData: () => FormData,
+  init?: { method?: 'POST' | 'PUT' | 'PATCH'; headers?: Record<string, string> },
+): Promise<T> {
+  const url = apiUrl(path);
+  const method = init?.method ?? 'POST';
+  const extraHeaders = stripContentTypeHeader(normalizeHeaders(init?.headers));
+
+  const send = async (): Promise<MultipartTransportResponse> => {
+    const token = await tokenStore.get();
+    const headers: Record<string, string> = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    };
+    const body = buildFormData();
+    if (Platform.OS === 'web') {
+      return sendMultipartViaFetch(url, method, headers, body);
+    }
+    return sendMultipartViaXhr(url, method, headers, body);
+  };
+
+  const sentToken = await tokenStore.get();
+  let response = await send();
+  let refreshError: ApiError | null = null;
+  if (response.status === 401 && hasBearerChallengeHeader(response.wwwAuthenticate)) {
+    try {
+      if ((await tokenStore.get()) === sentToken) await refresh();
+      response = await send();
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      refreshError = error;
+    }
+  }
+
+  if (response.status === 401 && hasBearerChallengeHeader(response.wwwAuthenticate)) {
+    await tokenStore.clear();
+    useSessionStore.setState({
+      token: null,
+      user: null,
+      loading: false,
+      restriction: null,
+      restrictionDismissed: false,
+    });
+  }
+
+  if (!response.ok) {
+    if (refreshError) throw refreshError;
+    const raw = response.bodyText;
+    await handleRestrictedResponse({ status: response.status }, raw, false);
+    let message = `API ${response.status}: ${raw}`;
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(raw);
+      message = parsed.message ?? message;
+      code = parsed.code;
+    } catch {
+      /* plain response */
+    }
+    throw new ApiError(response.status, message, code);
+  }
+
+  if (response.status === 204 || !response.bodyText) {
+    return undefined as T;
+  }
+  return JSON.parse(response.bodyText) as T;
 }

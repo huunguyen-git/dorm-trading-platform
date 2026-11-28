@@ -144,6 +144,16 @@ export function getEvidenceRequestStatusMeta(status: DisputeEvidenceRequestStatu
   }
 }
 
+export function isEvidenceRequestExpired(
+  req: Pick<DisputeEvidenceRequest, 'status' | 'dueAt'>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (req.status === 'QUA_HAN') return true;
+  if (req.status !== 'CHO_BO_SUNG') return false;
+  const dueMs = Date.parse(req.dueAt);
+  return Number.isFinite(dueMs) && dueMs <= nowMs;
+}
+
 export function getTimelineActorLabel(role: DisputeTimelineActorRole): string {
   switch (role) {
     case 'BUYER':

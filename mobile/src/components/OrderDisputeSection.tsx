@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { isRestrictedError } from '../listings/sellerApi';
+import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import {
   pickImagesFromLibrary,
   takePhotoWithCamera,
@@ -31,6 +31,7 @@ import {
   getTimelineActionLabel,
   getTimelineActorLabel,
   hasDisputeContent,
+  isEvidenceRequestExpired,
   MAX_DISPUTE_EVIDENCE_FILES,
   type DisputeAttachment,
   type DisputeEvidenceRequest,
@@ -49,11 +50,32 @@ import {
   StatusIndicator,
 } from './ui';
 
-export interface OrderDisputeSectionProps {
-  order: OrderDetail;
-  isRestricted: boolean;
-  onDisputeUpdated?: (dispute: MemberDispute) => void;
-}
+export type OrderDisputeSectionProps =
+  | {
+      order: OrderDetail;
+      orderId?: undefined;
+      fallbackStatus?: undefined;
+      isRestricted: boolean;
+      refreshNonce?: number;
+      emptyFallbackMessage?: string;
+      onDisputeUpdated?: (dispute?: MemberDispute) => void;
+    }
+  | {
+      order?: undefined;
+      orderId: string;
+      fallbackStatus?: OrderDetail['status'];
+      isRestricted: boolean;
+      refreshNonce?: number;
+      emptyFallbackMessage?: string;
+      onDisputeUpdated?: (dispute?: MemberDispute) => void;
+    };
+
+const DISPUTE_STALE_CONFLICT_CODES = new Set([
+  'DISPUTE_ALREADY_RESOLVED',
+  'EVIDENCE_REQUEST_EXPIRED',
+  'EVIDENCE_REQUEST_CLOSED',
+  'EVIDENCE_ALREADY_SUBMITTED',
+]);
 
 function isDisputeEligibleOrderStatus(status: OrderDetail['status']): boolean {
   return status === 'CHO_XU_LY' || status === 'HOAN_TAT' || status === 'HUY';
@@ -61,15 +83,25 @@ function isDisputeEligibleOrderStatus(status: OrderDetail['status']): boolean {
 
 export function OrderDisputeSection({
   order,
+  orderId,
+  fallbackStatus,
   isRestricted,
+  refreshNonce,
+  emptyFallbackMessage,
   onDisputeUpdated,
 }: OrderDisputeSectionProps) {
-  const eligible = isDisputeEligibleOrderStatus(order.status);
+  const activeOrderId = order ? order.id : orderId;
+  const effectiveStatus: OrderDetail['status'] = order
+    ? order.status
+    : (fallbackStatus ?? 'CHO_XU_LY');
+  const orderVersion = order ? order.version : null;
+  const eligible = isDisputeEligibleOrderStatus(effectiveStatus);
 
   const [dispute, setDispute] = useState<MemberDispute | null>(null);
-  const [loading, setLoading] = useState<boolean>(order.status === 'CHO_XU_LY');
+  const [loading, setLoading] = useState<boolean>(effectiveStatus === 'CHO_XU_LY');
   const [loadError, setLoadError] = useState('');
   const [submitNotice, setSubmitNotice] = useState('');
+  const [conflictNotice, setConflictNotice] = useState('');
 
   // Evidence submission BottomSheet state
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -91,14 +123,18 @@ export function OrderDisputeSection({
   const fetchSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
   const pickerInFlightRef = useRef(false);
+  const submittingRef = useRef(false);
   const disputeRef = useRef<MemberDispute | null>(null);
   const loadingRef = useRef<boolean>(loading);
   const loadErrorRef = useRef<string>(loadError);
-  const prevOrderIdRef = useRef<string>(order.id);
+  const activeOrderIdRef = useRef<string>(activeOrderId);
+  const prevOrderIdRef = useRef<string>(activeOrderId);
+  const prevRefreshNonceRef = useRef<number>(refreshNonce ?? 0);
 
   disputeRef.current = dispute;
   loadingRef.current = loading;
   loadErrorRef.current = loadError;
+  activeOrderIdRef.current = activeOrderId;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -110,14 +146,16 @@ export function OrderDisputeSection({
   const loadDispute = useCallback(
     async (opts?: { forceLoading?: boolean }) => {
       if (!eligible) {
+        fetchSeqRef.current += 1;
         if (disputeRef.current !== null) setDispute(null);
         if (loadingRef.current) setLoading(false);
         if (loadErrorRef.current) setLoadError('');
         return;
       }
 
+      const targetOrderId = activeOrderId;
       const seq = ++fetchSeqRef.current;
-      const showSpinner = Boolean(opts?.forceLoading || order.status === 'CHO_XU_LY');
+      const showSpinner = Boolean(opts?.forceLoading || effectiveStatus === 'CHO_XU_LY');
       if (showSpinner && !loadingRef.current) {
         setLoading(true);
       }
@@ -126,8 +164,14 @@ export function OrderDisputeSection({
       }
 
       try {
-        const data = await fetchOrderDispute(order.id);
-        if (!mountedRef.current || seq !== fetchSeqRef.current) return;
+        const data = await fetchOrderDispute(targetOrderId);
+        if (
+          !mountedRef.current ||
+          seq !== fetchSeqRef.current ||
+          activeOrderIdRef.current !== targetOrderId
+        ) {
+          return;
+        }
 
         if (!hasDisputeContent(data)) {
           if (disputeRef.current !== null) setDispute(null);
@@ -138,12 +182,18 @@ export function OrderDisputeSection({
         setDispute(data);
         if (loadingRef.current) setLoading(false);
       } catch (err) {
-        if (!mountedRef.current || seq !== fetchSeqRef.current) return;
+        if (
+          !mountedRef.current ||
+          seq !== fetchSeqRef.current ||
+          activeOrderIdRef.current !== targetOrderId
+        ) {
+          return;
+        }
         if (loadingRef.current) setLoading(false);
         if (isRestrictedError(err)) {
           return;
         }
-        if (order.status === 'CHO_XU_LY' || disputeRef.current !== null) {
+        if (effectiveStatus === 'CHO_XU_LY' || disputeRef.current !== null) {
           setLoadError(
             extractDisputeError(
               err,
@@ -153,14 +203,21 @@ export function OrderDisputeSection({
         }
       }
     },
-    [eligible, order.id, order.status],
+    [activeOrderId, effectiveStatus, eligible],
   );
 
   useEffect(() => {
-    const orderChanged = prevOrderIdRef.current !== order.id;
-    prevOrderIdRef.current = order.id;
+    const orderChanged = prevOrderIdRef.current !== activeOrderId;
+    prevOrderIdRef.current = activeOrderId;
+    const currentRefreshNonce = refreshNonce ?? 0;
+    const refreshRequested = currentRefreshNonce !== prevRefreshNonceRef.current;
+    prevRefreshNonceRef.current = currentRefreshNonce;
 
     if (orderChanged) {
+      fetchSeqRef.current += 1;
+      previewSeqRef.current += 1;
+      submittingRef.current = false;
+      setSubmitting(false);
       setSheetOpen(false);
       setActiveRequestId(null);
       setNoteDraft('');
@@ -169,13 +226,17 @@ export function OrderDisputeSection({
       setPickerError('');
       setSubmitError('');
       setSubmitNotice('');
+      setConflictNotice('');
       setPreviewAttachment(null);
       setPreviewUri(null);
       setPreviewError('');
+      setPreviewLoading(false);
+      setLoadError('');
       if (disputeRef.current !== null) setDispute(null);
     }
 
     if (!eligible) {
+      fetchSeqRef.current += 1;
       if (disputeRef.current !== null) setDispute(null);
       if (loadingRef.current) setLoading(false);
       if (loadErrorRef.current) setLoadError('');
@@ -185,40 +246,46 @@ export function OrderDisputeSection({
     // Avoid redundant GET right after our own evidence submission already updated state to the latest version.
     if (
       !orderChanged &&
+      !refreshRequested &&
       disputeRef.current &&
-      disputeRef.current.orderId === order.id &&
-      disputeRef.current.status === order.status &&
-      disputeRef.current.version === order.version
+      disputeRef.current.orderId === activeOrderId &&
+      disputeRef.current.status === effectiveStatus &&
+      orderVersion !== null &&
+      disputeRef.current.version === orderVersion
     ) {
       return;
     }
 
-    void loadDispute();
-  }, [eligible, loadDispute, order.id, order.status, order.version]);
+    void loadDispute({ forceLoading: orderChanged && effectiveStatus === 'CHO_XU_LY' });
+  }, [activeOrderId, effectiveStatus, eligible, loadDispute, orderVersion, refreshNonce]);
 
   const openEvidenceSheet = (request: DisputeEvidenceRequest) => {
-    if (isRestricted || !request.canSubmitResponse) return;
+    if (isRestricted || !request.canSubmitResponse || isEvidenceRequestExpired(request)) return;
     setActiveRequestId(request.id);
     setNoteDraft('');
     setNoteError('');
     setSelectedFiles([]);
     setPickerError('');
     setSubmitError('');
+    setConflictNotice('');
     setSheetOpen(true);
   };
 
   const handlePickFromLibrary = async () => {
-    if (pickerInFlightRef.current || submitting) return;
+    if (pickerInFlightRef.current || submittingRef.current || submitting) return;
     setPickerError('');
     const remaining = Math.max(0, MAX_DISPUTE_EVIDENCE_FILES - selectedFiles.length);
     if (remaining <= 0) {
       setPickerError(`Bạn chỉ có thể đính kèm tối đa ${MAX_DISPUTE_EVIDENCE_FILES} ảnh.`);
       return;
     }
+    const targetOrderId = activeOrderIdRef.current;
     pickerInFlightRef.current = true;
     try {
       const picked = await pickImagesFromLibrary(remaining);
-      if (!mountedRef.current || picked.length === 0) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId || picked.length === 0) {
+        return;
+      }
       setSelectedFiles((prev) => {
         const existingUris = new Set(prev.map((item) => item.uri));
         const next = [...prev];
@@ -232,7 +299,7 @@ export function OrderDisputeSection({
         return next;
       });
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       setPickerError(extractDisputeError(err, 'Không thể chọn ảnh từ thư viện.'));
     } finally {
       pickerInFlightRef.current = false;
@@ -240,23 +307,24 @@ export function OrderDisputeSection({
   };
 
   const handleTakePhoto = async () => {
-    if (pickerInFlightRef.current || submitting) return;
+    if (pickerInFlightRef.current || submittingRef.current || submitting) return;
     setPickerError('');
     if (selectedFiles.length >= MAX_DISPUTE_EVIDENCE_FILES) {
       setPickerError(`Bạn chỉ có thể đính kèm tối đa ${MAX_DISPUTE_EVIDENCE_FILES} ảnh.`);
       return;
     }
+    const targetOrderId = activeOrderIdRef.current;
     pickerInFlightRef.current = true;
     try {
       const photo = await takePhotoWithCamera();
-      if (!mountedRef.current || !photo) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId || !photo) return;
       setSelectedFiles((prev) => {
         if (prev.length >= MAX_DISPUTE_EVIDENCE_FILES) return prev;
         if (prev.some((item) => item.uri === photo.uri)) return prev;
         return [...prev, photo];
       });
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       setPickerError(extractDisputeError(err, 'Không thể chụp ảnh bằng chứng.'));
     } finally {
       pickerInFlightRef.current = false;
@@ -269,7 +337,7 @@ export function OrderDisputeSection({
   };
 
   const handleSubmitEvidence = async () => {
-    if (!activeRequestId || submitting || isRestricted) return;
+    if (!activeRequestId || submittingRef.current || submitting || isRestricted) return;
     setNoteError('');
     setSubmitError('');
 
@@ -287,43 +355,79 @@ export function OrderDisputeSection({
       return;
     }
 
+    const targetOrderId = activeOrderId;
+    const targetRequestId = activeRequestId;
+    submittingRef.current = true;
     setSubmitting(true);
+    setConflictNotice('');
+
     try {
       const updated = await submitDisputeEvidenceResponse(
-        order.id,
-        activeRequestId,
+        targetOrderId,
+        targetRequestId,
         trimmed,
         selectedFiles,
       );
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
+      fetchSeqRef.current += 1;
       setDispute(updated);
+      setLoading(false);
+      setLoadError('');
       setSheetOpen(false);
       setActiveRequestId(null);
       setNoteDraft('');
       setSelectedFiles([]);
       setPickerError('');
       setSubmitError('');
+      setConflictNotice('');
       setSubmitNotice(
         'Đã gửi bằng chứng bổ sung thành công. Kiểm duyệt viên sẽ xem xét hồ sơ của bạn.',
       );
       onDisputeUpdated?.(updated);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || activeOrderIdRef.current !== targetOrderId) return;
       if (isRestrictedError(err)) {
         setSheetOpen(false);
         return;
       }
-      setSubmitError(
-        extractDisputeError(err, 'Không thể gửi bằng chứng bổ sung. Vui lòng thử lại.'),
+      const parsedErr = extractApiError(
+        err,
+        'Không thể gửi bằng chứng bổ sung. Vui lòng thử lại.',
       );
+      const friendlyMsg = extractDisputeError(
+        err,
+        'Không thể gửi bằng chứng bổ sung. Vui lòng thử lại.',
+      );
+      if (parsedErr.code && DISPUTE_STALE_CONFLICT_CODES.has(parsedErr.code)) {
+        setSheetOpen(false);
+        setActiveRequestId(null);
+        setSubmitError('');
+        setSubmitNotice('');
+        setConflictNotice(friendlyMsg);
+        void loadDispute();
+        onDisputeUpdated?.();
+        return;
+      }
+      if (parsedErr.status === 409) {
+        setSubmitError(friendlyMsg);
+        setConflictNotice(friendlyMsg);
+        void loadDispute();
+        onDisputeUpdated?.();
+        return;
+      }
+      setSubmitError(friendlyMsg);
     } finally {
-      if (mountedRef.current) {
-        setSubmitting(false);
+      if (activeOrderIdRef.current === targetOrderId) {
+        submittingRef.current = false;
+        if (mountedRef.current) {
+          setSubmitting(false);
+        }
       }
     }
   };
 
   const loadAttachmentPreview = useCallback(async (att: DisputeAttachment) => {
+    const targetOrderId = activeOrderIdRef.current;
     const seq = ++previewSeqRef.current;
     setPreviewAttachment(att);
     setPreviewUri(null);
@@ -331,17 +435,33 @@ export function OrderDisputeSection({
     setPreviewLoading(true);
     try {
       const uri = await fetchDisputeEvidenceDataUri(att.url);
-      if (!mountedRef.current || seq !== previewSeqRef.current) return;
+      if (
+        !mountedRef.current ||
+        seq !== previewSeqRef.current ||
+        activeOrderIdRef.current !== targetOrderId
+      ) {
+        return;
+      }
       if (!uri) {
         setPreviewError('Không tìm thấy tệp ảnh bằng chứng hoặc bạn không có quyền xem.');
       } else {
         setPreviewUri(uri);
       }
     } catch (err) {
-      if (!mountedRef.current || seq !== previewSeqRef.current) return;
+      if (
+        !mountedRef.current ||
+        seq !== previewSeqRef.current ||
+        activeOrderIdRef.current !== targetOrderId
+      ) {
+        return;
+      }
       setPreviewError(extractDisputeError(err, 'Không thể tải ảnh bằng chứng. Vui lòng thử lại.'));
     } finally {
-      if (mountedRef.current && seq === previewSeqRef.current) {
+      if (
+        mountedRef.current &&
+        seq === previewSeqRef.current &&
+        activeOrderIdRef.current === targetOrderId
+      ) {
         setPreviewLoading(false);
       }
     }
@@ -384,6 +504,16 @@ export function OrderDisputeSection({
   }
 
   if (!hasDisputeContent(dispute)) {
+    if (emptyFallbackMessage) {
+      return (
+        <>
+          <View style={styles.sectionGap} />
+          <View style={styles.section} testID="dispute-empty-fallback">
+            <InlineBanner tone="neutral" message={emptyFallbackMessage} />
+          </View>
+        </>
+      );
+    }
     return null;
   }
 
@@ -392,6 +522,9 @@ export function OrderDisputeSection({
   const decision = dispute.decision;
   const activeEvidenceRequest =
     dispute.evidenceRequests.find((req) => req.status === 'CHO_BO_SUNG') ?? null;
+  const activeRequestExpired = activeEvidenceRequest
+    ? isEvidenceRequestExpired(activeEvidenceRequest)
+    : false;
   const pastEvidenceRequests = dispute.evidenceRequests.filter(
     (req) => req.id !== activeEvidenceRequest?.id,
   );
@@ -462,11 +595,24 @@ export function OrderDisputeSection({
           />
         ) : null}
 
+        {conflictNotice ? (
+          <InlineBanner
+            testID="dispute-conflict-notice"
+            tone="warning"
+            title="Hồ sơ tranh chấp đã thay đổi"
+            message={conflictNotice}
+            onDismiss={() => setConflictNotice('')}
+            dismissTestID="dispute-conflict-notice-dismiss"
+          />
+        ) : null}
+
         {loadError ? (
           <InlineBanner
+            testID="dispute-inline-load-error"
             tone="danger"
             message={loadError}
             actionLabel="Tải lại"
+            actionTestID="dispute-inline-retry-button"
             onActionPress={() => void loadDispute({ forceLoading: true })}
           />
         ) : null}
@@ -474,9 +620,9 @@ export function OrderDisputeSection({
         {/* Moderator Decision Card (HOAN_TAT / HUY) */}
         {decision ? (
           <View style={styles.cardBlock} testID="dispute-decision-card">
-            <SectionHeading
-              title="Kết quả xử lý của Kiểm duyệt viên"
-              rightSlot={
+            <View style={styles.headerBlock}>
+              <SectionHeading title="Kết quả xử lý của Kiểm duyệt viên" />
+              <View style={styles.headerBadgeRow}>
                 <StatusIndicator
                   testID="dispute-decision-conclusion-badge"
                   variant="urgent"
@@ -485,9 +631,10 @@ export function OrderDisputeSection({
                   label={
                     decision.conclusion === 'HOAN_TAT' ? 'Xác nhận hoàn tất' : 'Hủy giao dịch'
                   }
+                  style={styles.headerBadge}
                 />
-              }
-            />
+              </View>
+            </View>
 
             <View style={styles.metaStrip}>
               <View style={styles.metaCell}>
@@ -561,17 +708,18 @@ export function OrderDisputeSection({
         {/* Pending Moderator Review Card (CHO_XU_LY) */}
         {isPendingReview ? (
           <View style={styles.cardBlock} testID="dispute-pending-card">
-            <SectionHeading
-              title="Hồ sơ chờ Kiểm duyệt viên xử lý"
-              rightSlot={
+            <View style={styles.headerBlock}>
+              <SectionHeading title="Hồ sơ chờ Kiểm duyệt viên xử lý" />
+              <View style={styles.headerBadgeRow}>
                 <StatusIndicator
                   testID="dispute-escalation-reason"
                   variant="soft"
                   tone={reasonMeta.tone}
                   label={reasonMeta.label}
+                  style={styles.headerBadge}
                 />
-              }
-            />
+              </View>
+            </View>
 
             <Text style={styles.bodyCaption}>{reasonMeta.description}</Text>
 
@@ -606,7 +754,7 @@ export function OrderDisputeSection({
               testID="dispute-hold-reputation-note"
               tone="neutral"
               icon="shield"
-              message="Đồ vật vẫn đang ở trạng thái Đang giữ (DANG_GIU) trong thời gian chờ quyết định. Điểm uy tín của hai bên không thay đổi từ quy trình xử lý này."
+              message="Đồ vật vẫn đang được giữ cho giao dịch này cho đến khi có quyết định. Điểm uy tín của hai bên không thay đổi từ quy trình xử lý này."
             />
           </View>
         ) : null}
@@ -616,12 +764,22 @@ export function OrderDisputeSection({
           <>
             <HairlineDivider />
             <View style={styles.cardBlock} testID="dispute-active-evidence-request">
-              <View style={styles.rowBetween}>
+              <View style={styles.rowBetweenWrap}>
                 <Text style={styles.subHeading}>Yêu cầu bổ sung bằng chứng</Text>
                 <StatusIndicator
+                  testID="dispute-active-evidence-status"
                   variant="soft"
-                  tone={getEvidenceRequestStatusMeta(activeEvidenceRequest.status).tone}
-                  label={getEvidenceRequestStatusMeta(activeEvidenceRequest.status).label}
+                  tone={
+                    activeRequestExpired
+                      ? 'danger'
+                      : getEvidenceRequestStatusMeta(activeEvidenceRequest.status).tone
+                  }
+                  label={
+                    activeRequestExpired
+                      ? 'Đã quá hạn bổ sung'
+                      : getEvidenceRequestStatusMeta(activeEvidenceRequest.status).label
+                  }
+                  style={styles.headerBadge}
                 />
               </View>
 
@@ -656,6 +814,14 @@ export function OrderDisputeSection({
                     label="Bạn đã gửi bằng chứng bổ sung"
                   />
                 </View>
+              ) : activeRequestExpired ? (
+                <InlineBanner
+                  testID="dispute-evidence-expired-notice"
+                  tone="danger"
+                  icon="clock"
+                  title="Đã quá hạn bổ sung"
+                  message={`Yêu cầu bổ sung bằng chứng này đã quá thời hạn nộp (${formatOrderDateTime(activeEvidenceRequest.dueAt)}).`}
+                />
               ) : isRestricted ? (
                 <InlineBanner
                   testID="dispute-restricted-readonly-notice"
@@ -795,7 +961,7 @@ export function OrderDisputeSection({
       <BottomSheet
         visible={sheetOpen}
         onClose={() => {
-          if (!submitting) setSheetOpen(false);
+          if (!submittingRef.current && !submitting) setSheetOpen(false);
         }}
         title="Bổ sung bằng chứng"
         subtitle="Cung cấp giải trình rõ ràng và tối đa 5 ảnh chụp (JPEG/PNG/WebP, ≤ 5MB/ảnh)."
@@ -991,19 +1157,29 @@ export function OrderDisputeSection({
             </View>
           ) : previewError ? (
             <InlineBanner
+              testID="dispute-preview-error"
               tone="danger"
               message={previewError}
               actionLabel="Thử lại"
+              actionTestID="dispute-preview-retry-button"
               onActionPress={() => {
                 if (previewAttachment) void loadAttachmentPreview(previewAttachment);
               }}
             />
           ) : previewUri ? (
             <Image
+              testID="dispute-preview-image"
               source={{ uri: previewUri }}
               style={styles.previewFullImage}
               resizeMode="contain"
               accessibilityLabel={previewAttachment?.originalFilename ?? 'Ảnh bằng chứng'}
+              onError={() => {
+                if (!mountedRef.current) return;
+                setPreviewUri(null);
+                setPreviewError(
+                  'Không thể hiển thị ảnh bằng chứng. Tệp ảnh có thể bị hỏng hoặc không hợp lệ.',
+                );
+              }}
             />
           ) : null}
         </View>
@@ -1035,8 +1211,27 @@ const styles = StyleSheet.create({
   cardBlock: {
     gap: primitive.space[2.5],
   },
+  headerBlock: {
+    gap: primitive.space[1.5],
+  },
+  headerBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  headerBadge: {
+    flexShrink: 1,
+    maxWidth: '100%',
+  },
   rowBetween: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
+  },
+  rowBetweenWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: primitive.space[2],

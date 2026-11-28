@@ -37,6 +37,7 @@ interface OrdersState {
   selectedOrder: OrderDetail | null;
   detailLoading: boolean;
   detailError: string | null;
+  detailRestrictedOrderId: string | null;
   submitting: boolean;
   notifications: AppNotification[];
   unreadCount: number;
@@ -87,6 +88,7 @@ export const useOrders = create<OrdersState>((set, get) => ({
   selectedOrder: null,
   detailLoading: false,
   detailError: null,
+  detailRestrictedOrderId: null,
   submitting: false,
   notifications: [],
   unreadCount: 0,
@@ -153,20 +155,29 @@ export const useOrders = create<OrdersState>((set, get) => ({
   loadOrderDetail: async (orderId) => {
     const seq = ++detailReqSeq;
     const epoch = sessionEpoch;
-    set({ detailLoading: true, detailError: null });
+    set({ detailLoading: true, detailError: null, detailRestrictedOrderId: null });
     try {
       const detail = await orderApi.fetchOrderDetail(orderId);
       if (seq !== detailReqSeq || epoch !== sessionEpoch) return null;
-      set({ selectedOrder: detail, detailLoading: false, detailError: null });
+      set({
+        selectedOrder: detail,
+        detailLoading: false,
+        detailError: null,
+        detailRestrictedOrderId: null,
+      });
       return detail;
     } catch (err) {
       if (seq !== detailReqSeq || epoch !== sessionEpoch) return null;
-      if (isRestrictedError(err)) {
-        set({ detailLoading: false, detailError: null });
+      const errShape = err as { status?: number; code?: string } | null | undefined;
+      if (
+        isRestrictedError(err) ||
+        (errShape?.status === 403 && errShape?.code === 'ACCOUNT_RESTRICTED')
+      ) {
+        set({ detailLoading: false, detailError: null, detailRestrictedOrderId: orderId });
         return null;
       }
       const parsed = extractApiError(err, 'Không thể tải chi tiết giao dịch.');
-      set({ detailLoading: false, detailError: parsed.message });
+      set({ detailLoading: false, detailError: parsed.message, detailRestrictedOrderId: null });
       return null;
     }
   },
@@ -385,6 +396,7 @@ export const useOrders = create<OrdersState>((set, get) => ({
       selectedOrder: null,
       detailLoading: false,
       detailError: null,
+      detailRestrictedOrderId: null,
       submitting: false,
       notifications: [],
       unreadCount: 0,
