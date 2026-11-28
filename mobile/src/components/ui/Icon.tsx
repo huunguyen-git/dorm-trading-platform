@@ -71,7 +71,10 @@ export type AppIconName =
   | 'music'
   | 'sun'
   | 'heart'
-  | 'settings';
+  | 'settings'
+  | 'bell'
+  | 'calendar'
+  | 'x-circle';
 
 export interface IconProps {
   name: AppIconName;
