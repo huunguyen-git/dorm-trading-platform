@@ -2,6 +2,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Listing } from './listings/store';
 import type { ListingSummary } from './listings/types';
 import type { InventoryItem } from './inventory/types';
+import type {
+  TransactionListStatusFilter,
+  TransactionRoleFilter,
+} from './transactions/types';
 
 export type RootStack = {
   Listings: undefined;
@@ -16,6 +20,8 @@ export type RootStack = {
   InventoryList: undefined;
   InventoryDetail: { id: string };
   InventoryForm: { mode: 'create' | 'edit'; id?: string; item?: InventoryItem };
+  Transactions: { initialRole?: TransactionRoleFilter; initialStatus?: TransactionListStatusFilter } | undefined;
+  TransactionDetail: { id: string };
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;

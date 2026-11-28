@@ -14,7 +14,6 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -24,7 +23,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { Nav, RootStack } from '../navigation';
 import { buildMediaImageSource } from '../api/client';
@@ -241,7 +240,7 @@ export default function ListingScreen() {
   // Not found / deleted / hidden (404)
   if (detailNotFound || (!listingId && !display)) {
     return (
-      <SafeAreaView style={styles.centerPage}>
+      <SafeAreaView edges={['bottom', 'left', 'right']} style={styles.centerPage}>
         <EmptyState
           testID="listing-not-found"
           icon="eye-off"
@@ -258,7 +257,7 @@ export default function ListingScreen() {
   // Initial loading with no preview
   if (detailLoading && !display) {
     return (
-      <SafeAreaView style={styles.centerPage}>
+      <SafeAreaView edges={['bottom', 'left', 'right']} style={styles.centerPage}>
         <ActivityIndicator size="large" color={semantic.color.accent} />
         <Text style={styles.loadingText}>Đang tải chi tiết tin đăng…</Text>
       </SafeAreaView>
@@ -268,7 +267,7 @@ export default function ListingScreen() {
   // Network error with no preview
   if (detailError && !display) {
     return (
-      <SafeAreaView style={styles.centerPage}>
+      <SafeAreaView edges={['bottom', 'left', 'right']} style={styles.centerPage}>
         <View style={styles.errorContainer} testID="listing-detail-error">
           <InlineBanner
             tone="danger"
@@ -647,7 +646,7 @@ export default function ListingScreen() {
       : 'Bán lẻ';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['left', 'right']} style={styles.container}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -933,8 +932,19 @@ export default function ListingScreen() {
             <InlineBanner
               testID="reserved-banner"
               tone="warning"
-              title="Tin đang được giữ chỗ"
-              message="Tin đăng này hiện đang được giữ chỗ cho một giao dịch khác. Bạn tạm thời không thể gửi yêu cầu giữ chỗ mới."
+              title={display.activeTransactionId ? 'Giao dịch giữ chỗ của bạn' : 'Tin đang được giữ chỗ'}
+              message={
+                display.activeTransactionId
+                  ? 'Bạn đang có giao dịch giữ chỗ với tin này. Mở để theo dõi bàn giao, xác nhận hoặc yêu cầu hủy.'
+                  : 'Tin đăng này hiện đang được giữ chỗ cho một giao dịch khác. Bạn tạm thời không thể gửi yêu cầu giữ chỗ mới.'
+              }
+              actionLabel={display.activeTransactionId ? 'Mở giao dịch' : undefined}
+              actionTestID="listing-open-transaction-btn"
+              onActionPress={
+                display.activeTransactionId
+                  ? () => navigation.navigate('TransactionDetail', { id: display.activeTransactionId! })
+                  : undefined
+              }
               style={styles.statusBannerSpacing}
             />
           ) : null}
@@ -960,6 +970,19 @@ export default function ListingScreen() {
                   : display.status === 'AN'
                     ? `Tin đang bị ẩn.${detail?.hiddenReason ? ` Lý do: ${detail.hiddenReason}` : ''}`
                     : 'Tin hiện không hiển thị công khai trong kết quả tìm kiếm.'
+              }
+              actionLabel={display.status === 'GIU_CHO' ? 'Mở giao dịch' : undefined}
+              actionTestID="owner-open-transaction-btn"
+              onActionPress={
+                display.status === 'GIU_CHO'
+                  ? () => {
+                      if (display.activeTransactionId) {
+                        navigation.navigate('TransactionDetail', { id: display.activeTransactionId });
+                      } else {
+                        navigation.navigate('Transactions', { initialRole: 'SELLER' });
+                      }
+                    }
+                  : undefined
               }
               style={styles.statusBannerSpacing}
             />
@@ -1014,7 +1037,12 @@ export default function ListingScreen() {
               </Text>
             </View>
             {isHighTrustSeller ? (
-              <StatusIndicator variant="dot" tone="success" label="Tin cậy cao" />
+              <StatusIndicator
+                variant="dot"
+                tone="success"
+                label="Tin cậy cao"
+                style={styles.statusSelfStart}
+              />
             ) : null}
           </View>
 
@@ -1474,6 +1502,7 @@ export default function ListingScreen() {
                 variant="dot"
                 tone={isHighTrustSeller ? 'success' : 'neutral'}
                 label={reputationSummary.tierLabel}
+                style={styles.statusSelfStart}
               />
             </View>
           </View>
@@ -1519,6 +1548,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: semantic.color.bgSurface,
+  },
+  statusSelfStart: {
+    alignSelf: 'flex-start',
   },
   centerPage: {
     flex: 1,

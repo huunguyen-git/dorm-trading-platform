@@ -1,12 +1,10 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Image,
-  Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,7 +15,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Nav } from '../navigation';
 import { buildMediaImageSource, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
@@ -128,7 +126,6 @@ function shortZoneLabel(zone: LocationZone | null): string {
 
 export default function ListingsScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useContext(SafeAreaInsetsContext);
   const { width: windowWidth } = useWindowDimensions();
   const heroCardWidth = Math.max((windowWidth || 375) - semantic.spacing.pageX * 2, 280);
 
@@ -535,7 +532,6 @@ export default function ListingsScreen() {
   }, [categories, filters, filtersActive, handleApplyFilters, locations]);
 
   const showPendingNotice = Boolean(token && !isMember && user?.accountStatus !== 'BI_KHOA');
-  const androidTopInset = Platform.OS === 'android' ? (insets?.top ?? 0) : 0;
   const showDiscoveryShowcase = !filtersActive && !effectiveError && displayItems.length >= 4;
 
   const listHeader = (
@@ -874,7 +870,8 @@ export default function ListingsScreen() {
 
   return (
     <SafeAreaView
-      style={[styles.container, androidTopInset > 0 && { paddingTop: androidTopInset }]}
+      edges={['top', 'left', 'right']}
+      style={styles.container}
     >
       {/* Signature Pinned Terracotta Commerce Header (Shopee / Tiki / Lazada sticky dock) */}
       <View style={styles.stickyHeaderShell}>

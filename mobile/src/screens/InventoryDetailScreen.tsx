@@ -241,6 +241,7 @@ export default function InventoryDetailScreen() {
             tone={statusMeta.tone}
             icon={item.trangThai === 'DANG_GIU' ? 'clock' : undefined}
             label={statusMeta.label}
+            style={styles.statusSelfStart}
           />
         </View>
 
@@ -431,6 +432,9 @@ const styles = StyleSheet.create({
   },
   title: {
     ...semantic.type.screenTitle,
+  },
+  statusSelfStart: {
+    alignSelf: 'flex-start',
   },
   description: {
     ...semantic.type.body,
