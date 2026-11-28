@@ -15,6 +15,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
+import ReportScreen from '../screens/ReportScreen';
 import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -104,6 +105,16 @@ export default function AppNavigator() {
           component={InventoryFormScreen}
           options={({ route }) => ({
             title: route.params?.mode === 'edit' ? 'Sửa đồ vật' : 'Thêm đồ vật',
+          })}
+        />
+        <Stack.Screen
+          name="Report"
+          component={ReportScreen}
+          options={({ route }) => ({
+            title:
+              route.params?.targetType === 'NGUOI_DUNG'
+                ? 'Báo cáo người dùng'
+                : 'Báo cáo tin đăng',
           })}
         />
       </Stack.Navigator>

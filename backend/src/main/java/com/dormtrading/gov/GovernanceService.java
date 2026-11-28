@@ -115,6 +115,7 @@ public class GovernanceService {
                 db.update("update vai_tro_quan_tri set trang_thai_hieu_luc=false,ket_thuc=? where id=?", time, role.get("id"));
         }
         db.update("update bao_caos set trang_thai='CHO_XU_LY',nguoi_xu_ly_id=null where nguoi_xu_ly_id=? and trang_thai='DANG_XU_LY'", userId);
+        db.update("update nhom_bao_caos set trang_thai='CHO_XU_LY',nguoi_xu_ly_id=null,version=version+1 where nguoi_xu_ly_id=? and trang_thai='DANG_XU_LY'", userId);
         audit(actor, "REVOKE_MODERATOR", "MODERATOR", userId.toString(), before, null);
     }
 

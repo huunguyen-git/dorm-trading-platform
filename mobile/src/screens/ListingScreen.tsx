@@ -508,7 +508,30 @@ export default function ListingScreen() {
       navigation.navigate('Login');
       return;
     }
-    showUpcomingFeatureNotice('Báo cáo tin');
+    navigation.navigate('Report', {
+      targetType: 'TIN_DANG',
+      targetId: display.id,
+      targetTitle: display.title,
+      sellerName: display.seller.displayName,
+      listingId: display.id,
+      listingTitle: display.title,
+    });
+  };
+
+  const handleReportSellerPress = () => {
+    if (reportDisabled || !display.seller.id) return;
+    setReputationSheetOpen(false);
+    if (!isAuthenticated) {
+      navigation.navigate('Login');
+      return;
+    }
+    navigation.navigate('Report', {
+      targetType: 'NGUOI_DUNG',
+      targetId: display.seller.id,
+      targetTitle: display.seller.displayName,
+      listingId: display.id,
+      listingTitle: display.title,
+    });
   };
 
   const sellerInitial = (display.seller.displayName.trim()[0] ?? 'T').toUpperCase();
@@ -636,6 +659,19 @@ export default function ListingScreen() {
           onPress: handleReportPress,
           testID: 'action-sheet-report',
         },
+        ...(display.seller.id
+          ? [
+              {
+                key: 'report-seller',
+                label: 'Báo cáo người bán',
+                icon: 'flag' as const,
+                destructive: true,
+                disabled: reportDisabled,
+                onPress: handleReportSellerPress,
+                testID: 'action-sheet-report-seller',
+              },
+            ]
+          : []),
       ];
 
   const expiryChipText = formatListingExpiryChip(display.status, display.expiresAt);
@@ -1500,6 +1536,30 @@ export default function ListingScreen() {
               </Text>
             </View>
           </View>
+
+          {!isOwner && display.seller.id ? (
+            <>
+              <HairlineDivider />
+              <Pressable
+                testID="report-seller-button"
+                disabled={reportDisabled}
+                onPress={handleReportSellerPress}
+                accessibilityRole="button"
+                accessibilityLabel="Báo cáo người dùng này"
+                accessibilityState={{ disabled: reportDisabled }}
+                style={({ pressed }) => [
+                  styles.reportLink,
+                  reportDisabled && styles.disabledControl,
+                  pressed && !reportDisabled && styles.pressedControl,
+                ]}
+              >
+                <Icon name="flag" size={14} color={semantic.color.danger} />
+                <Text style={[styles.reportLinkText, { color: semantic.color.danger }]}>
+                  Báo cáo người dùng này
+                </Text>
+              </Pressable>
+            </>
+          ) : null}
         </View>
       </BottomSheet>
 
