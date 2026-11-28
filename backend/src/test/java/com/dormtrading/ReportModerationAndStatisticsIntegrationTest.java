@@ -219,7 +219,10 @@ class ReportModerationAndStatisticsIntegrationTest extends BaseIntegrationTest {
                 .body("totalCompleted", greaterThanOrEqualTo(2))
                 .body("zeroPriceCount", greaterThanOrEqualTo(1));
 
+        // Shared singleton container: other ITs seed listings/txs, so the default top-10
+        // window can push our subject out. Request the widest page instead of assuming rank.
         given().auth().oauth2(seniorToken)
+                .queryParam("limit", 50)
                 .when().get("/api/v1/admin/senior/statistics/top-subjects")
                 .then().statusCode(200)
                 .body("items.subjectCode", hasItem("IT002"));
@@ -230,11 +233,26 @@ class ReportModerationAndStatisticsIntegrationTest extends BaseIntegrationTest {
                 .body("byCategory", not(empty()))
                 .body("byLocation", hasSize(9));
 
-        given().auth().oauth2(seniorToken)
-                .queryParam("maxScore", 65)
-                .when().get("/api/v1/admin/senior/statistics/low-reputation-disputes")
-                .then().statusCode(200)
-                .body("items.userId", hasItem(sellerId.toString()));
+        // Same reason: score ASC + size 20 hides our seller behind rows left by other ITs.
+        // Walk the pages the endpoint actually reports instead of assuming a rank.
+        // ponytail: ceiling is 5 pages x 100; upgrade when the endpoint gains a userId filter.
+        List<String> lowRepIds = new ArrayList<>();
+        long lowRepTotal = 0;
+        for (int page = 0; page < 5; page++) {
+            var extracted = given().auth().oauth2(seniorToken)
+                    .queryParam("maxScore", 65)
+                    .queryParam("size", 100)
+                    .queryParam("page", page)
+                    .when().get("/api/v1/admin/senior/statistics/low-reputation-disputes")
+                    .then().statusCode(200).extract();
+            lowRepTotal = ((Number) extracted.path("total")).longValue();
+            lowRepIds.addAll(extracted.path("items.userId"));
+            if (lowRepIds.size() >= lowRepTotal) {
+                break;
+            }
+        }
+        assertThat(lowRepTotal).isGreaterThan(0);
+        assertThat(lowRepIds).contains(sellerId.toString());
     }
 
     private UUID createUser(String email, String mssv, String name, int score, String hash) {
