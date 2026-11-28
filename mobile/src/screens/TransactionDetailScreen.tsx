@@ -1087,6 +1087,9 @@ export default function TransactionDetailScreen() {
                     ? 'Đang chờ người bán bắt đầu giao hàng.'
                     : 'Đang chờ người bán phản hồi giữ chỗ.'
                 }
+                actionLabel="Mở giữ chỗ & lịch hẹn"
+                actionTestID="tx-open-order-detail-btn"
+                onActionPress={() => navigation.navigate('OrderDetail', { id: detail.id })}
               />
             </View>
             <View style={styles.sectionGap} />

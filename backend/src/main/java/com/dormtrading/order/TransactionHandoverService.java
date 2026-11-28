@@ -1066,7 +1066,7 @@ public class TransactionHandoverService {
                 transactionId
         );
 
-        // 3. Transition transaction to HOAN_TAT (one-time completion, reputation unchanged — UC-30 handles rating)
+        // 3. Transition transaction to HOAN_TAT & release active hold flag on giao_dich_do_vat (one-time completion, reputation unchanged — UC-30 handles rating)
         db.update(
                 """
                 UPDATE giao_dichs
@@ -1078,6 +1078,10 @@ public class TransactionHandoverService {
                 """,
                 tsNow,
                 tsNow,
+                transactionId
+        );
+        db.update(
+                "UPDATE giao_dich_do_vat SET giu_hieu_luc = FALSE WHERE ma_giao_dich = ?",
                 transactionId
         );
 
@@ -1500,7 +1504,7 @@ public class TransactionHandoverService {
                     transactionId
             );
 
-            // 3. Mark transaction HUY
+            // 3. Mark transaction HUY & deactivate its item holds in giao_dich_do_vat (P2-04 compatibility)
             String reasonLabel = TransactionDtos.CancelReasonCode.fromString(cancelReq.reasonCode())
                     .map(TransactionDtos.CancelReasonCode::label)
                     .orElse(cancelReq.reasonCode());
@@ -1521,6 +1525,10 @@ public class TransactionHandoverService {
                     finalReason,
                     tsNow,
                     tsNow,
+                    transactionId
+            );
+            db.update(
+                    "UPDATE giao_dich_do_vat SET giu_hieu_luc = FALSE WHERE ma_giao_dich = ?",
                     transactionId
             );
 
@@ -2513,14 +2521,23 @@ public class TransactionHandoverService {
                 """
                 SELECT COUNT(*)
                 FROM giao_dichs g
-                JOIN tin_dang_do_vat tdv ON tdv.ma_tin = g.ma_tin
-                WHERE tdv.ma_vat = ?
-                  AND g.ma_giao_dich <> ?
+                WHERE g.ma_giao_dich <> ?
                   AND g.trang_thai IN ('GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY')
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM tin_dang_do_vat tdv
+                          WHERE tdv.ma_tin = g.ma_tin AND tdv.ma_vat = ?
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM giao_dich_do_vat gdv
+                          WHERE gdv.ma_giao_dich = g.ma_giao_dich AND gdv.ma_vat = ? AND gdv.giu_hieu_luc = TRUE
+                      )
+                  )
                 """,
                 Integer.class,
+                excludedTransactionId,
                 itemId,
-                excludedTransactionId
+                itemId
         );
         return count != null && count > 0;
     }

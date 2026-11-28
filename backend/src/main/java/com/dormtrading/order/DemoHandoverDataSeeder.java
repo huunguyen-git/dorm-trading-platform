@@ -509,11 +509,11 @@ public class DemoHandoverDataSeeder implements ApplicationRunner {
                 """
                 INSERT INTO giao_dichs(
                     ma_giao_dich, ma_tin, nguoi_ban_id, nguoi_mua_id, gia_thoa_thuan,
-                    thoi_gian_hen, dia_diem_hen, anh_ban_giao, ghi_chu_ban_giao,
+                    lich_hen_da_xac_nhan, thoi_gian_hen, dia_diem_hen, anh_ban_giao, ghi_chu_ban_giao,
                     trang_thai, ly_do_cho_xu_ly, thoi_diem_chuyen_xu_ly,
                     thoi_diem_giu_cho, thoi_diem_bat_dau_giao, thoi_diem_bao_giao, thoi_diem_hoan_tat,
                     updated_at, version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ) VALUES (?, ?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 txId, listingId, sellerId, buyerId, priceVnd,
                 toTs(appointmentAt), appointmentLocation, primaryPhotoUrl, deliveryNote,
@@ -522,6 +522,18 @@ public class DemoHandoverDataSeeder implements ApplicationRunner {
                 toTs(deliveryStartedAt), toTs(deliveredAt), toTs(completedAt),
                 Timestamp.from(updatedAt)
         );
+
+        boolean activeHold = !"HOAN_TAT".equals(txStatus) && !"HUY".equals(txStatus);
+        for (SeedItem item : items) {
+            db.update(
+                    """
+                    INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, ten_vat_snapshot, tinh_trang_snapshot, giu_hieu_luc)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (ma_giao_dich, ma_vat) WHERE ma_vat IS NOT NULL DO NOTHING
+                    """,
+                    txId, item.id(), item.name(), item.condition(), activeHold
+            );
+        }
 
         if (proof != null && deliveredAt != null) {
             String storageKey = txId + "/" + proof.id() + ".jpg";

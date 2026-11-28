@@ -7,6 +7,8 @@ import type {
   TransactionRoleFilter,
 } from './transactions/types';
 
+import type { OrderRoleFilter, OrderStatus } from './orders/types';
+
 export type RootStack = {
   Listings: undefined;
   Login: undefined;
@@ -22,6 +24,20 @@ export type RootStack = {
   InventoryForm: { mode: 'create' | 'edit'; id?: string; item?: InventoryItem };
   Transactions: { initialRole?: TransactionRoleFilter; initialStatus?: TransactionListStatusFilter } | undefined;
   TransactionDetail: { id: string };
+  ReservationRequest: {
+    listingId: string;
+    listing?: ListingSummary;
+    agreedPriceVnd?: number;
+  };
+  Orders:
+    | {
+        initialRole?: OrderRoleFilter;
+        initialStatus?: OrderStatus | 'ALL';
+        listingId?: string;
+        listingTitle?: string;
+      }
+    | undefined;
+  OrderDetail: { id: string; justCreated?: boolean };
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;

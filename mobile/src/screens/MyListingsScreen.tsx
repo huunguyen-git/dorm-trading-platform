@@ -310,6 +310,19 @@ export default function MyListingsScreen() {
         testID: `action-sheet-view-${item.id}`,
         onPress: () => navigation.navigate('Listing', { id: item.id, listing: item }),
       },
+      {
+        key: 'orders',
+        label: 'Giao dịch của tin này',
+        icon: 'shopping-bag',
+        testID: `action-sheet-orders-${item.id}`,
+        onPress: () =>
+          navigation.navigate('Orders', {
+            initialRole: 'SELLER',
+            initialStatus: 'ALL',
+            listingId: item.id,
+            listingTitle: item.title,
+          }),
+      },
     ];
 
     if (canEdit) {
@@ -483,6 +496,16 @@ export default function MyListingsScreen() {
                 </Text>
               </View>
             ) : null}
+          </Pressable>
+          <Pressable
+            testID="my-listings-orders-btn"
+            accessibilityRole="button"
+            accessibilityLabel="Yêu cầu giữ chỗ & lịch hẹn"
+            onPress={() => navigation.navigate('Orders', { initialRole: 'SELLER' })}
+            style={({ pressed }) => [styles.ordersBtn, pressed && styles.pressedState]}
+          >
+            <Icon name="calendar" size={14} color={semantic.color.textPrimary} />
+            <Text style={styles.ordersBtnText}>Giữ chỗ</Text>
           </Pressable>
           <Pressable
             testID="my-listings-create-btn"
@@ -734,6 +757,16 @@ export default function MyListingsScreen() {
                   icon="lock"
                   testID={`locked-badge-${item.id}`}
                   message="Tin đang được giữ chỗ cho giao dịch — không thể sửa, rút tin hoặc xóa lúc này."
+                  actionLabel="Xem giao dịch"
+                  actionTestID={`my-listing-view-order-${item.id}`}
+                  onActionPress={() =>
+                    navigation.navigate('Orders', {
+                      initialRole: 'SELLER',
+                      initialStatus: 'ALL',
+                      listingId: item.id,
+                      listingTitle: item.title,
+                    })
+                  }
                 />
               ) : null}
 
@@ -905,6 +938,20 @@ const styles = StyleSheet.create({
     fontWeight: primitive.fontWeight.bold,
     fontVariant: ['tabular-nums'],
     color: semantic.color.textInverse,
+  },
+  ordersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: primitive.space[1.5],
+    minHeight: component.button.minHeightSm,
+    paddingHorizontal: primitive.space[2.5],
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.bgSubtle,
+  },
+  ordersBtnText: {
+    ...semantic.type.label,
+    color: semantic.color.textPrimary,
   },
   createBtn: {
     flexDirection: 'row',

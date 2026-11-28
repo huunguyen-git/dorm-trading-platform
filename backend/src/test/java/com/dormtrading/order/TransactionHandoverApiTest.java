@@ -180,8 +180,8 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 """
                 INSERT INTO giao_dichs(
                     ma_giao_dich, ma_tin, nguoi_ban_id, nguoi_mua_id, gia_thoa_thuan,
-                    thoi_gian_hen, dia_diem_hen, trang_thai, thoi_diem_giu_cho, thoi_diem_bat_dau_giao, updated_at, version
-                ) VALUES (?, ?, ?, ?, ?, ?, 'Sảnh B4 KTX Khu A', ?, ?, ?, ?, 0)
+                    lich_hen_da_xac_nhan, thoi_gian_hen, dia_diem_hen, trang_thai, thoi_diem_giu_cho, thoi_diem_bat_dau_giao, updated_at, version
+                ) VALUES (?, ?, ?, ?, ?, TRUE, ?, 'Sảnh B4 KTX Khu A', ?, ?, ?, ?, 0)
                 """,
                 txId,
                 listingId,
@@ -194,6 +194,20 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 startTs,
                 nowTs
         );
+
+        boolean activeHold = !"HOAN_TAT".equals(txStatus) && !"HUY".equals(txStatus);
+        for (int i = 0; i < itemIds.size(); i++) {
+            db.update(
+                    """
+                    INSERT INTO giao_dich_do_vat(ma_giao_dich, ma_vat, ten_vat_snapshot, tinh_trang_snapshot, giu_hieu_luc)
+                    VALUES (?, ?, ?, 'Tốt', ?)
+                    """,
+                    txId,
+                    itemIds.get(i),
+                    "Đồ vật #" + (i + 1),
+                    activeHold
+            );
+        }
 
         return new SeededDeal(listingId, List.copyOf(itemIds), txId);
     }
@@ -373,10 +387,13 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 .body("timeline", hasSize(2))
                 .body("timeline[1].action", equalTo("COMPLETED_BY_OTP"));
 
-        // Ciphertext wiped in DB; reputation scores unchanged (belongs to UC-30)
+        // Ciphertext wiped in DB; active hold in giao_dich_do_vat cleared; reputation scores unchanged (belongs to UC-30)
         assertThat(db.queryForObject(
                 "SELECT otp_ciphertext FROM ma_xac_nhan_otp WHERE ma_giao_dich = ?",
                 String.class, deal.transactionId())).isNull();
+        assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND giu_hieu_luc = TRUE",
+                Integer.class, deal.transactionId())).isZero();
         assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, seller.id()))
                 .isEqualTo(100);
         assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, buyer.id()))
@@ -746,6 +763,9 @@ class TransactionHandoverApiTest extends BaseIntegrationTest {
                 .isEqualTo("KHA_DUNG");
         assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, deal.itemIds().get(1)))
                 .isEqualTo("DANG_GIU");
+        assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM giao_dich_do_vat WHERE ma_giao_dich = ? AND giu_hieu_luc = TRUE",
+                Integer.class, deal.transactionId())).isZero();
         // Unreleased shared item under UC-28 E5 MUST NOT have its optimistic-lock version bumped!
         assertThat(db.queryForObject("SELECT version FROM do_vats WHERE ma_vat = ?", Long.class, deal.itemIds().get(1)))
                 .isEqualTo(0L);

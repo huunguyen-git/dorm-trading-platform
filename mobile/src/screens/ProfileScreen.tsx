@@ -20,6 +20,7 @@ import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../pr
 import { useSellerListings } from '../listings/sellerStore';
 import { useTransactions } from '../transactions/store';
 import { formatReputationSummary } from '../listings/types';
+import { useOrders } from '../orders/store';
 import { Action, Field, Notice } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
@@ -113,6 +114,7 @@ export default function ProfileScreen() {
   const loadQuota = useSellerListings((s) => s.loadQuota);
   const pendingTxCount = useTransactions((s) => s.pendingActionCount);
   const loadPendingTxCount = useTransactions((s) => s.loadPendingActionCount);
+  const unreadOrderNotifications = useOrders((s) => s.unreadCount);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [cardUri, setCardUri] = useState<string | null>(null);
@@ -160,7 +162,21 @@ export default function ProfileScreen() {
     if (!isActiveMember) return;
     void loadQuota().catch(() => { });
     void loadPendingTxCount().catch(() => { });
-  }, [isActiveMember, loadQuota, loadPendingTxCount]);
+    if (
+      sessionUser?.accountStatus === 'HOAT_DONG' &&
+      sessionUser.emailVerified &&
+      sessionUser.profileApproved
+    ) {
+      void useOrders.getState().loadNotifications().catch(() => { });
+    }
+  }, [
+    isActiveMember,
+    loadQuota,
+    loadPendingTxCount,
+    sessionUser?.accountStatus,
+    sessionUser?.emailVerified,
+    sessionUser?.profileApproved,
+  ]);
 
   useEffect(() => {
     void load();
@@ -472,6 +488,35 @@ export default function ProfileScreen() {
                         <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
                       </Pressable>
                     </View>
+
+                    <Pressable
+                      testID="profile-shortcut-orders"
+                      accessibilityRole="button"
+                      accessibilityLabel="Mở Giữ chỗ & lịch hẹn"
+                      onPress={() => nav.navigate('Orders')}
+                      style={({ pressed }) => [styles.quickLinkTileFull, pressed && styles.tilePressed]}
+                    >
+                      <View style={styles.quickLinkIcon}>
+                        <Icon name="calendar" size={18} color={semantic.color.accent} />
+                      </View>
+                      <View style={styles.quickLinkTextWrap}>
+                        <Text style={styles.quickLinkTitle}>Giữ chỗ & lịch hẹn</Text>
+                        <Text style={styles.quickLinkSub}>
+                          Duyệt yêu cầu giữ chỗ, hẹn lịch & báo bắt đầu giao
+                        </Text>
+                      </View>
+                      {unreadOrderNotifications > 0 ? (
+                        <View
+                          testID="profile-orders-unread-badge"
+                          style={styles.ordersUnreadPill}
+                        >
+                          <Text style={styles.ordersUnreadText}>
+                            {unreadOrderNotifications > 99 ? '99+' : unreadOrderNotifications}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
+                    </Pressable>
                   </View>
                   <HairlineDivider />
                 </>
@@ -872,6 +917,31 @@ const styles = StyleSheet.create({
     borderRadius: primitive.radius.md,
     paddingHorizontal: primitive.space[2.5],
     paddingVertical: primitive.space[2.5],
+  },
+  quickLinkTileFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[2.5],
+  },
+  ordersUnreadPill: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: primitive.radius.full,
+    backgroundColor: semantic.color.accent,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ordersUnreadText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: primitive.fontWeight.bold,
+    fontVariant: ['tabular-nums'],
+    color: semantic.color.textInverse,
   },
   tilePressed: {
     opacity: primitive.opacity.pressed,

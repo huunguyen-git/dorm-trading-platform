@@ -1,10 +1,10 @@
 -- ==============================================================================
--- Flyway Migration V13: Hoàn tất giao dịch (Ảnh bàn giao, OTP 6 số) & Hủy sau báo giao
+-- Flyway Migration V14: Hoàn tất giao dịch (Ảnh bàn giao, OTP 6 số) & Hủy sau báo giao
 -- Tasks: P3-02 (UC-27, UC-28)
 -- Tham chiếu: FR-04, FR-08, FR-09, FR-13, NFR-01, NFR-03
 -- ==============================================================================
 
--- 1. Mở rộng bảng giao_dichs (tương thích ngược V1..V12 & sẵn sàng ghép P2-04/P2-05)
+-- 1. Mở rộng bảng giao_dichs (tương thích ngược V1..V13 & ghép P2-04/P2-05)
 ALTER TABLE giao_dichs
   ADD COLUMN IF NOT EXISTS thoi_diem_bat_dau_giao TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS ghi_chu_ban_giao TEXT,
