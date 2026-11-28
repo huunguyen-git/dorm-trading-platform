@@ -16,11 +16,28 @@ ALTER TABLE giao_dichs
   ADD COLUMN IF NOT EXISTS thoi_diem_huy TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
-ALTER TABLE giao_dichs
-  ADD CONSTRAINT chk_giao_dichs_trang_thai
-    CHECK (trang_thai IN ('YEU_CAU', 'GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY', 'HOAN_TAT', 'HUY')),
-  ADD CONSTRAINT chk_giao_dichs_distinct_parties
-    CHECK (nguoi_ban_id <> nguoi_mua_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_giao_dichs_trang_thai'
+      AND conrelid = 'giao_dichs'::regclass
+  ) THEN
+    ALTER TABLE giao_dichs
+      ADD CONSTRAINT chk_giao_dichs_trang_thai
+        CHECK (trang_thai IN ('YEU_CAU', 'GIU_CHO', 'DANG_GIAO', 'CHO_XAC_NHAN', 'CHO_XU_LY', 'HOAN_TAT', 'HUY'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_giao_dichs_distinct_parties'
+      AND conrelid = 'giao_dichs'::regclass
+  ) THEN
+    ALTER TABLE giao_dichs
+      ADD CONSTRAINT chk_giao_dichs_distinct_parties
+        CHECK (nguoi_ban_id <> nguoi_mua_id);
+  END IF;
+END $$;
 
 -- Phòng vệ tầng CSDL (FR-08, NFR-02): tối đa 1 giữ chỗ hiệu lực trên mỗi tin đăng
 CREATE UNIQUE INDEX IF NOT EXISTS uq_giao_dichs_active_listing

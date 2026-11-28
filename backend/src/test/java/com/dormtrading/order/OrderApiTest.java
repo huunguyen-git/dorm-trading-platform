@@ -1962,4 +1962,63 @@ class OrderApiTest extends BaseIntegrationTest {
         assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listingExpiredLock))
                 .isEqualTo("CONG_KHAI");
     }
+
+    @Test
+    void uc23AcceptRejectsZeroAgreedPriceAfterFreeListingEditedToPaid() {
+        MemberAccount seller = createActiveMember("FreeToPaidSeller");
+        MemberAccount buyer = createActiveMember("FreeToPaidBuyer");
+        UUID itemId = createItem(seller.token(), "Áo khoác đồng phục");
+        UUID listingId = publishListing(seller.token(), "Áo khoác cho tặng KTX", 0, List.of(itemId));
+
+        UUID orderId = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of(
+                        "listingId", listingId.toString(),
+                        "agreedPriceVnd", 0
+                ))
+                .post("/api/v1/orders")
+                .then()
+                .statusCode(201)
+                .body("agreedPriceVnd", equalTo(0))
+                .extract().jsonPath().getString("id"));
+
+        // Seller edits free listing to a paid price (120,000đ) via UC-17 while YEU_CAU (0đ) is pending
+        Map<String, Object> updateBody = new LinkedHashMap<>();
+        updateBody.put("action", "KEEP");
+        updateBody.put("version", 0);
+        updateBody.put("title", "Áo khoác chuyển sang bán");
+        updateBody.put("description", "Cập nhật giá bán 120.000đ");
+        updateBody.put("condition", "Tốt 95%");
+        updateBody.put("priceVnd", 120000);
+        updateBody.put("categoryId", "DO_GIA_DUNG");
+        updateBody.put("locationCode", "KTX_KHU_A");
+        updateBody.put("locationText", "Sảnh tòa A1");
+        updateBody.put("images", List.of("https://cdn.example.edu.vn/ord/free-to-paid.jpg"));
+        updateBody.put("itemIds", List.of(itemId.toString()));
+
+        given()
+                .auth().oauth2(seller.token())
+                .contentType(ContentType.JSON)
+                .body(updateBody)
+                .put("/api/v1/listings/" + listingId)
+                .then()
+                .statusCode(200);
+
+        given()
+                .auth().oauth2(seller.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of())
+                .post("/api/v1/orders/" + orderId + "/accept")
+                .then()
+                .statusCode(400)
+                .body("code", equalTo("INVALID_INPUT"));
+
+        assertThat(db.queryForObject("SELECT trang_thai FROM giao_dichs WHERE ma_giao_dich = ?", String.class, orderId))
+                .isEqualTo("YEU_CAU");
+        assertThat(db.queryForObject("SELECT trang_thai FROM tin_dangs WHERE ma_tin = ?", String.class, listingId))
+                .isEqualTo("CONG_KHAI");
+        assertThat(db.queryForObject("SELECT trang_thai FROM do_vats WHERE ma_vat = ?", String.class, itemId))
+                .isEqualTo("KHA_DUNG");
+    }
 }

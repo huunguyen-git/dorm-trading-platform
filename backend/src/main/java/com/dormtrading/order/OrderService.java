@@ -340,6 +340,9 @@ public class OrderService {
         if (listing.priceVnd() == 0 && agreedPrice != 0) {
             throw new AuthFailure(400, "INVALID_INPUT", "Tin cho tặng miễn phí chỉ chấp nhận mức giá thỏa thuận 0đ.");
         }
+        if (listing.priceVnd() > 0 && agreedPrice == 0) {
+            throw new AuthFailure(400, "INVALID_INPUT", "Tin đăng có phí không thể chấp nhận mức giá thỏa thuận 0đ.");
+        }
 
         // Lock ALL current items of the listing atomically (combo all-or-nothing, UC-23 E2/E3)
         List<UUID> itemIds = findListingItemIdsSorted(listing.id());

@@ -1895,4 +1895,73 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     expect(finalState.loading).toBe(false);
     expect(finalState.detailLoading).toBe(false);
   });
+
+  test('UC-25 expired proposal: canReject && !canConfirm shows expired notice + Chưa đồng ý button and submits reject', async () => {
+    mockRouteParams = { id: 'order-expired-prop' };
+    act(() => {
+      useSession.setState({ token: 'seller-jwt-token', user: sellerUser, loading: false });
+    });
+
+    const expiredIncomingOrder = makeOrderDetail({
+      id: 'order-expired-prop',
+      status: 'GIU_CHO',
+      pendingScheduleProposal: {
+        id: 'prop-expired',
+        orderId: 'order-expired-prop',
+        proposedById: 'buyer-1',
+        proposedByName: 'Nguyễn Minh Quân',
+        proposedTime: '2026-11-20T09:00:00Z',
+        proposedLocation: 'Sảnh KTX A1',
+        note: null,
+        status: 'CHO_XAC_NHAN',
+        respondedById: null,
+        respondedAt: null,
+        rejectReason: null,
+        createdAt: '2026-11-19T08:00:00Z',
+        canConfirm: false,
+        canReject: true,
+      },
+      viewer: {
+        isBuyer: false,
+        isSeller: true,
+        canAccept: false,
+        canReject: false,
+        canCancel: true,
+        canProposeSchedule: true,
+        canStartDelivery: false,
+        requiresPostDeliveryCancel: false,
+      },
+    });
+
+    const afterReject = makeOrderDetail({
+      ...expiredIncomingOrder,
+      pendingScheduleProposal: null,
+      version: 2,
+    });
+
+    mockedApi
+      .mockResolvedValueOnce(expiredIncomingOrder)
+      .mockResolvedValueOnce(afterReject);
+
+    render(<OrderDetailScreen />);
+
+    expect(await screen.findByTestId('expired-schedule-proposal-notice')).toBeTruthy();
+    expect(screen.queryByTestId('confirm-schedule-button')).toBeNull();
+    expect(screen.queryByTestId('waiting-counterparty-schedule')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('reject-schedule-button'));
+    expect(screen.getByTestId('reject-schedule-sheet')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('confirm-reject-schedule-button'));
+
+    await waitFor(() => {
+      expect(mockedApi).toHaveBeenCalledWith(
+        '/orders/order-expired-prop/schedules/prop-expired/reject',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ reason: 'Chưa phù hợp, đề xuất lịch khác.' }),
+        }),
+      );
+    });
+  });
 });

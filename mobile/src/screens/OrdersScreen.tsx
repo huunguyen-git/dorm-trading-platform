@@ -51,6 +51,7 @@ const STATUS_TABS: UnderlineTabItem<OrderStatus | 'ALL'>[] = [
   { value: 'GIU_CHO', label: 'Đang giữ chỗ', testID: 'orders-status-GIU_CHO' },
   { value: 'DANG_GIAO', label: 'Đang giao', testID: 'orders-status-DANG_GIAO' },
   { value: 'CHO_XAC_NHAN', label: 'Chờ xác nhận', testID: 'orders-status-CHO_XAC_NHAN' },
+  { value: 'CHO_XU_LY', label: 'Chờ xử lý', testID: 'orders-status-CHO_XU_LY' },
   { value: 'HOAN_TAT', label: 'Hoàn tất', testID: 'orders-status-HOAN_TAT' },
   { value: 'HUY', label: 'Đã hủy', testID: 'orders-status-HUY' },
 ];

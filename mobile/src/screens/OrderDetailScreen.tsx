@@ -718,6 +718,32 @@ export default function OrderDetailScreen() {
                           <Text style={styles.primaryBtnText}>Xác nhận lịch hẹn</Text>
                         </Pressable>
                       </View>
+                    ) : order.pendingScheduleProposal.canReject ? (
+                      <View style={styles.proposalDetails}>
+                        <Text style={styles.waitingText} testID="expired-schedule-proposal-notice">
+                          Đề xuất lịch hẹn này đã quá thời gian dự kiến nên không thể xác nhận. Bạn
+                          có thể từ chối hoặc đề xuất lại lịch mới.
+                        </Text>
+                        <View style={styles.rowActions}>
+                          <Pressable
+                            testID="reject-schedule-button"
+                            disabled={submitting}
+                            accessibilityRole="button"
+                            accessibilityLabel="Chưa đồng ý lịch hẹn"
+                            onPress={() => {
+                              setActionError('');
+                              setScheduleRejectReason('');
+                              setRejectProposalId(order.pendingScheduleProposal!.id);
+                            }}
+                            style={({ pressed }) => [
+                              styles.secondaryBtn,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={styles.secondaryBtnText}>Chưa đồng ý</Text>
+                          </Pressable>
+                        </View>
+                      </View>
                     ) : (
                       <Text style={styles.waitingText} testID="waiting-counterparty-schedule">
                         Đang chờ bên còn lại xác nhận đề xuất lịch hẹn này.
