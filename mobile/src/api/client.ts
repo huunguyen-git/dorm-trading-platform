@@ -364,6 +364,20 @@ export async function upload(path: string, file: MultipartFileInput) {
   if (!response.ok) throw await errorOf(response);
 }
 
+/** Upload multipart trả về JSON với FormData mới ở mỗi lần gửi (an toàn khi retry 401 refresh). */
+export async function apiMultipart<T>(
+  path: string,
+  buildFormData: () => FormData | Promise<FormData>,
+): Promise<T> {
+  const response = await authorizedSend(path, async () => ({
+    method: 'POST',
+    body: await buildFormData(),
+  }));
+  if (!response.ok) throw await errorOf(response);
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
 /** Tải tệp nhị phân cần Authorization (ảnh thẻ). Trả null khi 404. */
 export async function attachment(path: string) {
   const response = await authorizedSend(path, () => ({}));

@@ -1,6 +1,7 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
 import {
   api,
+  apiMultipart,
   attachment,
   buildMediaImageSource,
   resolveMediaUrl,
@@ -8,6 +9,7 @@ import {
   toPersistableMediaUrl,
   upload,
 } from './client';
+import { reportDelivered } from '../transactions/api';
 import {
   appendMultipartFile,
   createWinterCGFilePart,
@@ -908,4 +910,69 @@ test('multipart helper produces WinterCG-compatible FormData parts accepted by E
   } finally {
     globalThis.XMLHttpRequest = originalXhr;
   }
+});
+
+test('reportDelivered uses apiMultipart to build a fresh FormData instance when retrying after 401 token refresh', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  let access: string | null = 'expired-jwt';
+  store.get.mockImplementation(async () => access);
+  store.getRefresh.mockResolvedValue('refresh-ok');
+  store.save.mockImplementation(async (value) => { access = value; });
+
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: new Headers({ 'WWW-Authenticate': 'Bearer error="invalid_token"' }),
+      text: async () => JSON.stringify({ code: 'UNAUTHORIZED', message: 'Expired' }),
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ token: 'fresh-jwt', refreshToken: 'refresh-new', user: activeUser }),
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        id: 'tx-retry',
+        version: 2,
+        serverNow: '2026-11-28T10:00:00Z',
+        status: 'CHO_XAC_NHAN',
+        viewerRole: 'SELLER',
+        agreedPriceVnd: 120000,
+        isFree: false,
+        listing: { id: 'l-1', title: 'Đèn bàn', isCombo: false, isFree: false, status: 'GIU_CHO' },
+        items: [],
+        counterparty: { id: 'u-2', displayName: 'Trần B', reputationScore: 100 },
+        actions: {
+          canReportDelivered: false,
+          canVerifyOtp: false,
+          canReissueOtp: false,
+          canRequestCancel: true,
+          canRespondCancel: false,
+          canViewHandoverPhoto: true,
+        },
+      }),
+    });
+
+  const detail = await reportDelivered('tx-retry', {
+    photos: [{ uri: 'data:image/jpeg;base64,/9j/4AAQ', fileName: 'proof.jpg', mimeType: 'image/jpeg', fileSize: 1024 }],
+    note: 'Đã giao',
+    version: 1,
+  });
+
+  expect(detail.status).toBe('CHO_XAC_NHAN');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const firstAttempt = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  const retryAttempt = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect(firstAttempt[0]).toContain('/transactions/tx-retry/deliver');
+  expect(retryAttempt[0]).toContain('/transactions/tx-retry/deliver');
+  expect(firstAttempt[1].body).toBeInstanceOf(FormData);
+  expect(retryAttempt[1].body).toBeInstanceOf(FormData);
+  expect(retryAttempt[1].body).not.toBe(firstAttempt[1].body);
+  expect((retryAttempt[1].headers as Record<string, string>).Authorization).toBe('Bearer fresh-jwt');
+  expect(typeof apiMultipart).toBe('function');
 });

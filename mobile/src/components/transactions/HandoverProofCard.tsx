@@ -56,6 +56,18 @@ export function HandoverProofCard({
   const verticalZoomScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const horizontalZoomScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const hasCenteredZoomRef = useRef(false);
+  const mountedRef = useRef(true);
+  const activeRequestIdRef = useRef(0);
+  const activeProofUrlRef = useRef(proof.photoUrl);
+  const activePhotoUrlRef = useRef<string | null>(null);
+  const dataUrisRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const zoomedSize = Math.round(stageWidth * 1.85);
   const centerOffsetX = Math.max(0, Math.round((zoomedSize - stageWidth) / 2));
@@ -76,8 +88,13 @@ export function HandoverProofCard({
     return () => clearTimeout(timer);
   }, [zoomed, activeIndex, centerZoomViewport]);
 
-  // Reset local viewer state when viewing a different transaction proof
+  // Reset local viewer state & private photo cache when viewing a different transaction proof
   useEffect(() => {
+    activeRequestIdRef.current += 1;
+    activeProofUrlRef.current = proof.photoUrl;
+    dataUrisRef.current = {};
+    setDataUris({});
+    setLoadingUrl(null);
     setActiveIndex(0);
     setZoomed(false);
     setLoadError('');
@@ -86,36 +103,75 @@ export function HandoverProofCard({
   const safeIndex = Math.min(activeIndex, photos.length - 1);
   const currentPhoto = photos[safeIndex];
   const currentPhotoUrl = currentPhoto?.url ?? null;
+  activeProofUrlRef.current = proof.photoUrl;
+  activePhotoUrlRef.current = currentPhotoUrl;
   const currentDataUri = currentPhotoUrl ? dataUris[currentPhotoUrl] : undefined;
   const isModalVisible = lightboxOpen || externalLightboxOpen;
 
-  const loadPhoto = useCallback(async (url: string) => {
-    if (!canViewPhoto) return;
-    setLoadingUrl(url);
-    setLoadError('');
-    try {
-      const uri = await fetchHandoverPhotoDataUri(url);
-      if (!uri) {
-        setLoadError('Không tìm thấy ảnh bàn giao.');
-        return;
+  const selectPhotoIndex = useCallback(
+    (nextIndex: number) => {
+      activeRequestIdRef.current += 1;
+      setZoomed(false);
+      setLoadError('');
+      const targetUrl = photos[nextIndex]?.url;
+      if (targetUrl && dataUrisRef.current[targetUrl]) {
+        setLoadingUrl(null);
       }
-      setDataUris((prev) => ({ ...prev, [url]: uri }));
-    } catch (err) {
-      setLoadError(
-        err instanceof Error && err.message && !err.message.startsWith('API ')
-          ? err.message
-          : 'Không thể tải ảnh bàn giao. Vui lòng thử lại.',
-      );
-    } finally {
-      setLoadingUrl((prev) => (prev === url ? null : prev));
-    }
-  }, [canViewPhoto]);
+      setActiveIndex(nextIndex);
+    },
+    [photos],
+  );
+
+  const loadPhoto = useCallback(
+    async (url: string) => {
+      if (!canViewPhoto) return;
+      const reqId = ++activeRequestIdRef.current;
+      const scopeProofUrl = proof.photoUrl;
+      setLoadingUrl(url);
+      setLoadError('');
+      try {
+        const uri = await fetchHandoverPhotoDataUri(url);
+        if (!mountedRef.current || activeProofUrlRef.current !== scopeProofUrl) {
+          return;
+        }
+        if (!uri) {
+          if (activeRequestIdRef.current === reqId && activePhotoUrlRef.current === url) {
+            setLoadError('Không tìm thấy ảnh bàn giao.');
+          }
+          return;
+        }
+        dataUrisRef.current = { ...dataUrisRef.current, [url]: uri };
+        setDataUris((prev) => ({ ...prev, [url]: uri }));
+        if (activeRequestIdRef.current === reqId) {
+          setLoadError('');
+        }
+      } catch (err) {
+        if (
+          mountedRef.current &&
+          activeProofUrlRef.current === scopeProofUrl &&
+          activeRequestIdRef.current === reqId &&
+          activePhotoUrlRef.current === url
+        ) {
+          setLoadError(
+            err instanceof Error && err.message && !err.message.startsWith('API ')
+              ? err.message
+              : 'Không thể tải ảnh bàn giao. Vui lòng thử lại.',
+          );
+        }
+      } finally {
+        if (mountedRef.current && activeRequestIdRef.current === reqId) {
+          setLoadingUrl((prev) => (prev === url ? null : prev));
+        }
+      }
+    },
+    [canViewPhoto, proof.photoUrl],
+  );
 
   useEffect(() => {
     if (!currentPhotoUrl || !canViewPhoto) return;
-    if (dataUris[currentPhotoUrl]) return;
+    if (dataUrisRef.current[currentPhotoUrl]) return;
     void loadPhoto(currentPhotoUrl);
-  }, [canViewPhoto, currentPhotoUrl, dataUris, loadPhoto]);
+  }, [canViewPhoto, currentPhotoUrl, proof.photoUrl, loadPhoto]);
 
   const closeLightbox = () => {
     setLightboxOpen(false);
@@ -131,8 +187,8 @@ export function HandoverProofCard({
 
   const stepPhoto = (delta: -1 | 1) => {
     if (photos.length <= 1) return;
-    setZoomed(false);
-    setActiveIndex((prev) => ((prev + delta) % photos.length + photos.length) % photos.length);
+    const nextIndex = ((safeIndex + delta) % photos.length + photos.length) % photos.length;
+    selectPhotoIndex(nextIndex);
   };
 
   const uploadedLabel = formatTransactionDateTime(currentPhoto?.uploadedAt ?? proof.uploadedAt);
@@ -230,7 +286,7 @@ export function HandoverProofCard({
               <Pressable
                 key={photo.id || `${photo.url}-${index}`}
                 testID={`handover-proof-switch-${index}`}
-                onPress={() => setActiveIndex(index)}
+                onPress={() => selectPhotoIndex(index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Xem ảnh bàn giao ${index + 1}`}
                 accessibilityState={{ selected: active }}
@@ -413,10 +469,7 @@ export function HandoverProofCard({
                         key={photo.id || `dot-${index}`}
                         testID={`proof-lightbox-dot-${index}`}
                         hitSlop={6}
-                        onPress={() => {
-                          setZoomed(false);
-                          setActiveIndex(index);
-                        }}
+                        onPress={() => selectPhotoIndex(index)}
                         accessibilityRole="button"
                         accessibilityLabel={`Chuyển sang ảnh ${index + 1}`}
                         accessibilityState={{ selected: active }}

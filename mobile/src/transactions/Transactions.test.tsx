@@ -24,6 +24,7 @@ import {
 import { CountdownPill } from '../components/transactions/CountdownPill';
 import { TransactionTimeline } from '../components/transactions/TransactionTimeline';
 import { HandoverPhotoUploader } from '../components/transactions/HandoverPhotoUploader';
+import { HandoverProofCard } from '../components/transactions/HandoverProofCard';
 import { CancelConsentCard } from '../components/transactions/CancelConsentCard';
 import {
   fetchHandoverPhotoDataUri,
@@ -45,9 +46,13 @@ import {
 
 jest.mock('../api/client', () => {
   const actual = jest.requireActual<typeof import('../api/client')>('../api/client');
+  const mockApi = jest.fn();
   return {
     ...actual,
-    api: jest.fn(),
+    api: mockApi,
+    apiMultipart: jest.fn(async (path: string, buildFormData: () => FormData | Promise<FormData>) =>
+      mockApi(path, { method: 'POST', body: await buildFormData() }),
+    ),
     attachment: jest.fn(),
   };
 });
@@ -2345,5 +2350,113 @@ describe('Wave-4 Copy Purification & Zero-Jargon UI Regressions', () => {
     expect(listTree.getAllByText('Đơn mua').length).toBeGreaterThanOrEqual(2);
     assertZeroUiJargon(listTree.toJSON(), 'TransactionsScreen');
     listTree.unmount();
+  });
+});
+
+describe('PR #38 Review Hardening — HandoverProofCard race, unmount & cache reset', () => {
+  test('ignores stale rejection when switching photos, stays safe on unmount, and resets cache when proof changes', async () => {
+    let rejectPhoto1!: (err: Error) => void;
+    let resolvePhoto2!: (val: { type: string; bytes: ArrayBuffer }) => void;
+
+    mockedAttachment.mockImplementation((path: string) => {
+      if (path.endsWith('/ph-1')) {
+        return new Promise((_, reject) => {
+          rejectPhoto1 = reject;
+        });
+      }
+      if (path.endsWith('/ph-2')) {
+        return new Promise((resolve) => {
+          resolvePhoto2 = resolve;
+        });
+      }
+      if (path.endsWith('/ph-tx2')) {
+        return Promise.resolve({ type: 'image/png', bytes: new Uint8Array([1, 2, 3]).buffer });
+      }
+      return Promise.resolve(null);
+    });
+
+    const proofTx1 = {
+      photoId: 'ph-1',
+      photoUrl: '/api/v1/transactions/tx-100/handover-photo',
+      photos: [
+        {
+          id: 'ph-1',
+          url: '/api/v1/transactions/tx-100/handover-photos/ph-1',
+          contentType: 'image/jpeg',
+          sizeBytes: 12000,
+          uploadedAt: '2026-11-28T09:00:00Z',
+        },
+        {
+          id: 'ph-2',
+          url: '/api/v1/transactions/tx-100/handover-photos/ph-2',
+          contentType: 'image/jpeg',
+          sizeBytes: 14000,
+          uploadedAt: '2026-11-28T09:00:00Z',
+        },
+      ],
+      uploadedAt: '2026-11-28T09:00:00Z',
+      note: 'Ảnh tx1',
+      contentType: 'image/jpeg',
+    };
+
+    const card = render(<HandoverProofCard proof={proofTx1} canViewPhoto />);
+    await waitFor(() => expect(mockedAttachment).toHaveBeenCalledWith('/transactions/tx-100/handover-photos/ph-1'));
+
+    // Switch immediately to Photo 2 while Photo 1 is still in flight
+    fireEvent.press(card.getByTestId('handover-proof-switch-1'));
+    await waitFor(() => expect(mockedAttachment).toHaveBeenCalledWith('/transactions/tx-100/handover-photos/ph-2'));
+
+    // Resolve Photo 2 first, then reject stale Photo 1 -> Photo 2 MUST stay rendered with ZERO error banner!
+    await act(async () => {
+      resolvePhoto2({ type: 'image/jpeg', bytes: new Uint8Array([0xff, 0xd8, 0xff]).buffer });
+    });
+    expect(await card.findByTestId('handover-proof-image')).toBeTruthy();
+
+    await act(async () => {
+      rejectPhoto1(new Error('Network glitch on photo 1'));
+    });
+    expect(card.queryByTestId('handover-proof-error')).toBeNull();
+    expect(card.getByTestId('handover-proof-image')).toBeTruthy();
+
+    // Switching proof.photoUrl to another transaction resets dataUris cache and fetches the new proof cleanly
+    const proofTx2 = {
+      photoId: 'ph-tx2',
+      photoUrl: '/api/v1/transactions/tx-200/handover-photo',
+      photos: [
+        {
+          id: 'ph-tx2',
+          url: '/api/v1/transactions/tx-200/handover-photos/ph-tx2',
+          contentType: 'image/png',
+          sizeBytes: 9000,
+          uploadedAt: '2026-11-28T09:05:00Z',
+        },
+      ],
+      uploadedAt: '2026-11-28T09:05:00Z',
+      note: 'Ảnh tx2',
+      contentType: 'image/png',
+    };
+    card.rerender(<HandoverProofCard proof={proofTx2} canViewPhoto />);
+    await waitFor(() => expect(mockedAttachment).toHaveBeenCalledWith('/transactions/tx-200/handover-photos/ph-tx2'));
+    expect(await card.findByTestId('handover-proof-image')).toBeTruthy();
+
+    // Unmounting mid-flight stays completely safe with zero errors
+    let rejectAfterUnmount!: (err: Error) => void;
+    mockedAttachment.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectAfterUnmount = reject;
+        }),
+    );
+    const unmountProof = {
+      ...proofTx2,
+      photoUrl: '/api/v1/transactions/tx-300/handover-photo',
+      photos: [{ ...proofTx2.photos[0], id: 'ph-tx3', url: '/api/v1/transactions/tx-300/handover-photos/ph-tx3' }],
+    };
+    const tempCard = render(<HandoverProofCard proof={unmountProof} canViewPhoto />);
+    await waitFor(() => expect(mockedAttachment).toHaveBeenCalledWith('/transactions/tx-300/handover-photos/ph-tx3'));
+    tempCard.unmount();
+    await act(async () => {
+      rejectAfterUnmount(new Error('Late error after unmount'));
+    });
   });
 });

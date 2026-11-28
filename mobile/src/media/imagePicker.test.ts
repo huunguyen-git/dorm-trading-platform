@@ -22,9 +22,15 @@ jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(),
 }));
 
-jest.mock('../api/client', () => ({
-  api: jest.fn(),
-}));
+jest.mock('../api/client', () => {
+  const mockApi = jest.fn();
+  return {
+    api: mockApi,
+    apiMultipart: jest.fn(async (path: string, buildFormData: () => FormData | Promise<FormData>) =>
+      mockApi(path, { method: 'POST', body: await buildFormData() }),
+    ),
+  };
+});
 
 const mockedPicker = jest.mocked(ImagePicker);
 const mockedApi = jest.mocked(api);

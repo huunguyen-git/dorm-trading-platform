@@ -1,6 +1,7 @@
 import {
   api,
   ApiError,
+  apiMultipart,
   attachment,
   RestrictedAccountError,
   type ApiErrorDetails,
@@ -256,31 +257,34 @@ export async function reportDelivered(
     validated.push({ asset: photo, mimeType: check.mimeType });
   }
 
-  const formData = new FormData();
-  const fieldName = validated.length === 1 ? 'file' : 'files';
-  for (let index = 0; index < validated.length; index += 1) {
-    const { asset, mimeType } = validated[index];
-    const fileName = resolveHandoverFileName(asset, mimeType, index);
-    await appendMultipartFile(formData, fieldName, {
-      uri: asset.uri,
-      name: fileName,
-      type: mimeType,
-      file: asset.file,
-    });
-  }
-
   const trimmedNote = payload.note?.trim();
-  if (trimmedNote) {
-    formData.append('note', trimmedNote);
-  }
-  if (typeof payload.version === 'number' && Number.isFinite(payload.version)) {
-    formData.append('version', String(payload.version));
-  }
+  const hasVersion = typeof payload.version === 'number' && Number.isFinite(payload.version);
+  const fieldName = validated.length === 1 ? 'file' : 'files';
 
-  const data = await api<unknown>(`/transactions/${encodeURIComponent(id)}/deliver`, {
-    method: 'POST',
-    body: formData,
-  });
+  // FormData mới mỗi lần gửi để 401 refresh retry không tái sử dụng body đã đọc
+  const data = await apiMultipart<unknown>(
+    `/transactions/${encodeURIComponent(id)}/deliver`,
+    async () => {
+      const formData = new FormData();
+      for (let index = 0; index < validated.length; index += 1) {
+        const { asset, mimeType } = validated[index];
+        const fileName = resolveHandoverFileName(asset, mimeType, index);
+        await appendMultipartFile(formData, fieldName, {
+          uri: asset.uri,
+          name: fileName,
+          type: mimeType,
+          file: asset.file,
+        });
+      }
+      if (trimmedNote) {
+        formData.append('note', trimmedNote);
+      }
+      if (hasVersion) {
+        formData.append('version', String(payload.version));
+      }
+      return formData;
+    },
+  );
   return normalizeTransactionDetail(data);
 }
 
