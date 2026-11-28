@@ -15,6 +15,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
+import { resolveUserRestriction, useSession } from '../auth/session';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
@@ -31,6 +32,7 @@ import {
   QUICK_MEETING_LOCATIONS,
   SCHEDULE_REJECT_REASONS,
 } from '../orders/types';
+import { OrderDisputeSection } from '../components/OrderDisputeSection';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
   BottomSheet,
@@ -53,10 +55,20 @@ export default function OrderDetailScreen() {
   const stickyBottomPad = Math.max(insets?.bottom ?? 0, primitive.space[3]);
   const orderId = params.id;
 
+  const sessionUser = useSession((s) => s.user);
+  const sessionRestriction = useSession((s) => s.restriction);
+  const isRestricted = Boolean(
+    sessionRestriction ||
+      resolveUserRestriction(sessionUser) ||
+      sessionUser?.accountStatus === 'BI_KHOA' ||
+      sessionUser?.accountStatus === 'VO_HIEU_HOA',
+  );
+
   const {
     selectedOrder,
     detailLoading,
     detailError,
+    detailRestrictedOrderId,
     submitting,
     loadOrderDetail,
     accept,
@@ -100,14 +112,20 @@ export default function OrderDetailScreen() {
   );
 
   const skipInitialFocusRef = useRef(true);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
-  const refresh = useCallback(() => {
+  const refreshOrderOnly = useCallback(() => {
     void loadOrderDetail(orderId);
   }, [loadOrderDetail, orderId]);
 
+  const refresh = useCallback(() => {
+    void loadOrderDetail(orderId);
+    setRefreshNonce((prev) => prev + 1);
+  }, [loadOrderDetail, orderId]);
+
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void loadOrderDetail(orderId);
+  }, [loadOrderDetail, orderId]);
 
   useEffect(() => {
     if (typeof navigation?.addListener !== 'function') return;
@@ -289,6 +307,39 @@ export default function OrderDetailScreen() {
     );
   }
 
+  if (!order && detailRestrictedOrderId === orderId) {
+    return (
+      <View style={styles.container} testID="order-detail-restricted-fallback">
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.topNoticesWrap}>
+            <RestrictedAccountNotice />
+            <InlineBanner
+              testID="order-detail-restricted-readonly-banner"
+              tone="warning"
+              icon="lock"
+              title="Chế độ xem hồ sơ tranh chấp"
+              message="Tài khoản đang bị hạn chế nên không thể mở đầy đủ chi tiết giao dịch. Bạn vẫn có thể theo dõi trạng thái xử lý tranh chấp và quyết định của Kiểm duyệt viên."
+              actionLabel="Tải lại"
+              actionTestID="order-detail-restricted-retry"
+              onActionPress={refresh}
+            />
+          </View>
+          <OrderDisputeSection
+            orderId={orderId}
+            fallbackStatus="CHO_XU_LY"
+            isRestricted={true}
+            refreshNonce={refreshNonce}
+            emptyFallbackMessage="Giao dịch này chưa có hồ sơ tranh chấp hoặc quá hạn để hiển thị."
+          />
+        </ScrollView>
+      </View>
+    );
+  }
+
   if (detailError && !order) {
     return (
       <View style={styles.center}>
@@ -447,6 +498,17 @@ export default function OrderDetailScreen() {
               />
             ) : null}
           </View>
+
+          {order.status === 'CHO_XU_LY' ||
+          order.status === 'HOAN_TAT' ||
+          order.status === 'HUY' ? (
+            <OrderDisputeSection
+              order={order}
+              isRestricted={isRestricted}
+              refreshNonce={refreshNonce}
+              onDisputeUpdated={refreshOrderOnly}
+            />
+          ) : null}
 
           <View style={styles.sectionGap} />
 

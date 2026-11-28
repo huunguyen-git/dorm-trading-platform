@@ -1,6 +1,9 @@
-import { beforeEach, expect, jest, test } from '@jest/globals';
+import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
+import { Platform } from 'react-native';
 import {
   api,
+  apiMultipart,
+  apiUrl,
   attachment,
   buildMediaImageSource,
   resolveMediaUrl,
@@ -755,6 +758,17 @@ test('keeps the mobile session when the upload refresh fails with 503', async ()
   expect(store.clear).not.toHaveBeenCalled();
 });
 
+const originalPlatformOS = Platform.OS;
+const originalXmlHttpRequest = globalThis.XMLHttpRequest;
+
+afterEach(() => {
+  Object.defineProperty(Platform, 'OS', {
+    configurable: true,
+    value: originalPlatformOS,
+  });
+  globalThis.XMLHttpRequest = originalXmlHttpRequest;
+});
+
 test('refreshes then retries a protected attachment download, clears the session on a real 401 and returns null on 404', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
   let access: string | null = 'expired';
@@ -778,4 +792,294 @@ test('refreshes then retries a protected attachment download, clears the session
   fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired());
   await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
   expect(store.clear).toHaveBeenCalled();
+});
+
+test('baseUrl strips trailing slashes so api() and apiUrl() never emit double slashes', async () => {
+  process.env.EXPO_PUBLIC_API_URL = '  http://localhost:8082/api/v1///  ';
+  store.get.mockResolvedValue('abc');
+  fetchMock.mockResolvedValueOnce({ status: 200, ok: true, json: async () => ({ ok: true }) });
+
+  expect(apiUrl('/orders/order-1/dispute')).toBe('http://localhost:8082/api/v1/orders/order-1/dispute');
+  await expect(api('/orders/order-1/dispute')).resolves.toEqual({ ok: true });
+  expect(fetchMock).toHaveBeenCalledWith(
+    'http://localhost:8082/api/v1/orders/order-1/dispute',
+    expect.any(Object),
+  );
+});
+
+type MockXhrAttempt = {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+};
+
+type MockXhrBehavior =
+  | {
+      kind: 'response';
+      status: number;
+      responseText?: string;
+      headers?: Record<string, string>;
+    }
+  | { kind: 'error' };
+
+function installMockXhr(behaviors: MockXhrBehavior[]): MockXhrAttempt[] {
+  const attempts: MockXhrAttempt[] = [];
+  let cursor = 0;
+
+  class MockXMLHttpRequest {
+    status = 0;
+    responseText = '';
+    response: unknown = '';
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    private reqMethod = '';
+    private reqUrl = '';
+    private reqHeaders: Record<string, string> = {};
+    private resHeaders: Record<string, string> = {};
+
+    open(method: string, url: string) {
+      this.reqMethod = method;
+      this.reqUrl = url;
+    }
+
+    setRequestHeader(key: string, value: string) {
+      this.reqHeaders[key] = value;
+    }
+
+    getResponseHeader(name: string): string | null {
+      const target = name.toLowerCase();
+      for (const [k, v] of Object.entries(this.resHeaders)) {
+        if (k.toLowerCase() === target) return v;
+      }
+      return null;
+    }
+
+    send(body?: unknown) {
+      attempts.push({
+        method: this.reqMethod,
+        url: this.reqUrl,
+        headers: { ...this.reqHeaders },
+        body,
+      });
+      const next = behaviors[cursor++];
+      if (!next) {
+        throw new Error(`Unexpected XHR attempt #${cursor}`);
+      }
+      if (next.kind === 'error') {
+        this.onerror?.();
+        return;
+      }
+      this.status = next.status;
+      this.responseText = next.responseText ?? '';
+      this.response = this.responseText;
+      this.resHeaders = next.headers ?? {};
+      this.onload?.();
+    }
+  }
+
+  globalThis.XMLHttpRequest = MockXMLHttpRequest as unknown as typeof XMLHttpRequest;
+  return attempts;
+}
+
+test('apiMultipart uses native XMLHttpRequest on Android/iOS, omits Content-Type, and rebuilds fresh FormData on 401 Bearer refresh', async () => {
+  Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+  process.env.EXPO_PUBLIC_API_URL = 'http://10.0.2.2:8082/api/v1/';
+
+  let currentToken: string | null = 'expired-native-jwt';
+  store.get.mockImplementation(async () => currentToken);
+  store.getRefresh.mockResolvedValue('valid-refresh-token');
+  store.save.mockImplementation(async (nextToken) => {
+    currentToken = nextToken;
+  });
+
+  const xhrAttempts = installMockXhr([
+    {
+      kind: 'response',
+      status: 401,
+      headers: { 'WWW-Authenticate': 'Bearer error="invalid_token"' },
+      responseText: JSON.stringify({ code: 'UNAUTHORIZED', message: 'Expired' }),
+    },
+    {
+      kind: 'response',
+      status: 201,
+      responseText: JSON.stringify({ orderId: 'order-1', version: 4 }),
+    },
+  ]);
+
+  // Only /auth/refresh should call fetch; multipart bodies must go through XMLHttpRequest on native
+  fetchMock.mockResolvedValueOnce({
+    status: 200,
+    ok: true,
+    json: async () => ({
+      token: 'fresh-native-jwt',
+      refreshToken: 'next-refresh-token',
+      user: activeUser,
+    }),
+  });
+
+  const builtForms: FormData[] = [];
+  const result = await apiMultipart<{ orderId: string; version: number }>(
+    '/orders/order-1/dispute/evidence-requests/req-1/responses',
+    () => {
+      const form = new FormData();
+      form.append('note', 'Bằng chứng ảnh chụp bàn giao.');
+      form.append('files', {
+        uri: 'content://media/external/images/media/42',
+        name: 'evidence.jpg',
+        type: 'image/jpeg',
+      } as unknown as Blob);
+      builtForms.push(form);
+      return form;
+    },
+    { method: 'POST', headers: { 'Content-Type': 'multipart/form-data', 'X-Client': 'mobile' } },
+  );
+
+  expect(result).toEqual({ orderId: 'order-1', version: 4 });
+  expect(builtForms).toHaveLength(2);
+  expect(builtForms[0]).not.toBe(builtForms[1]);
+  expect(xhrAttempts).toHaveLength(2);
+  expect(xhrAttempts[0].url).toBe(
+    'http://10.0.2.2:8082/api/v1/orders/order-1/dispute/evidence-requests/req-1/responses',
+  );
+  expect(xhrAttempts[0].headers.Authorization).toBe('Bearer expired-native-jwt');
+  expect(xhrAttempts[0].headers['Content-Type']).toBeUndefined();
+  expect(xhrAttempts[0].headers['X-Client']).toBe('mobile');
+  expect(xhrAttempts[0].body).toBe(builtForms[0]);
+
+  expect(xhrAttempts[1].headers.Authorization).toBe('Bearer fresh-native-jwt');
+  expect(xhrAttempts[1].headers['Content-Type']).toBeUndefined();
+  expect(xhrAttempts[1].body).toBe(builtForms[1]);
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock.mock.calls[0][0]).toBe('http://10.0.2.2:8082/api/v1/auth/refresh');
+});
+
+test('apiMultipart handles 403 ACCOUNT_RESTRICTED, 413 JSON error, 204 empty, and XHR network failure identically to api()', async () => {
+  Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false, restriction: null });
+  store.get.mockResolvedValue('valid-jwt');
+
+  installMockXhr([
+    {
+      kind: 'response',
+      status: 403,
+      responseText: JSON.stringify({
+        code: 'ACCOUNT_RESTRICTED',
+        message: 'Tài khoản bị khóa tạm thời.',
+        restriction: {
+          accountStatus: 'BI_KHOA',
+          lockType: 'KHOA_TAM_THOI',
+          reason: 'Vi phạm quy định',
+          lockedUntil: '2026-12-10T00:00:00Z',
+          appealable: false,
+          reputationScore: 40,
+        },
+      }),
+    },
+    {
+      kind: 'response',
+      status: 413,
+      responseText: JSON.stringify({
+        code: 'FILE_TOO_LARGE',
+        message: 'Ảnh vượt quá giới hạn 5MB.',
+      }),
+    },
+    {
+      kind: 'response',
+      status: 204,
+      responseText: '',
+    },
+    {
+      kind: 'error',
+    },
+  ]);
+
+  await expect(apiMultipart('/orders/1/dispute/evidence', () => new FormData())).rejects.toBeInstanceOf(
+    RestrictedAccountError,
+  );
+  expect(useSession.getState().restriction?.lockType).toBe('KHOA_TAM_THOI');
+  expect(store.clear).not.toHaveBeenCalled();
+
+  await expect(apiMultipart('/orders/1/dispute/evidence', () => new FormData())).rejects.toMatchObject({
+    status: 413,
+    code: 'FILE_TOO_LARGE',
+    message: 'Ảnh vượt quá giới hạn 5MB.',
+  });
+
+  await expect(apiMultipart('/orders/1/dispute/evidence', () => new FormData())).resolves.toBeUndefined();
+
+  await expect(apiMultipart('/orders/1/dispute/evidence', () => new FormData())).rejects.toThrow(
+    'Network request failed',
+  );
+});
+
+test('apiMultipart uses fetch on web without setting Content-Type and rebuilds fresh FormData on 401 refresh', async () => {
+  Object.defineProperty(Platform, 'OS', { configurable: true, value: 'web' });
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1/';
+
+  let currentToken: string | null = 'expired-web-jwt';
+  store.get.mockImplementation(async () => currentToken);
+  store.getRefresh.mockResolvedValue('web-refresh-token');
+  store.save.mockImplementation(async (nextToken) => {
+    currentToken = nextToken;
+  });
+
+  const xhrAttempts = installMockXhr([]);
+  fetchMock
+    .mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      headers: { get: (name: string) => (name.toLowerCase() === 'www-authenticate' ? 'Bearer' : null) },
+      text: async () => '',
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        token: 'fresh-web-jwt',
+        refreshToken: 'next-web-refresh',
+        user: activeUser,
+      }),
+    })
+    .mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ orderId: 'order-web', version: 2 }),
+    });
+
+  const builtForms: FormData[] = [];
+  const result = await apiMultipart<{ orderId: string; version: number }>(
+    '/orders/order-web/dispute/evidence-requests/req-1/responses',
+    () => {
+      const form = new FormData();
+      form.append('note', 'Web multipart test');
+      builtForms.push(form);
+      return form;
+    },
+    { method: 'POST', headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+
+  expect(result).toEqual({ orderId: 'order-web', version: 2 });
+  expect(xhrAttempts).toHaveLength(0);
+  expect(builtForms).toHaveLength(2);
+  expect(builtForms[0]).not.toBe(builtForms[1]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+
+  const [firstUrl, firstInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(firstUrl).toBe(
+    'http://localhost:8082/api/v1/orders/order-web/dispute/evidence-requests/req-1/responses',
+  );
+  expect((firstInit.headers as Record<string, string>).Authorization).toBe('Bearer expired-web-jwt');
+  expect((firstInit.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+  expect(firstInit.body).toBe(builtForms[0]);
+
+  const [, retryInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+  expect((retryInit.headers as Record<string, string>).Authorization).toBe('Bearer fresh-web-jwt');
+  expect((retryInit.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+  expect(retryInit.body).toBe(builtForms[1]);
 });
