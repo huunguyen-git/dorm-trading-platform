@@ -100,6 +100,36 @@ public final class ReviewPolicy {
             String lockingComplaintStatus,
             Instant now
     ) {
+        return evaluateCapabilities(
+                viewerIsBuyer,
+                false,
+                true,
+                orderStatus,
+                completedAt,
+                noReviewBonusApplied,
+                hasActiveReview,
+                activeReviewStatus,
+                activeReviewModeratedAt,
+                activeReviewModeratorId,
+                lockingComplaintStatus,
+                now
+        );
+    }
+
+    public static Capabilities evaluateCapabilities(
+            boolean viewerIsBuyer,
+            boolean viewerAccountRestricted,
+            boolean viewerAccountActive,
+            String orderStatus,
+            Instant completedAt,
+            boolean noReviewBonusApplied,
+            boolean hasActiveReview,
+            String activeReviewStatus,
+            Instant activeReviewModeratedAt,
+            Object activeReviewModeratorId,
+            String lockingComplaintStatus,
+            Instant now
+    ) {
         Instant deadline = reviewDeadline(completedAt);
         boolean withinWindow = isWithinReviewWindow(completedAt, now);
         int daysLeft = daysRemaining(completedAt, now);
@@ -127,6 +157,32 @@ public final class ReviewPolicy {
                     false,
                     ReviewDtos.ReviewLockReason.NOT_BUYER.name(),
                     "Chỉ người mua của giao dịch mới có quyền gửi, sửa hoặc xóa đánh giá."
+            );
+        }
+
+        if (viewerAccountRestricted) {
+            return new Capabilities(
+                    deadline,
+                    daysLeft,
+                    withinWindow,
+                    false,
+                    false,
+                    false,
+                    ReviewDtos.ReviewLockReason.ACCOUNT_RESTRICTED.name(),
+                    "Tài khoản của bạn hiện đang bị hạn chế nên không thể gửi, chỉnh sửa hoặc xóa đánh giá."
+            );
+        }
+
+        if (!viewerAccountActive) {
+            return new Capabilities(
+                    deadline,
+                    daysLeft,
+                    withinWindow,
+                    false,
+                    false,
+                    false,
+                    ReviewDtos.ReviewLockReason.ACCOUNT_NOT_ACTIVE.name(),
+                    "Tài khoản cần được xác minh email và phê duyệt hồ sơ trước khi gửi, chỉnh sửa hoặc xóa đánh giá."
             );
         }
 

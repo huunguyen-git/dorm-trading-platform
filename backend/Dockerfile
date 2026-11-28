@@ -29,7 +29,7 @@ WORKDIR /app
 
 RUN addgroup -S app \
     && adduser -S -G app -u 10001 app \
-    && mkdir -p /app/data/uploads \
+    && mkdir -p /app/data/uploads /app/data/uploads/review-evidence \
     && chown -R app:app /app
 
 COPY --from=build --chown=app:app /workspace/app.jar /app/app.jar
@@ -37,7 +37,8 @@ COPY --from=build --chown=app:app /workspace/app.jar /app/app.jar
 USER app
 
 ENV SERVER_PORT=8082 \
-    MEDIA_STORAGE_DIR=/app/data/uploads
+    MEDIA_STORAGE_DIR=/app/data/uploads \
+    REVIEW_EVIDENCE_STORAGE_DIR=/app/data/uploads/review-evidence
 
 EXPOSE 8082
 

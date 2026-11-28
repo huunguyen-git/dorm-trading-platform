@@ -87,6 +87,24 @@ class ReviewPolicyUnitTest {
         );
         assertThat(sellerView.canReview()).isFalse();
         assertThat(sellerView.lockReason()).isEqualTo("NOT_BUYER");
+
+        // 6) BI_KHOA buyer -> ACCOUNT_RESTRICTED (all mutations disabled)
+        ReviewPolicy.Capabilities restrictedBuyer = ReviewPolicy.evaluateCapabilities(
+                true, true, false, "HOAN_TAT", completedAt, false, true, "CHAP_NHAN", null, null, null, day5
+        );
+        assertThat(restrictedBuyer.canReview()).isFalse();
+        assertThat(restrictedBuyer.canEdit()).isFalse();
+        assertThat(restrictedBuyer.canDelete()).isFalse();
+        assertThat(restrictedBuyer.lockReason()).isEqualTo("ACCOUNT_RESTRICTED");
+
+        // 7) CHO_KICH_HOAT / non-active buyer -> ACCOUNT_NOT_ACTIVE
+        ReviewPolicy.Capabilities inactiveBuyer = ReviewPolicy.evaluateCapabilities(
+                true, false, false, "HOAN_TAT", completedAt, false, false, null, null, null, null, day5
+        );
+        assertThat(inactiveBuyer.canReview()).isFalse();
+        assertThat(inactiveBuyer.canEdit()).isFalse();
+        assertThat(inactiveBuyer.canDelete()).isFalse();
+        assertThat(inactiveBuyer.lockReason()).isEqualTo("ACCOUNT_NOT_ACTIVE");
     }
 
     @Test

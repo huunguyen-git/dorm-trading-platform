@@ -116,6 +116,10 @@ public class LocalDiskMediaStorage implements MediaStorage {
                     Instant mtime = Files.getLastModifiedTime(path).toInstant();
                     if (mtime.isBefore(cutoff)) {
                         String key = rootDir.relativize(path).toString().replace('\\', '/');
+                        // Never touch private review evidence stored under a dedicated sibling/nested prefix
+                        if ("review-evidence".equals(key) || key.startsWith("review-evidence/")) {
+                            continue;
+                        }
                         batch.add(key);
                         if (batch.size() >= chunkSize) {
                             boolean keepGoing = chunkConsumer.test(List.copyOf(batch));

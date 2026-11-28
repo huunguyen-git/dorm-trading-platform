@@ -1,8 +1,12 @@
 package com.dormtrading.review;
 
+import com.dormtrading.catalog.media.LocalDiskMediaStorage;
+import com.dormtrading.catalog.media.MediaService;
 import com.dormtrading.common.BaseIntegrationTest;
 import com.dormtrading.iam.auth.AuthService;
 import com.dormtrading.iam.auth.OtpDelivery;
+import com.dormtrading.order.OrderNotificationService;
+import com.dormtrading.review.reputation.ReputationLedgerService;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import java.awt.Color;
@@ -10,13 +14,18 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -29,6 +38,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,7 +70,28 @@ class ReviewApiTest extends BaseIntegrationTest {
     private ReviewBonusService bonusService;
 
     @Autowired
+    private ReviewEvidenceService evidenceService;
+
+    @Autowired
     private LocalDiskReviewEvidenceStorage evidenceStorage;
+
+    @Autowired
+    private LocalDiskMediaStorage mediaStorage;
+
+    @Autowired
+    private MediaService mediaService;
+
+    @Autowired
+    private ReputationLedgerService reputationLedger;
+
+    @Autowired
+    private OrderNotificationService notificationService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private Clock clock;
 
     @Autowired
     private JdbcTemplate db;
@@ -310,7 +341,14 @@ class ReviewApiTest extends BaseIntegrationTest {
                 .extract().response();
 
         String rawPublic = publicResp.asString();
-        assertThat(rawPublic).doesNotContain(seller.email(), buyer1.email(), buyer1.studentId(), "/api/v1/reviews/evidence/");
+        assertThat(rawPublic).doesNotContain(
+                seller.email(),
+                buyer1.email(),
+                buyer1.studentId(),
+                "/api/v1/reviews/evidence/",
+                "\"orderId\"",
+                order5.toString()
+        );
     }
 
     @Test
@@ -1014,5 +1052,258 @@ class ReviewApiTest extends BaseIntegrationTest {
                 .put("/api/v1/reviews/" + modReviewId).then().statusCode(409).body("code", equalTo("REVIEW_MODERATED"));
         given().auth().oauth2(buyer.token()).delete("/api/v1/reviews/" + modReviewId)
                 .then().statusCode(409).body("code", equalTo("REVIEW_MODERATED"));
+    }
+
+    @Test
+    void restrictedAccountLockedBuyerFlagsAnd403AcrossAllReviewEndpoints() throws Exception {
+        Account seller = createActiveMember("SellerBiKhoa");
+        Account buyer = createActiveMember("BuyerBiKhoa");
+
+        UUID orderWithReview = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(2)), "Đơn có đánh giá");
+        UUID orderUnreviewed = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(1)), "Đơn chưa đánh giá");
+
+        // While active, buyer creates a review on orderWithReview and uploads a draft evidence on orderUnreviewed
+        UUID reviewId = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .contentType(ContentType.JSON)
+                .body(Map.of("rating", 5, "comment", "Đánh giá trước khi bị khóa"))
+                .post("/api/v1/orders/" + orderWithReview + "/review")
+                .then().statusCode(201).extract().jsonPath().getString("review.id"));
+
+        byte[] jpeg = validJpegWithExifMarker();
+        UUID draftId = UUID.fromString(given()
+                .auth().oauth2(buyer.token())
+                .multiPart("files", "draft.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/orders/" + orderUnreviewed + "/review/evidence")
+                .then().statusCode(201).extract().jsonPath().getString("items[0].id"));
+
+        // Lock buyer account (active 14-day temporary lock)
+        db.update(
+                """
+                UPDATE thanh_viens
+                SET trang_thai_tai_khoan = 'BI_KHOA',
+                    loai_han_che = 'KHOA_TAM_THOI',
+                    khoa_den_ngay = ?,
+                    ly_do_han_che = 'Vi phạm quy chế'
+                WHERE user_id = ?
+                """,
+                Timestamp.from(Instant.now().plus(Duration.ofDays(14))),
+                buyer.id()
+        );
+
+        // GET /orders/{id}/review still returns 200 for buyer, but disables ALL mutation flags with ACCOUNT_RESTRICTED
+        given().auth().oauth2(buyer.token()).get("/api/v1/orders/" + orderWithReview + "/review")
+                .then().statusCode(200)
+                .body("canReview", equalTo(false))
+                .body("canEdit", equalTo(false))
+                .body("canDelete", equalTo(false))
+                .body("lockReason", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token()).get("/api/v1/orders/" + orderUnreviewed + "/review")
+                .then().statusCode(200)
+                .body("canReview", equalTo(false))
+                .body("canEdit", equalTo(false))
+                .body("canDelete", equalTo(false))
+                .body("lockReason", equalTo("ACCOUNT_RESTRICTED"));
+
+        // Every review mutation endpoint returns 403 ACCOUNT_RESTRICTED
+        given().auth().oauth2(buyer.token()).contentType(ContentType.JSON).body(Map.of("rating", 5))
+                .post("/api/v1/orders/" + orderUnreviewed + "/review")
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token()).multiPart("files", "blocked.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/orders/" + orderUnreviewed + "/review/evidence")
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token())
+                .delete("/api/v1/orders/" + orderUnreviewed + "/review/evidence/" + draftId)
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 4, "comment", "Sửa khi bị khóa", "expectedVersion", 0))
+                .put("/api/v1/reviews/" + reviewId)
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+        given().auth().oauth2(buyer.token())
+                .delete("/api/v1/reviews/" + reviewId)
+                .then().statusCode(403).body("code", equalTo("ACCOUNT_RESTRICTED"));
+    }
+
+    @Test
+    void negativeIdorRejectsForeignAndCrossOrderEvidenceOnCreateAndEdit() throws Exception {
+        Account seller = createActiveMember("SellerIdor");
+        Account buyerA = createActiveMember("BuyerIdorA");
+        Account buyerB = createActiveMember("BuyerIdorB");
+
+        UUID orderA1 = createOrder(seller, buyerA, "HOAN_TAT", Instant.now().minus(Duration.ofDays(1)), "Đơn A1");
+        UUID orderA2 = createOrder(seller, buyerA, "HOAN_TAT", Instant.now().minus(Duration.ofDays(1)), "Đơn A2");
+        UUID orderB1 = createOrder(seller, buyerB, "HOAN_TAT", Instant.now().minus(Duration.ofDays(1)), "Đơn B1");
+
+        byte[] jpeg = validJpegWithExifMarker();
+        String evA1 = given()
+                .auth().oauth2(buyerA.token())
+                .multiPart("files", "a1.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/orders/" + orderA1 + "/review/evidence")
+                .then().statusCode(201).extract().jsonPath().getString("items[0].id");
+
+        // 1) Buyer B cannot attach Buyer A's evidence on POST /review
+        given().auth().oauth2(buyerB.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 2, "comment", "IDOR create", "evidenceIds", List.of(evA1)))
+                .post("/api/v1/orders/" + orderB1 + "/review")
+                .then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+
+        // 2) Buyer A cannot attach orderA1's evidence to orderA2 on POST /review
+        given().auth().oauth2(buyerA.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 2, "comment", "Cross-order create", "evidenceIds", List.of(evA1)))
+                .post("/api/v1/orders/" + orderA2 + "/review")
+                .then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+
+        // Create clean reviews on orderB1 and orderA2, then attempt IDOR/cross-order attach on PUT /reviews/{id}
+        String reviewB1 = given().auth().oauth2(buyerB.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 5, "comment", "Hợp lệ B1"))
+                .post("/api/v1/orders/" + orderB1 + "/review")
+                .then().statusCode(201).extract().jsonPath().getString("review.id");
+        String reviewA2 = given().auth().oauth2(buyerA.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 5, "comment", "Hợp lệ A2"))
+                .post("/api/v1/orders/" + orderA2 + "/review")
+                .then().statusCode(201).extract().jsonPath().getString("review.id");
+
+        given().auth().oauth2(buyerB.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 4, "comment", "IDOR edit", "evidenceIds", List.of(evA1), "expectedVersion", 0))
+                .put("/api/v1/reviews/" + reviewB1)
+                .then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+        given().auth().oauth2(buyerA.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 4, "comment", "Cross-order edit", "evidenceIds", List.of(evA1), "expectedVersion", 0))
+                .put("/api/v1/reviews/" + reviewA2)
+                .then().statusCode(400).body("code", equalTo("INVALID_INPUT"));
+
+        // evA1 remains unattached (ma_danh_gia IS NULL)
+        assertThat(db.queryForObject("SELECT ma_danh_gia FROM danh_gia_bang_chungs WHERE id = ?", UUID.class, UUID.fromString(evA1)))
+                .isNull();
+    }
+
+    @Test
+    void draftDeleteOrphanCleanupMediaIsolationAndCorsIdempotencyKeyPreflight() throws Exception {
+        Account seller = createActiveMember("SellerDraft");
+        Account buyer = createActiveMember("BuyerDraft");
+        Account outsider = createActiveMember("OutsiderDraft");
+        UUID orderId = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(1)), "Tủ mini KTX");
+
+        // 1) CORS preflight allows Idempotency-Key header
+        given()
+                .header("Origin", "http://localhost:5173")
+                .header("Access-Control-Request-Method", "POST")
+                .header("Access-Control-Request-Headers", "Authorization, Content-Type, Idempotency-Key")
+                .options("/api/v1/orders/" + orderId + "/review")
+                .then()
+                .statusCode(200)
+                .header("Access-Control-Allow-Headers", containsString("Idempotency-Key"));
+
+        // 2) Upload 4 drafts: dDelete (manual delete), dAttach (attached), dExpired (TTL orphan), dFresh (kept)
+        byte[] jpeg = validJpegWithExifMarker();
+        Response uploaded = given()
+                .auth().oauth2(buyer.token())
+                .multiPart("files", "d1.jpg", jpeg, "image/jpeg")
+                .multiPart("files", "d2.jpg", jpeg, "image/jpeg")
+                .multiPart("files", "d3.jpg", jpeg, "image/jpeg")
+                .multiPart("files", "d4.jpg", jpeg, "image/jpeg")
+                .post("/api/v1/orders/" + orderId + "/review/evidence")
+                .then().statusCode(201).body("items", hasSize(4)).extract().response();
+
+        UUID dDelete = UUID.fromString(uploaded.jsonPath().getString("items[0].id"));
+        UUID dAttach = UUID.fromString(uploaded.jsonPath().getString("items[1].id"));
+        UUID dExpired = UUID.fromString(uploaded.jsonPath().getString("items[2].id"));
+        UUID dFresh = UUID.fromString(uploaded.jsonPath().getString("items[3].id"));
+
+        String deleteKey = db.queryForObject("SELECT storage_key FROM danh_gia_bang_chungs WHERE id = ?", String.class, dDelete);
+        String expiredKey = db.queryForObject("SELECT storage_key FROM danh_gia_bang_chungs WHERE id = ?", String.class, dExpired);
+        String freshKey = db.queryForObject("SELECT storage_key FROM danh_gia_bang_chungs WHERE id = ?", String.class, dFresh);
+
+        // Outsider cannot delete buyer's draft -> 403
+        given().auth().oauth2(outsider.token())
+                .delete("/api/v1/orders/" + orderId + "/review/evidence/" + dDelete)
+                .then().statusCode(403);
+
+        // Buyer deletes unattached draft -> 204, row & disk blob removed (frees quota), repeat -> 404
+        given().auth().oauth2(buyer.token())
+                .delete("/api/v1/orders/" + orderId + "/review/evidence/" + dDelete)
+                .then().statusCode(204);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM danh_gia_bang_chungs WHERE id = ?", Integer.class, dDelete)).isZero();
+        assertThat(evidenceStorage.rootDir().resolve(deleteKey)).doesNotExist();
+        given().auth().oauth2(buyer.token())
+                .delete("/api/v1/orders/" + orderId + "/review/evidence/" + dDelete)
+                .then().statusCode(404).body("code", equalTo("EVIDENCE_NOT_FOUND"));
+
+        // Attach dAttach to a review -> DELETE returns 409 EVIDENCE_ALREADY_ATTACHED
+        given().auth().oauth2(buyer.token()).contentType(ContentType.JSON)
+                .body(Map.of("rating", 5, "comment", "Có ảnh", "evidenceIds", List.of(dAttach.toString())))
+                .post("/api/v1/orders/" + orderId + "/review")
+                .then().statusCode(201);
+        given().auth().oauth2(buyer.token())
+                .delete("/api/v1/orders/" + orderId + "/review/evidence/" + dAttach)
+                .then().statusCode(409).body("code", equalTo("EVIDENCE_ALREADY_ATTACHED"));
+
+        // 3) ReviewEvidenceOrphanCleanupScheduler logic: backdate dExpired by 3h -> cleaned; dFresh & dAttach stay!
+        db.update(
+                "UPDATE danh_gia_bang_chungs SET created_at = ? WHERE id = ?",
+                Timestamp.from(Instant.now().minus(Duration.ofHours(3))),
+                dExpired
+        );
+        int cleaned = evidenceService.cleanupExpiredDraftEvidence(Duration.ofHours(2), 100);
+        assertThat(cleaned).isGreaterThanOrEqualTo(1);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM danh_gia_bang_chungs WHERE id = ?", Integer.class, dExpired)).isZero();
+        assertThat(evidenceStorage.rootDir().resolve(expiredKey)).doesNotExist();
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM danh_gia_bang_chungs WHERE id = ?", Integer.class, dFresh)).isEqualTo(1);
+        assertThat(evidenceStorage.rootDir().resolve(freshKey)).exists();
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM danh_gia_bang_chungs WHERE id = ?", Integer.class, dAttach)).isEqualTo(1);
+
+        // 4) MediaOrphanCleanupScheduler MUST NOT delete files stored under <mediaRoot>/review-evidence/
+        Path nestedReviewEvidenceFile = mediaStorage.rootDir().resolve("review-evidence/2026/01/preserve.jpg");
+        Files.createDirectories(nestedReviewEvidenceFile.getParent());
+        Files.write(nestedReviewEvidenceFile, jpeg);
+        Files.setLastModifiedTime(nestedReviewEvidenceFile, FileTime.from(Instant.now().minus(Duration.ofHours(5))));
+        mediaService.cleanupOrphanFiles(Duration.ofMinutes(1), 100);
+        assertThat(nestedReviewEvidenceFile).exists();
+        Files.deleteIfExists(nestedReviewEvidenceFile);
+    }
+
+    @Test
+    void noReviewBonusSchedulerIsolatesPoisonPillOrdersAndAdvancesCursorToHealthyOrders() {
+        Account seller = createActiveMember("SellerPoison");
+        Account buyer = createActiveMember("BuyerPoison");
+
+        // Create 2 oldest overdue orders (poison pills filling a full batch of size=2) + 1 newer healthy overdue order
+        UUID poison1 = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(40)), "Poison 1");
+        UUID poison2 = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(39)), "Poison 2");
+        UUID healthy = createOrder(seller, buyer, "HOAN_TAT", Instant.now().minus(Duration.ofDays(38)), "Healthy 3");
+
+        Set<UUID> poisonedIds = Set.of(poison1, poison2);
+        ReviewBonusService batch2Service = new ReviewBonusService(
+                db,
+                clock,
+                reputationLedger,
+                notificationService,
+                transactionManager,
+                2
+        ) {
+            @Override
+            public boolean awardNoReviewBonusForOrder(UUID orderId) {
+                if (poisonedIds.contains(orderId)) {
+                    throw new IllegalStateException("Simulated poison-pill failure for " + orderId);
+                }
+                return super.awardNoReviewBonusForOrder(orderId);
+            }
+        };
+
+        // Even though BOTH slots in batch 1 throw exceptions, keyset cursor advances to batch 2 and credits healthy order!
+        int awarded = batch2Service.processAllDueNoReviewBonuses(5);
+        assertThat(awarded).isGreaterThanOrEqualTo(1);
+        assertThat(db.queryForObject(
+                "SELECT da_cong_diem_khong_danh_gia FROM giao_dichs WHERE ma_giao_dich = ?",
+                Boolean.class,
+                healthy
+        )).isTrue();
+        assertThat(db.queryForObject(
+                "SELECT da_cong_diem_khong_danh_gia FROM giao_dichs WHERE ma_giao_dich = ?",
+                Boolean.class,
+                poison1
+        )).isFalse();
+        assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, seller.id()))
+                .isEqualTo(101);
     }
 }

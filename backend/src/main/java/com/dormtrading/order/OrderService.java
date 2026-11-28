@@ -1353,8 +1353,40 @@ public class OrderService {
         Object moderatorId = active != null ? active.get("nguoi_xet_id") : null;
         String complaintStatus = active != null ? (String) active.get("locking_complaint_status") : null;
 
+        Instant current = now();
+        boolean viewerAccountRestricted = false;
+        boolean viewerAccountActive = true;
+        if (viewerIsBuyer) {
+            List<Map<String, Object>> buyerRows = db.queryForList(
+                    """
+                    SELECT trang_thai_tai_khoan, email_verified, profile_approved, loai_han_che, khoa_den_ngay
+                    FROM thanh_viens
+                    WHERE user_id = ?
+                    """,
+                    row.buyerId()
+            );
+            if (buyerRows.isEmpty()) {
+                viewerAccountActive = false;
+            } else {
+                Map<String, Object> buyer = buyerRows.getFirst();
+                String accStatus = String.valueOf(buyer.get("trang_thai_tai_khoan"));
+                boolean emailVerified = Boolean.TRUE.equals(buyer.get("email_verified"));
+                boolean profileApproved = Boolean.TRUE.equals(buyer.get("profile_approved"));
+                Instant lockedUntil = toInstant((Timestamp) buyer.get("khoa_den_ngay"));
+                boolean expiredTempLock = "BI_KHOA".equals(accStatus)
+                        && "KHOA_TAM_THOI".equals(buyer.get("loai_han_che"))
+                        && lockedUntil != null
+                        && !lockedUntil.isAfter(current);
+                viewerAccountRestricted = "BI_KHOA".equals(accStatus) && !expiredTempLock;
+                viewerAccountActive = emailVerified && profileApproved
+                        && ("HOAT_DONG".equals(accStatus) || expiredTempLock);
+            }
+        }
+
         ReviewPolicy.Capabilities caps = ReviewPolicy.evaluateCapabilities(
                 viewerIsBuyer,
+                viewerAccountRestricted,
+                viewerAccountActive,
                 row.status(),
                 row.completedAt(),
                 row.noReviewBonusApplied(),
@@ -1363,7 +1395,7 @@ public class OrderService {
                 moderatedAt,
                 moderatorId,
                 complaintStatus,
-                now()
+                current
         );
 
         boolean hasPendingModeration = active != null

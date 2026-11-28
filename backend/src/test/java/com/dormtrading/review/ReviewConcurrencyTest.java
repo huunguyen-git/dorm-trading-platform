@@ -30,6 +30,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +54,12 @@ class ReviewConcurrencyTest extends BaseIntegrationTest {
 
     @Autowired
     private ReviewBonusService bonusService;
+
+    @Autowired
+    private ReviewService reviewService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private JdbcTemplate db;
@@ -424,5 +432,69 @@ class ReviewConcurrencyTest extends BaseIntegrationTest {
         assertThat(boundaryBonus).isTrue();
         assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, seller.id()))
                 .isEqualTo(105);
+    }
+
+    @Test
+    void expiredTempLockBuyerWithUuidGreaterThanSellerNeverDeadlocksAgainstCanonicalLocks() throws Exception {
+        // Pick two accounts and deterministically assign seller < buyer (lexicographic UUID ASC)
+        Account a1 = createActiveAccount("deadlock_a");
+        Account a2 = createActiveAccount("deadlock_b");
+        Account seller = a1.id().toString().compareTo(a2.id().toString()) < 0 ? a1 : a2;
+        Account buyer = seller == a1 ? a2 : a1;
+        assertThat(buyer.id().toString().compareTo(seller.id().toString())).isGreaterThan(0);
+
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+
+        // Run 5 rounds to thoroughly exercise the seller->buyer canonical lock window with zero 40P01 deadlocks!
+        for (int round = 1; round <= 5; round++) {
+            // Put buyer into BI_KHOA with an ALREADY-EXPIRED 14-day temporary lock right before ReviewService entry
+            db.update(
+                    """
+                    UPDATE thanh_viens
+                    SET trang_thai_tai_khoan = 'BI_KHOA',
+                        loai_han_che = 'KHOA_TAM_THOI',
+                        khoa_den_ngay = ?,
+                        ly_do_han_che = 'Khóa tạm đã hết hạn'
+                    WHERE user_id = ?
+                    """,
+                    Timestamp.from(Instant.now().minusSeconds(60)),
+                    buyer.id()
+            );
+
+            UUID orderId = createCompletedOrder(seller, buyer, Instant.now().minus(Duration.ofDays(1)));
+            int finalRound = round;
+
+            // Thread 1: ReviewService.createReview (must lock seller FIRST, then buyer, THEN reconcile temp lock)
+            // Thread 2: Canonical-order transaction locking seller FOR UPDATE -> brief pause -> buyer FOR UPDATE
+            List<String> results = runSimultaneously(List.of(
+                    () -> {
+                        var resp = reviewService.createReview(
+                                buyer.id(),
+                                orderId,
+                                new ReviewDtos.CreateReviewRequest(5, "Đánh giá sau hết khóa tạm vòng " + finalRound, null, null),
+                                null
+                        );
+                        return resp.review().status();
+                    },
+                    () -> tx.execute(status -> {
+                        db.queryForList("SELECT user_id FROM thanh_viens WHERE user_id = ? FOR UPDATE", UUID.class, seller.id());
+                        try {
+                            Thread.sleep(15);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        db.queryForList("SELECT user_id FROM thanh_viens WHERE user_id = ? FOR UPDATE", UUID.class, buyer.id());
+                        return "CANONICAL_OK";
+                    })
+            ));
+
+            assertThat(results).containsExactly("CHAP_NHAN", "CANONICAL_OK");
+            assertThat(db.queryForObject("SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?", String.class, buyer.id()))
+                    .isEqualTo("HOAT_DONG");
+        }
+
+        // Seller received +2 across all 5 rounds (100 -> 110) with zero deadlocks
+        assertThat(db.queryForObject("SELECT diem_uy_tin FROM thanh_viens WHERE user_id = ?", Integer.class, seller.id()))
+                .isEqualTo(110);
     }
 }

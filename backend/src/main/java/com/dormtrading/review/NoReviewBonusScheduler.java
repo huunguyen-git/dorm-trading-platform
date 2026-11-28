@@ -28,14 +28,7 @@ public class NoReviewBonusScheduler {
 
     @Scheduled(fixedDelayString = "${app.review.no-review-bonus-delay-ms:60000}")
     public void processNoReviewBonuses() {
-        int totalAwarded = 0;
-        for (int i = 0; i < MAX_BATCHES_PER_TICK; i++) {
-            int awarded = bonusService.processDueNoReviewBonuses();
-            totalAwarded += awarded;
-            if (awarded == 0) {
-                break;
-            }
-        }
+        int totalAwarded = bonusService.processAllDueNoReviewBonuses(MAX_BATCHES_PER_TICK);
         if (totalAwarded > 0) {
             log.info("FR-10 scheduled no-review bonus credited +1 to {} completed order(s)", totalAwarded);
         }

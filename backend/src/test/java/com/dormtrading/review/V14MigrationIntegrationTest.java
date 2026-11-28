@@ -107,6 +107,8 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                       'idx_danh_gia_phien_bans_review',
                       'idx_danh_gia_bang_chungs_review',
                       'idx_danh_gia_bang_chungs_order_uploader',
+                      'idx_danh_gia_bang_chungs_uploader',
+                      'idx_danh_gia_bang_chungs_draft_created',
                       'idx_khieu_nais_danh_gia_trang_thai',
                       'idx_quyet_dinhs_khieu_nai'
                   )
@@ -122,6 +124,8 @@ class V14MigrationIntegrationTest extends BaseIntegrationTest {
                 "idx_danh_gia_phien_bans_review",
                 "idx_danh_gia_bang_chungs_review",
                 "idx_danh_gia_bang_chungs_order_uploader",
+                "idx_danh_gia_bang_chungs_uploader",
+                "idx_danh_gia_bang_chungs_draft_created",
                 "idx_khieu_nais_danh_gia_trang_thai",
                 "idx_quyet_dinhs_khieu_nai"
         );

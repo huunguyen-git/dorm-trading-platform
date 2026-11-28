@@ -170,6 +170,13 @@ CREATE INDEX IF NOT EXISTS idx_danh_gia_bang_chungs_review
 CREATE INDEX IF NOT EXISTS idx_danh_gia_bang_chungs_order_uploader
   ON danh_gia_bang_chungs(ma_giao_dich, nguoi_tai_len_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_danh_gia_bang_chungs_uploader
+  ON danh_gia_bang_chungs(nguoi_tai_len_id);
+
+CREATE INDEX IF NOT EXISTS idx_danh_gia_bang_chungs_draft_created
+  ON danh_gia_bang_chungs(created_at ASC, id ASC)
+  WHERE ma_danh_gia IS NULL;
+
 -- 5. Chỉ mục hỗ trợ kiểm tra khóa khiếu nại & quyết định kiểm duyệt (P3-04 <-> P3-05)
 CREATE INDEX IF NOT EXISTS idx_khieu_nais_danh_gia_trang_thai
   ON khieu_nais(ma_danh_gia, trang_thai);

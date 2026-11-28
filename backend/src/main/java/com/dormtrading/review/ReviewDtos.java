@@ -24,6 +24,8 @@ public final class ReviewDtos {
     public enum ReviewLockReason {
         ORDER_NOT_COMPLETED,
         NOT_BUYER,
+        ACCOUNT_RESTRICTED,
+        ACCOUNT_NOT_ACTIVE,
         REVIEW_WINDOW_EXPIRED,
         NO_REVIEW_BONUS_APPLIED,
         REVIEW_MODERATED,
@@ -144,11 +146,10 @@ public final class ReviewDtos {
 
     /**
      * Public seller review item complying with NFR-01:
-     * only CHAP_NHAN reviews, zero PII, zero private evidence IDs or URLs.
+     * only CHAP_NHAN reviews, zero PII, zero orderId, zero private evidence IDs or URLs.
      */
     public record PublicSellerReviewItemDto(
             UUID id,
-            UUID orderId,
             UUID listingId,
             String listingTitle,
             String buyerDisplayName,

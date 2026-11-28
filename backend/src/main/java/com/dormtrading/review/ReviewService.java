@@ -807,7 +807,7 @@ public class ReviewService {
 
         List<ReviewDtos.PublicSellerReviewItemDto> items = db.query(
                 """
-                SELECT d.ma_danh_gia, d.ma_giao_dich, g.ma_tin, t.tieu_de AS listing_title,
+                SELECT d.ma_danh_gia, g.ma_tin, t.tieu_de AS listing_title,
                        b.ho_ten AS buyer_name, d.so_sao, d.nhan_xet, d.phien_ban_hien_tai,
                        COALESCE(d.thoi_diem_cong_khai, d.thoi_diem_tao) AS published_at,
                        d.thoi_diem_tao, d.updated_at
@@ -820,7 +820,6 @@ public class ReviewService {
                         + " ORDER BY COALESCE(d.thoi_diem_cong_khai, d.thoi_diem_tao) DESC, d.ma_danh_gia DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> new ReviewDtos.PublicSellerReviewItemDto(
                         rs.getObject("ma_danh_gia", UUID.class),
-                        rs.getObject("ma_giao_dich", UUID.class),
                         rs.getObject("ma_tin", UUID.class),
                         rs.getString("listing_title"),
                         rs.getString("buyer_name"),
@@ -860,6 +859,11 @@ public class ReviewService {
                 SELECT g.ma_giao_dich, g.ma_tin, t.tieu_de AS listing_title, g.trang_thai,
                        g.nguoi_ban_id, s.ho_ten AS seller_name, s.diem_uy_tin AS seller_score,
                        g.nguoi_mua_id, b.ho_ten AS buyer_name, b.diem_uy_tin AS buyer_score,
+                       b.trang_thai_tai_khoan AS buyer_account_status,
+                       b.email_verified AS buyer_email_verified,
+                       b.profile_approved AS buyer_profile_approved,
+                       b.loai_han_che AS buyer_lock_type,
+                       b.khoa_den_ngay AS buyer_locked_until,
                        g.thoi_diem_hoan_tat, g.da_cong_diem_khong_danh_gia, g.thoi_diem_cong_diem_khong_danh_gia
                 FROM giao_dichs g
                 JOIN tin_dangs t ON t.ma_tin = g.ma_tin
@@ -882,16 +886,33 @@ public class ReviewService {
             throw new AuthFailure(403, "FORBIDDEN", "Bạn không có quyền xem thông tin đánh giá của giao dịch này.");
         }
 
+        Instant current = now();
         String orderStatus = String.valueOf(order.get("trang_thai"));
         Instant completedAt = toInstant((Timestamp) order.get("thoi_diem_hoan_tat"));
         boolean bonusApplied = Boolean.TRUE.equals(order.get("da_cong_diem_khong_danh_gia"));
         Instant bonusAppliedAt = toInstant((Timestamp) order.get("thoi_diem_cong_diem_khong_danh_gia"));
+
+        String buyerAccStatus = String.valueOf(order.get("buyer_account_status"));
+        boolean buyerEmailVerified = Boolean.TRUE.equals(order.get("buyer_email_verified"));
+        boolean buyerProfileApproved = Boolean.TRUE.equals(order.get("buyer_profile_approved"));
+        Instant buyerLockedUntil = toInstant((Timestamp) order.get("buyer_locked_until"));
+        boolean buyerExpiredTempLock = "BI_KHOA".equals(buyerAccStatus)
+                && "KHOA_TAM_THOI".equals(order.get("buyer_lock_type"))
+                && buyerLockedUntil != null
+                && !buyerLockedUntil.isAfter(current);
+        boolean viewerAccountRestricted = isBuyer && "BI_KHOA".equals(buyerAccStatus) && !buyerExpiredTempLock;
+        boolean viewerAccountActive = isBuyer
+                && buyerEmailVerified
+                && buyerProfileApproved
+                && ("HOAT_DONG".equals(buyerAccStatus) || buyerExpiredTempLock);
 
         LockedReview activeReview = findActiveReviewForOrder(orderId);
         String lockingComplaintStatus = activeReview != null ? findLockingComplaintStatus(activeReview.id()) : null;
 
         ReviewPolicy.Capabilities caps = ReviewPolicy.evaluateCapabilities(
                 isBuyer,
+                viewerAccountRestricted,
+                viewerAccountActive,
                 orderStatus,
                 completedAt,
                 bonusApplied,
@@ -900,7 +921,7 @@ public class ReviewService {
                 activeReview != null ? activeReview.moderatedAt() : null,
                 activeReview != null ? activeReview.moderatorId() : null,
                 lockingComplaintStatus,
-                now()
+                current
         );
 
         boolean hasPendingModeration = activeReview != null
@@ -1294,23 +1315,61 @@ public class ReviewService {
     }
 
     /**
-     * Acquires row locks on {@code thanh_viens} in canonical ascending UUID order BEFORE any
-     * {@code giao_dichs} or {@code danh_gias} lock:
-     * - Seller receives {@code FOR UPDATE} (matches {@link ReputationLedgerService#recordScoreChange}
-     *   so no lock upgrade occurs mid-transaction).
-     * - Buyer receives {@code FOR KEY SHARE} and active-account verification.
+     * Acquires row locks on {@code thanh_viens} in strict canonical ascending UUID order BEFORE any
+     * {@code giao_dichs} or {@code danh_gias} lock, eliminating AB-BA deadlocks even when
+     * {@code buyerId > sellerId} and the buyer's 14-day temporary lock has just expired:
+     * - Seller always receives {@code FOR UPDATE} (matches {@link ReputationLedgerService#recordScoreChange}).
+     * - Buyer receives {@code FOR UPDATE} (and runs expired-temp-lock reconciliation AFTER taking the
+     *   canonical-position lock) when currently {@code BI_KHOA}; otherwise receives {@code FOR KEY SHARE}.
      */
     private void lockSellerAndVerifyBuyerCanonical(UUID buyerId, UUID sellerId) {
-        reputationLedger.reconcileExpiredTemporaryLock(buyerId);
+        boolean buyerLockedForReconcile = isBuyerLockedReadOnly(buyerId);
         if (buyerId.toString().compareTo(sellerId.toString()) < 0) {
-            List<Map<String, Object>> buyerRows = lockBuyerForKeyShare(buyerId);
+            List<Map<String, Object>> buyerRows = lockAndMaybeReconcileBuyer(buyerId, buyerLockedForReconcile);
             evaluateActiveBuyer(buyerRows);
             lockSellerForUpdate(sellerId);
         } else {
             lockSellerForUpdate(sellerId);
-            List<Map<String, Object>> buyerRows = lockBuyerForKeyShare(buyerId);
+            List<Map<String, Object>> buyerRows = lockAndMaybeReconcileBuyer(buyerId, buyerLockedForReconcile);
             evaluateActiveBuyer(buyerRows);
         }
+    }
+
+    private boolean isBuyerLockedReadOnly(UUID buyerId) {
+        List<String> rows = db.queryForList(
+                "SELECT trang_thai_tai_khoan FROM thanh_viens WHERE user_id = ?",
+                String.class,
+                buyerId
+        );
+        return !rows.isEmpty() && "BI_KHOA".equals(rows.getFirst());
+    }
+
+    private List<Map<String, Object>> lockAndMaybeReconcileBuyer(UUID buyerId, boolean lockForUpdate) {
+        if (!lockForUpdate) {
+            return lockBuyerForKeyShare(buyerId);
+        }
+        List<Map<String, Object>> lockedRows = db.queryForList(
+                """
+                SELECT user_id, diem_uy_tin, trang_thai_tai_khoan, email_verified, profile_approved,
+                       khoa_den_ngay, loai_han_che, ly_do_han_che, cho_phep_khieu_nai
+                FROM thanh_viens
+                WHERE user_id = ?
+                FOR UPDATE
+                """,
+                buyerId
+        );
+        if (!lockedRows.isEmpty() && reputationLedger.reconcileExpiredTemporaryLock(buyerId)) {
+            return db.queryForList(
+                    """
+                    SELECT user_id, diem_uy_tin, trang_thai_tai_khoan, email_verified, profile_approved,
+                           khoa_den_ngay, loai_han_che, ly_do_han_che, cho_phep_khieu_nai
+                    FROM thanh_viens
+                    WHERE user_id = ?
+                    """,
+                    buyerId
+            );
+        }
+        return lockedRows;
     }
 
     private List<Map<String, Object>> lockBuyerForKeyShare(UUID buyerId) {
