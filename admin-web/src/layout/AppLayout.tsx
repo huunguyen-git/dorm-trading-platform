@@ -7,6 +7,8 @@ import type { User } from '../auth/session';
 import { rolePages } from '../config/rolePages';
 import ModeratorsPage from '../gov/ModeratorsPage';
 import PenaltiesPage from '../gov/PenaltiesPage';
+import DisputeDetailPage from '../disputes/DisputeDetailPage';
+import DisputesQueuePage from '../disputes/DisputesQueuePage';
 import RolePage from '../pages/RolePage';
 import PendingProfilesPage from '../profiles/PendingProfilesPage';
 import ProfileDetailPage from '../profiles/ProfileDetailPage';
@@ -15,6 +17,7 @@ function ProtectedPage({ user, permission, detail = false }: { user: User; permi
   const allowed = rolePages[user.role].some((page) => page.path === permission);
   if (!allowed) return <Navigate to="/account" replace />;
   if (permission === 'profiles') return detail ? <ProfileDetailPage /> : <PendingProfilesPage />;
+  if (permission === 'disputes') return detail ? <DisputeDetailPage /> : <DisputesQueuePage />;
   if (permission === 'users') return <UsersManagementPage />;
   if (permission === 'moderators') return <ModeratorsPage />;
   if (permission === 'penalties') return <PenaltiesPage />;
@@ -46,7 +49,9 @@ export default function AppLayout() {
     <Route path="/" element={<Navigate to="/account" replace />} /><Route path="/account" element={account} />
     <Route path="/profiles" element={<ProtectedPage user={user} permission="profiles" />} />
     <Route path="/profiles/:id" element={<ProtectedPage user={user} permission="profiles" detail />} />
-    {pages.filter((page) => page.path !== 'profiles').map((page) => <Route key={page.path} path={`/${page.path}`} element={<ProtectedPage user={user} permission={page.path} />} />)}
+    <Route path="/disputes" element={<ProtectedPage user={user} permission="disputes" />} />
+    <Route path="/disputes/:id" element={<ProtectedPage user={user} permission="disputes" detail />} />
+    {pages.filter((page) => page.path !== 'profiles' && page.path !== 'disputes').map((page) => <Route key={page.path} path={`/${page.path}`} element={<ProtectedPage user={user} permission={page.path} />} />)}
     <Route path="*" element={<Navigate to="/account" replace />} />
   </Routes></main></div>;
 }
