@@ -11,7 +11,11 @@ export class ApiError extends Error {
     super(message);
   }
 }
-const baseUrl = () => { const url = import.meta.env.VITE_API_URL; if (!url) throw new Error('VITE_API_URL is required'); return url; };
+const baseUrl = () => {
+  const url = import.meta.env.VITE_API_URL?.trim().replace(/\/+$/, '');
+  if (!url) throw new Error('VITE_API_URL is required');
+  return url;
+};
 function hasBearerChallenge(response: Response): boolean {
   const header = response.headers?.get('WWW-Authenticate') ?? response.headers?.get('www-authenticate');
   return typeof header === 'string' && /^Bearer(?:\s|$)/i.test(header.trim());

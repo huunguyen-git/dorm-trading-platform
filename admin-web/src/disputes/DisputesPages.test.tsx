@@ -1,14 +1,17 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { api, ApiError, attachment } from '../api/client';
 import App from '../App';
 import { rolePages } from '../config/rolePages';
 import {
+  formatCancelReasonCode,
   formatCancelStatus,
   formatItemStatus,
   formatListingStatus,
   formatScheduleStatus,
+  formatTimelineAction,
+  loadEvidenceBlobUrl,
   normalizeApiPath,
 } from './api';
 import DisputeDetailPage from './DisputeDetailPage';
@@ -233,6 +236,8 @@ beforeEach(() => {
 afterEach(() => {
   createObjectURLSpy.mockRestore();
   revokeObjectURLSpy.mockRestore();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 function renderQueue(state?: { done?: string }) {
@@ -258,22 +263,54 @@ function renderDetail(orderId = ORDER_ID) {
 }
 
 describe('normalizeApiPath & status formatters', () => {
-  it('strips leading /api/v1 before passing paths to attachment()', () => {
+  it('strips leading /api/v1 only for relative or same-origin URLs and keeps cross-origin URLs intact', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.com/api/v1/');
+
     expect(normalizeApiPath('/api/v1/admin/disputes/123/evidence/handover/p1')).toBe(
       '/admin/disputes/123/evidence/handover/p1',
     );
     expect(normalizeApiPath('/admin/disputes/123/evidence/supplementary/a1')).toBe(
       '/admin/disputes/123/evidence/supplementary/a1',
     );
-    expect(normalizeApiPath('https://api.example.com/api/v1/admin/disputes/123/evidence/handover/p1')).toBe(
-      '/admin/disputes/123/evidence/handover/p1',
+    expect(normalizeApiPath('https://api.example.com/api/v1/admin/disputes/123/evidence/handover/p1?v=1')).toBe(
+      '/admin/disputes/123/evidence/handover/p1?v=1',
     );
+    // Cross-origin legacy URL must NOT be stripped or sent through authenticated attachment()
+    expect(normalizeApiPath('https://cdn.example.com/legacy/handover-1.jpg')).toBe(
+      'https://cdn.example.com/legacy/handover-1.jpg',
+    );
+    expect(normalizeApiPath('https://cdn.example.com/api/v1/legacy/handover-2.jpg')).toBe(
+      'https://cdn.example.com/api/v1/legacy/handover-2.jpg',
+    );
+
+    await expect(loadEvidenceBlobUrl('https://cdn.example.com/legacy/handover-1.jpg')).resolves.toBe(
+      'https://cdn.example.com/legacy/handover-1.jpg',
+    );
+    expect(mockedAttachment).not.toHaveBeenCalled();
   });
 
-  it('formats V13/V14 schedule, cancel, listing, and item statuses into Vietnamese without raw enum leaks', () => {
+  it('normalizes trailing slashes in VITE_API_URL inside client baseUrl()', async () => {
+    vi.stubEnv('VITE_API_URL', '  http://localhost:8082/api/v1///  ');
+    const fetchSpy = vi.fn().mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const actualClient = await vi.importActual<typeof import('../api/client')>('../api/client');
+    await expect(actualClient.api('/admin/disputes')).resolves.toEqual({ ok: true });
+    expect(fetchSpy).toHaveBeenCalledWith('http://localhost:8082/api/v1/admin/disputes', expect.any(Object));
+  });
+
+  it('formats V13/V14 schedule, cancel, reasonCode, timeline, listing, and item statuses into Vietnamese without raw enum leaks', () => {
     expect(formatScheduleStatus('DA_XAC_NHAN')).toBe('Đã xác nhận');
     expect(formatScheduleStatus('DA_THAY_THE')).toBe('Đã thay thế');
     expect(formatCancelStatus('CHO_XAC_NHAN')).toBe('Chờ xác nhận');
+    expect(formatCancelStatus('DA_DONG_DO_HUY')).toBe('Đã đóng do hủy giao dịch');
+    expect(formatCancelReasonCode('ITEM_NOT_AS_DESCRIBED')).toBe('Sản phẩm không đúng mô tả');
+    expect(formatCancelReasonCode('DEFECT_AT_HANDOVER')).toBe('Phát hiện lỗi/hư hỏng khi bàn giao');
+    expect(formatCancelReasonCode('COMBO_MISSING_ITEM')).toBe('Combo thiếu đồ vật thành phần');
+    expect(formatCancelReasonCode('MUTUAL_AGREEMENT')).toBe('Hai bên thỏa thuận hủy');
+    expect(formatCancelReasonCode('OTHER')).toBe('Lý do khác');
+    expect(formatCancelReasonCode(null)).toBe('');
+    expect(formatTimelineAction('CANCEL_DISPUTE_ESCALATED')).toBe('Chuyển tranh chấp hủy lên kiểm duyệt');
     expect(formatListingStatus('CHO_DUYET')).toBe('Chờ duyệt');
     expect(formatListingStatus('DA_RUT')).toBe('Đã rút');
     expect(formatListingStatus('HET_HAN')).toBe('Hết hạn');
@@ -363,6 +400,37 @@ describe('DisputesQueuePage', () => {
       await screen.findByText('Hiện không có giao dịch quá hạn hoặc tranh chấp nào cần xem xét.'),
     ).toBeInTheDocument();
   });
+
+  it('enforces maxLength=200 on search input and recovers cleanly when page > 0 becomes empty', async () => {
+    const page0: DisputePage = {
+      ...makeQueuePage([makeSummary()]),
+      page: 0,
+      totalElements: 21,
+      totalPages: 2,
+    };
+    const emptyPage1: DisputePage = {
+      ...makeQueuePage([]),
+      page: 1,
+      totalElements: 20,
+      totalPages: 1,
+    };
+
+    mockedApi.mockResolvedValueOnce(page0).mockResolvedValueOnce(emptyPage1).mockResolvedValueOnce(page0);
+
+    renderQueue();
+
+    expect(await screen.findByText('Bàn học gỗ KTX khu B')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tìm kiếm hồ sơ')).toHaveAttribute('maxlength', '200');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trang sau' }));
+    expect(await screen.findByText('Trang 2 hiện không còn hồ sơ tranh chấp nào.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quay về trang đầu' }));
+    await waitFor(() =>
+      expect(mockedApi).toHaveBeenLastCalledWith('/admin/disputes?reason=ALL&queueState=ALL&q=&page=0&size=20'),
+    );
+    expect(await screen.findByText('Bàn học gỗ KTX khu B')).toBeInTheDocument();
+  });
 });
 
 describe('DisputeDetailPage', () => {
@@ -374,9 +442,13 @@ describe('DisputeDetailPage', () => {
 
     expect(await screen.findByRole('heading', { name: /Bàn học gỗ KTX khu B/ })).toBeInTheDocument();
     expect(screen.getByText(/Quyết định trong UC-29 không làm thay đổi điểm uy tín của hai bên/)).toBeInTheDocument();
+    expect(screen.getByText(/\(UC-35\/UC-36\/UC-37\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/UC-25\/UC-26/)).not.toBeInTheDocument();
     expect(screen.getByText('Bàn học gấp gọn màu sồi')).toBeInTheDocument();
     expect(screen.getByText(/Đã bàn giao tận tay tại sảnh B3/)).toBeInTheDocument();
     expect(screen.getByText(/Mình xuống sảnh trước giờ học\./)).toBeInTheDocument();
+    expect(screen.getByText(/\[Sản phẩm không đúng mô tả\]/)).toBeInTheDocument();
+    expect(screen.queryByText(/\[ITEM_NOT_AS_DESCRIBED\]/)).not.toBeInTheDocument();
     expect(screen.getByText(/Mặt bàn có vết trầy nhỏ ở góc/)).toBeInTheDocument();
     expect(screen.getByText('Cung cấp ảnh cận cảnh góc bàn bị trầy.')).toBeInTheDocument();
     expect(screen.getByText('Anh để em 220k sáng mai em lấy tại sảnh B3 nhé.')).toBeInTheDocument();
@@ -727,6 +799,282 @@ describe('DisputeDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Quay lại hàng đợi tranh chấp' }));
     expect(await screen.findByText('Hàng đợi tranh chấp')).toBeInTheDocument();
+  });
+
+  it('renders cross-origin legacy handover photos directly without attachment() Bearer fetch and enforces UC-29 §3.3 via onLoad/onError', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://localhost:8082/api/v1');
+    const externalUrl = 'https://cdn.example.com/legacy/handover-1.jpg';
+    mockedApi.mockResolvedValueOnce(
+      makeDetail({
+        evidenceRequests: [],
+        handoverPhotos: [
+          {
+            id: 'legacy-1',
+            url: externalUrl,
+            contentType: 'image/jpeg',
+            sizeBytes: 64000,
+            uploadedAt: '2026-11-24T07:58:00Z',
+          },
+        ],
+      }),
+    );
+
+    const view = renderDetail();
+
+    const img = await screen.findByAltText('Ảnh bàn giao #1');
+    expect(img).toHaveAttribute('src', externalUrl);
+    expect(mockedAttachment).not.toHaveBeenCalled();
+
+    // Still loading -> decision buttons disabled until browser confirms image loaded
+    expect(screen.getByTestId('decision-complete-btn')).toBeDisabled();
+    expect(screen.getByTestId('decision-cancel-btn')).toBeDisabled();
+
+    // If image fails to render -> UC-29 §3.3 alert appears and buttons remain blocked
+    fireEvent.error(img);
+    expect(await screen.findByTestId('media-error-alert')).toHaveTextContent('Không tải được ảnh bằng chứng');
+    expect(screen.getByTestId('decision-complete-btn')).toBeDisabled();
+
+    // Retry re-renders the direct image; onLoad unlocks decision buttons
+    fireEvent.click(screen.getByTestId('retry-evidence-media'));
+    const retriedImg = await screen.findByAltText('Ảnh bàn giao #1');
+    expect(retriedImg).toHaveAttribute('src', externalUrl);
+    fireEvent.load(retriedImg);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('media-error-alert')).not.toBeInTheDocument();
+      expect(screen.getByTestId('decision-complete-btn')).toBeEnabled();
+      expect(screen.getByTestId('decision-cancel-btn')).toBeEnabled();
+    });
+    expect(mockedAttachment).not.toHaveBeenCalled();
+
+    view.unmount();
+    expect(revokeObjectURLSpy).not.toHaveBeenCalledWith(externalUrl);
+  });
+
+  it('omits decision-blocking copy in media-error-alert when dispute is already resolved (!decidable)', async () => {
+    mockedApi.mockResolvedValueOnce(
+      makeDetail({
+        status: 'HOAN_TAT',
+        queueState: 'RESOLVED',
+        decidable: false,
+        evidenceRequests: [],
+      }),
+    );
+    mockedAttachment.mockRejectedValueOnce(new ApiError(502, 'Storage error'));
+
+    renderDetail();
+
+    const alert = await screen.findByTestId('media-error-alert');
+    expect(alert).toHaveTextContent('Không tải được ảnh bằng chứng (1/1 ảnh).');
+    expect(alert).not.toHaveTextContent('chưa cho phép ra quyết định');
+    expect(alert).not.toHaveTextContent('UC-29 §3.3');
+  });
+
+  it('separates dueInHours ARIA error from instruction input on evidence request validation', async () => {
+    mockedApi.mockResolvedValueOnce(makeDetail({ handoverPhotos: [], evidenceRequests: [] }));
+
+    renderDetail();
+
+    await screen.findByTestId('submit-evidence-request-btn');
+
+    const instructionInput = screen.getByLabelText(/Nội dung cần cung cấp/);
+    const dueHoursInput = screen.getByLabelText(/Thời hạn phản hồi/);
+
+    fireEvent.change(instructionInput, {
+      target: { value: 'Đề nghị người mua gửi thêm ảnh góc bàn còn lại.' },
+    });
+    fireEvent.change(dueHoursInput, { target: { value: '0' } });
+    fireEvent.click(screen.getByTestId('submit-evidence-request-btn'));
+
+    expect(await screen.findByText(/Thời hạn bổ sung phải là số nguyên từ 1 đến 168 giờ/)).toBeInTheDocument();
+    expect(dueHoursInput).toHaveAttribute('aria-invalid', 'true');
+    expect(dueHoursInput).toHaveAttribute('aria-describedby', 'evidence-due-hours-error');
+    expect(instructionInput).toHaveAttribute('aria-invalid', 'false');
+    expect(instructionInput).not.toHaveAttribute('aria-describedby');
+    expect(mockedApi.mock.calls.some(([path]) => String(path).endsWith('/request-evidence'))).toBe(false);
+  });
+
+  it('prevents synchronous double-submit on decision & evidence actions and keeps Panel B label isolated via activeAction', async () => {
+    let resolveComplete!: (value: DisputeDetail) => void;
+    const completeDeferred = new Promise<DisputeDetail>((resolve) => {
+      resolveComplete = resolve;
+    });
+    const initial = makeDetail({ handoverPhotos: [], evidenceRequests: [] });
+    const resolved = makeDetail({
+      handoverPhotos: [],
+      evidenceRequests: [],
+      status: 'HOAN_TAT',
+      queueState: 'RESOLVED',
+      decidable: false,
+      version: 6,
+      decision: {
+        id: 'dec-sync',
+        conclusion: 'HOAN_TAT',
+        basis: 'Căn cứ hợp lệ đầy đủ sau khi kiểm tra biên nhận và ảnh bàn giao.',
+        decidedById: 'mod-1',
+        decidedByName: 'KDV Lê Hòa',
+        decidedAt: '2026-11-26T10:00:00Z',
+        listingStatusAfter: 'KET_THUC',
+        listingHiddenReason: null,
+      },
+    });
+    mockedApi.mockResolvedValueOnce(initial).mockReturnValueOnce(completeDeferred);
+
+    const view = renderDetail();
+
+    fireEvent.click(await screen.findByTestId('decision-complete-btn'));
+    fireEvent.change(screen.getByLabelText(/Căn cứ quyết định/), {
+      target: { value: 'Căn cứ hợp lệ đầy đủ sau khi kiểm tra biên nhận và ảnh bàn giao.' },
+    });
+    fireEvent.click(screen.getByTestId('decision-review-btn'));
+    const confirmBtn = await screen.findByTestId('decision-confirm-submit-btn');
+
+    // Synchronous double-click before React re-renders disabled state
+    fireEvent.click(confirmBtn);
+    fireEvent.click(confirmBtn);
+
+    const completeCalls = mockedApi.mock.calls.filter(([path]) => String(path).endsWith('/complete'));
+    expect(completeCalls).toHaveLength(1);
+    expect(screen.getByTestId('decision-confirm-submit-btn')).toHaveTextContent('Đang lưu quyết định…');
+    // Panel B must remain disabled without changing its own label to "Đang gửi yêu cầu…"
+    expect(screen.getByTestId('submit-evidence-request-btn')).toBeDisabled();
+    expect(screen.getByTestId('submit-evidence-request-btn')).toHaveTextContent('Gửi yêu cầu bổ sung');
+
+    await act(async () => {
+      resolveComplete(resolved);
+    });
+    expect(await screen.findByText('QUYẾT ĐỊNH ĐÃ GHI NHẬN')).toBeInTheDocument();
+    view.unmount();
+
+    // Also verify synchronous double-submit guard on evidence request form
+    mockedApi.mockReset();
+    let resolveEvidence!: (value: DisputeDetail) => void;
+    const evidenceDeferred = new Promise<DisputeDetail>((resolve) => {
+      resolveEvidence = resolve;
+    });
+    mockedApi.mockResolvedValueOnce(initial).mockReturnValueOnce(evidenceDeferred);
+
+    renderDetail();
+    const submitEvidenceBtn = await screen.findByTestId('submit-evidence-request-btn');
+    fireEvent.change(screen.getByLabelText(/Nội dung cần cung cấp/), {
+      target: { value: 'Bổ sung ảnh chụp hóa đơn hoặc tin nhắn xác nhận.' },
+    });
+    const evidenceForm = submitEvidenceBtn.closest('form')!;
+    fireEvent.submit(evidenceForm);
+    fireEvent.submit(evidenceForm);
+
+    const evidenceCalls = mockedApi.mock.calls.filter(([path]) => String(path).endsWith('/request-evidence'));
+    expect(evidenceCalls).toHaveLength(1);
+    expect(screen.getByTestId('submit-evidence-request-btn')).toHaveTextContent('Đang gửi yêu cầu…');
+
+    await act(async () => {
+      resolveEvidence(makeDetail({ handoverPhotos: [], evidenceRequests: [], hasActiveEvidenceRequest: true }));
+    });
+    expect(await screen.findByTestId('active-evidence-lock-notice')).toBeInTheDocument();
+  });
+
+  it('discards stale mutation response after switching :id and clears stale alert on subsequent submit', async () => {
+    let resolveFirstPost!: (value: DisputeDetail) => void;
+    const firstPostDeferred = new Promise<DisputeDetail>((resolve) => {
+      resolveFirstPost = resolve;
+    });
+
+    const firstDetail = makeDetail({
+      orderId: ORDER_ID,
+      handoverPhotos: [],
+      evidenceRequests: [],
+    });
+    const firstResolved = makeDetail({
+      orderId: ORDER_ID,
+      handoverPhotos: [],
+      evidenceRequests: [],
+      status: 'HOAN_TAT',
+      queueState: 'RESOLVED',
+      decidable: false,
+      version: 6,
+    });
+    const secondDetail = makeDetail({
+      orderId: SECOND_ORDER_ID,
+      handoverPhotos: [],
+      evidenceRequests: [],
+      listing: {
+        id: 'listing-2',
+        title: 'Đèn bàn chống cận Rạng Đông',
+        listedPriceVnd: 150000,
+        isCombo: false,
+        isFree: false,
+        status: 'GIU_CHO',
+        thumbnailUrl: null,
+      },
+    });
+
+    mockedApi.mockImplementation((path) => {
+      if (path === `/admin/disputes/${ORDER_ID}`) return Promise.resolve(firstDetail);
+      if (path === `/admin/disputes/${ORDER_ID}/complete`) return firstPostDeferred;
+      if (path === `/admin/disputes/${SECOND_ORDER_ID}`) return Promise.resolve(secondDetail);
+      return Promise.reject(new ApiError(500, 'Unexpected call'));
+    });
+
+    function SwitchableHarness() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button type="button" onClick={() => navigate(`/disputes/${SECOND_ORDER_ID}`)}>
+            Chuyển hồ sơ B
+          </button>
+          <Routes>
+            <Route path="/disputes/:id" element={<DisputeDetailPage />} />
+          </Routes>
+        </>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={[`/disputes/${ORDER_ID}`]}>
+        <SwitchableHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId('decision-complete-btn'));
+    fireEvent.change(screen.getByLabelText(/Căn cứ quyết định/), {
+      target: { value: 'Căn cứ hợp lệ đủ độ dài cho giao dịch đầu tiên.' },
+    });
+    fireEvent.click(screen.getByTestId('decision-review-btn'));
+    fireEvent.click(await screen.findByTestId('decision-confirm-submit-btn'));
+
+    // Switch to second dispute while POST for first dispute is still in flight
+    fireEvent.click(screen.getByRole('button', { name: 'Chuyển hồ sơ B' }));
+    expect(await screen.findByRole('heading', { name: /Đèn bàn chống cận Rạng Đông/ })).toBeInTheDocument();
+
+    // Late resolution of first dispute's POST must be completely ignored
+    await act(async () => {
+      resolveFirstPost(firstResolved);
+    });
+    expect(screen.getByRole('heading', { name: /Đèn bàn chống cận Rạng Đông/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Đã xác nhận hoàn tất giao dịch/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('decision-complete-btn')).toBeEnabled();
+
+    // Verify stale alert from 409 is cleared on the start of a subsequent submit (no stacked red alerts)
+    mockedApi.mockReset();
+    mockedApi
+      .mockRejectedValueOnce(new ApiError(409, 'Phiên bản cũ.', 'VERSION_CONFLICT'))
+      .mockResolvedValueOnce(makeDetail({ ...secondDetail, version: 6 }))
+      .mockRejectedValueOnce(new ApiError(503, 'Hệ thống tạm bận, thử lại sau.', 'DISPUTE_UNAVAILABLE'));
+
+    fireEvent.click(screen.getByTestId('decision-complete-btn'));
+    fireEvent.change(screen.getByLabelText(/Căn cứ quyết định/), {
+      target: { value: 'Căn cứ hợp lệ cho lần gửi gây xung đột phiên bản.' },
+    });
+    fireEvent.click(screen.getByTestId('decision-review-btn'));
+    fireEvent.click(await screen.findByTestId('decision-confirm-submit-btn'));
+    expect(await screen.findByTestId('stale-alert')).toBeInTheDocument();
+
+    // Second submit triggers 503 -> stale-alert must be cleared, showing only 503 error
+    fireEvent.click(screen.getByTestId('decision-complete-btn'));
+    fireEvent.click(screen.getByTestId('decision-review-btn'));
+    fireEvent.click(await screen.findByTestId('decision-confirm-submit-btn'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Hệ thống tạm bận, thử lại sau.');
+    expect(screen.queryByTestId('stale-alert')).not.toBeInTheDocument();
   });
 });
 

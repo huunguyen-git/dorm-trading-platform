@@ -14,18 +14,50 @@ import type {
   TimelineActorRole,
 } from './types';
 
+function resolveApiOrigin(configuredBaseUrl: string | undefined): string | null {
+  const raw = configuredBaseUrl?.trim();
+  if (!raw) return null;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      return new URL(raw).origin;
+    }
+    if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+      return new URL(raw, window.location.origin).origin;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function isExternalHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
+
 /**
  * Chuẩn hóa đường dẫn tệp đính kèm do backend trả về trước khi gọi `attachment(path)`.
- * `attachment()` đã tự ghép tiền tố `VITE_API_URL` (kết thúc bằng `/api/v1`),
- * nên cần loại bỏ `/api/v1` ở đầu nếu backend trả về `/api/v1/admin/disputes/...`.
+ * Chỉ tách tiền tố `/api/v1` và đi qua `attachment()` có Bearer token khi đường dẫn là
+ * relative (`/api/v1/...`, `/admin/...`) hoặc cùng origin với `VITE_API_URL`.
+ * URL cross-origin `http(s)://` từ dữ liệu cũ được trả nguyên vẹn để hiển thị trực tiếp
+ * qua `<img src>` mà không gửi Bearer token sang host ngoài hay gây lỗi 404.
  */
-export function normalizeApiPath(rawUrl: string): string {
+export function normalizeApiPath(
+  rawUrl: string,
+  configuredBaseUrl: string | undefined = import.meta.env.VITE_API_URL,
+): string {
   const trimmed = rawUrl.trim();
   if (!trimmed) return '';
 
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return '';
+      }
+      const apiOrigin = resolveApiOrigin(configuredBaseUrl);
+      if (!apiOrigin || parsed.origin !== apiOrigin) {
+        return parsed.href;
+      }
       const pathname = parsed.pathname.startsWith('/api/v1/')
         ? parsed.pathname.slice('/api/v1'.length)
         : parsed.pathname === '/api/v1'
@@ -33,8 +65,12 @@ export function normalizeApiPath(rawUrl: string): string {
           : parsed.pathname;
       return `${pathname}${parsed.search}`;
     } catch {
-      return trimmed;
+      return '';
     }
+  }
+
+  if (trimmed.startsWith('//')) {
+    return '';
   }
 
   if (trimmed.startsWith('/api/v1/')) {
@@ -95,11 +131,14 @@ export async function requestDisputeEvidence(
  * Ném lỗi rõ ràng khi không tồn tại (404 -> null) hoặc tải thất bại để kích hoạt cổng chặn UC-29 §3.3.
  */
 export async function loadEvidenceBlobUrl(rawUrl: string): Promise<string> {
-  const path = normalizeApiPath(rawUrl);
-  if (!path) {
+  const resolved = normalizeApiPath(rawUrl);
+  if (!resolved) {
     throw new ApiError(400, 'Đường dẫn ảnh bằng chứng không hợp lệ.', 'INVALID_EVIDENCE_URL');
   }
-  const blob = await attachment(path);
+  if (isExternalHttpUrl(resolved)) {
+    return resolved;
+  }
+  const blob = await attachment(resolved);
   if (!blob) {
     throw new ApiError(404, 'Không tìm thấy tệp ảnh bằng chứng trên hệ thống.', 'EVIDENCE_NOT_FOUND');
   }
@@ -296,6 +335,24 @@ export function formatScheduleStatus(status: string): string {
   }
 }
 
+export function formatCancelReasonCode(reasonCode: string | null | undefined): string {
+  if (!reasonCode) return '';
+  switch (reasonCode) {
+    case 'ITEM_NOT_AS_DESCRIBED':
+      return 'Sản phẩm không đúng mô tả';
+    case 'DEFECT_AT_HANDOVER':
+      return 'Phát hiện lỗi/hư hỏng khi bàn giao';
+    case 'COMBO_MISSING_ITEM':
+      return 'Combo thiếu đồ vật thành phần';
+    case 'MUTUAL_AGREEMENT':
+      return 'Hai bên thỏa thuận hủy';
+    case 'OTHER':
+      return 'Lý do khác';
+    default:
+      return reasonCode;
+  }
+}
+
 export function formatCancelStatus(status: string): string {
   switch (status) {
     case 'CHO_XAC_NHAN':
@@ -314,6 +371,8 @@ export function formatCancelStatus(status: string): string {
       return 'Đã chuyển kiểm duyệt';
     case 'DA_DONG_DO_HOAN_TAT':
       return 'Đã đóng do hoàn tất';
+    case 'DA_DONG_DO_HUY':
+      return 'Đã đóng do hủy giao dịch';
     default:
       return status;
   }
@@ -339,11 +398,15 @@ export function formatTimelineAction(action: string): string {
       return 'Người bán báo đã giao hàng';
     case 'AUTO_ESCALATED_OVERDUE_24H':
       return 'Tự động chuyển xử lý do quá hạn 24 giờ';
+    case 'ORDER_ESCALATED_OVERDUE_24H':
+      return 'Chuyển xử lý do quá hạn 24 giờ';
     case 'CANCEL_REQUESTED':
       return 'Gửi yêu cầu hủy giao dịch';
     case 'CANCEL_REJECTED':
       return 'Từ chối yêu cầu hủy';
     case 'CANCEL_ESCALATED':
+    case 'CANCEL_DISPUTE_ESCALATED':
+    case 'ORDER_ESCALATED_CANCEL_DISPUTE':
       return 'Chuyển tranh chấp hủy lên kiểm duyệt';
     case 'MODERATOR_REQUESTED_EVIDENCE':
       return 'Kiểm duyệt viên yêu cầu bổ sung bằng chứng';

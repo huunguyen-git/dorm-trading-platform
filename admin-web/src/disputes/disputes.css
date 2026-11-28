@@ -10,12 +10,22 @@
   margin-bottom: 0;
 }
 
+.disputes-page .page-heading h1 {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .disputes-page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
+}
+
+.disputes-page-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 320px;
 }
 
 .disputes-header-actions {
@@ -263,6 +273,15 @@
 .dispute-actions-col {
   position: sticky;
   top: var(--space-4);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.dispute-actions-inline-feedback {
+  display: none;
+  gap: var(--space-2);
 }
 
 .dispute-back-link {
@@ -427,6 +446,12 @@
   background: #faf9f6;
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.dispute-chat-item p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dispute-chat-item-seller {
@@ -446,6 +471,12 @@
   padding-left: 14px;
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.dispute-timeline-item p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dispute-timeline-item-mod {
@@ -460,6 +491,17 @@
   padding: var(--space-6);
   display: grid;
   gap: var(--space-3);
+  min-width: 0;
+}
+
+.dispute-decision-outcome p,
+.disputes-page .confirm-summary p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.disputes-page .confirm-summary {
+  min-width: 0;
 }
 
 .dispute-decision-outcome-cancel {
@@ -526,6 +568,8 @@
   padding: 12px 14px;
   font-size: 13px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dispute-no-rep-note {
@@ -538,13 +582,20 @@
   color: var(--color-ink-soft);
 }
 
-@media (max-width: 1040px) {
+@media (max-width: 1180px) {
   .dispute-detail-layout {
     grid-template-columns: 1fr;
   }
 
   .dispute-actions-col {
     position: static;
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
+  .dispute-actions-inline-feedback {
+    display: grid;
   }
 }
 

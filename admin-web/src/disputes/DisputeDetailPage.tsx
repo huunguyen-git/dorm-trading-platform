@@ -4,6 +4,7 @@ import { ApiError } from '../api/client';
 import {
   cancelDispute,
   completeDispute,
+  formatCancelReasonCode,
   formatCancelStatus,
   formatConclusion,
   formatDateTime,
@@ -21,7 +22,9 @@ import {
   formatTimelineAction,
   formatVnd,
   getDisputeDetail,
+  isExternalHttpUrl,
   loadEvidenceBlobUrl,
+  normalizeApiPath,
   requestDisputeEvidence,
 } from './api';
 import type { DisputeConclusion, DisputeDetail, EvidenceTargetParty } from './types';
@@ -34,6 +37,8 @@ const MAX_EVIDENCE_INSTRUCTION = 2000;
 const MIN_DUE_HOURS = 1;
 const MAX_DUE_HOURS = 168;
 
+type ActiveAction = 'complete' | 'cancel' | 'evidence' | null;
+
 interface MediaDescriptor {
   key: string;
   url: string;
@@ -44,6 +49,8 @@ interface MediaEntry {
   url: string;
   status: 'loading' | 'loaded' | 'error';
   objectUrl?: string;
+  directUrl?: string;
+  isExternal?: boolean;
   error?: string;
   runId: number;
 }
@@ -96,7 +103,8 @@ export default function DisputeDetailPage() {
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
   const [doneFlashMessage, setDoneFlashMessage] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState<ActiveAction>(null);
+  const busy = activeAction !== null;
 
   // State cho quyết định Hoàn tất / Hủy giao dịch (UC-29 Basic Flow & Alt 1)
   const [selectedConclusion, setSelectedConclusion] = useState<DisputeConclusion | null>(null);
@@ -108,7 +116,8 @@ export default function DisputeDetailPage() {
   const [targetParty, setTargetParty] = useState<EvidenceTargetParty>('BUYER');
   const [instruction, setInstruction] = useState('');
   const [dueInHours, setDueInHours] = useState('48');
-  const [evidenceError, setEvidenceError] = useState('');
+  const [evidenceInstructionError, setEvidenceInstructionError] = useState('');
+  const [evidenceDueHoursError, setEvidenceDueHoursError] = useState('');
 
   // Quản lý vòng đời blob URL cho toàn bộ ảnh bàn giao & ảnh bổ sung (UC-29 Exception 3)
   const [mediaMap, setMediaMap] = useState<Record<string, MediaEntry>>({});
@@ -117,6 +126,8 @@ export default function DisputeDetailPage() {
   const isMountedRef = useRef(true);
   const activeOrderIdRef = useRef<string>(id);
   const loadedOrderIdRef = useRef<string | null>(null);
+  const busyRef = useRef(false);
+  const mutationSeqRef = useRef(0);
 
   const revokeAllMedia = useCallback(() => {
     for (const entry of mediaEntriesRef.current.values()) {
@@ -147,6 +158,9 @@ export default function DisputeDetailPage() {
     if (activeOrderIdRef.current !== id) {
       activeOrderIdRef.current = id;
       loadedOrderIdRef.current = null;
+      mutationSeqRef.current += 1;
+      busyRef.current = false;
+      setActiveAction(null);
       revokeAllMedia();
       setDetail(null);
       setStale('');
@@ -157,8 +171,11 @@ export default function DisputeDetailPage() {
       setBasis('');
       setBasisError('');
       setConfirmingDecision(false);
+      setTargetParty('BUYER');
       setInstruction('');
-      setEvidenceError('');
+      setDueInHours('48');
+      setEvidenceInstructionError('');
+      setEvidenceDueHoursError('');
     }
   }, [id, revokeAllMedia]);
 
@@ -210,9 +227,38 @@ export default function DisputeDetailPage() {
       URL.revokeObjectURL(existing.objectUrl);
     }
 
+    const resolved = normalizeApiPath(descriptor.url);
+    if (!resolved) {
+      const invalidEntry: MediaEntry = {
+        url: descriptor.url,
+        status: 'error',
+        error: 'Đường dẫn ảnh bằng chứng không hợp lệ.',
+        runId,
+      };
+      mediaEntriesRef.current.set(descriptor.key, invalidEntry);
+      setMediaMap((prev) => ({ ...prev, [descriptor.key]: invalidEntry }));
+      return;
+    }
+
+    if (isExternalHttpUrl(resolved)) {
+      // URL cross-origin từ dữ liệu legacy: hiển thị trực tiếp qua <img src> không gửi Bearer token,
+      // giữ trạng thái 'loading' cho đến khi trình duyệt báo onLoad/onError để giữ nguyên cổng chặn UC-29 §3.3.
+      const externalLoadingEntry: MediaEntry = {
+        url: descriptor.url,
+        status: 'loading',
+        directUrl: resolved,
+        isExternal: true,
+        runId,
+      };
+      mediaEntriesRef.current.set(descriptor.key, externalLoadingEntry);
+      setMediaMap((prev) => ({ ...prev, [descriptor.key]: externalLoadingEntry }));
+      return;
+    }
+
     const loadingEntry: MediaEntry = {
       url: descriptor.url,
       status: 'loading',
+      isExternal: false,
       runId,
     };
     mediaEntriesRef.current.set(descriptor.key, loadingEntry);
@@ -222,13 +268,16 @@ export default function DisputeDetailPage() {
       .then((objectUrl) => {
         const current = mediaEntriesRef.current.get(descriptor.key);
         if (!isMountedRef.current || !current || current.runId !== runId) {
-          URL.revokeObjectURL(objectUrl);
+          if (objectUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(objectUrl);
+          }
           return;
         }
         const loadedEntry: MediaEntry = {
           url: descriptor.url,
           status: 'loaded',
           objectUrl,
+          isExternal: false,
           runId,
         };
         mediaEntriesRef.current.set(descriptor.key, loadedEntry);
@@ -294,9 +343,25 @@ export default function DisputeDetailPage() {
     }
   }, [mediaDescriptors, fetchMediaDescriptor]);
 
-  const handleImageRenderError = useCallback((descriptor: MediaDescriptor) => {
+  const handleImageRenderLoad = useCallback((descriptor: MediaDescriptor, runId: number) => {
     const existing = mediaEntriesRef.current.get(descriptor.key);
-    if (existing?.objectUrl) {
+    if (!isMountedRef.current || !existing || existing.runId !== runId || !existing.isExternal) {
+      return;
+    }
+    const next: MediaEntry = {
+      ...existing,
+      status: 'loaded',
+    };
+    mediaEntriesRef.current.set(descriptor.key, next);
+    setMediaMap((prev) => ({ ...prev, [descriptor.key]: next }));
+  }, []);
+
+  const handleImageRenderError = useCallback((descriptor: MediaDescriptor, runId: number) => {
+    const existing = mediaEntriesRef.current.get(descriptor.key);
+    if (!isMountedRef.current || !existing || existing.runId !== runId) {
+      return;
+    }
+    if (existing.objectUrl) {
       URL.revokeObjectURL(existing.objectUrl);
     }
     const next: MediaEntry = {
@@ -317,7 +382,7 @@ export default function DisputeDetailPage() {
   const allMediaLoaded = failedMediaCount === 0 && loadingMediaCount === 0;
 
   function handleSelectConclusion(conclusion: DisputeConclusion) {
-    if (!allMediaLoaded || busy) return;
+    if (!allMediaLoaded || busy || busyRef.current) return;
     setSelectedConclusion(conclusion);
     setConfirmingDecision(false);
     setBasisError('');
@@ -326,7 +391,7 @@ export default function DisputeDetailPage() {
 
   function handleReviewDecision(event: FormEvent) {
     event.preventDefault();
-    if (!selectedConclusion || !allMediaLoaded) return;
+    if (!selectedConclusion || !allMediaLoaded || busy || busyRef.current) return;
 
     const trimmed = basis.trim();
     if (trimmed.length < MIN_BASIS || trimmed.length > MAX_BASIS) {
@@ -338,6 +403,7 @@ export default function DisputeDetailPage() {
   }
 
   async function handleConfirmDecision() {
+    if (busyRef.current) return;
     if (!detail || !selectedConclusion || !allMediaLoaded) return;
     const trimmed = basis.trim();
     if (trimmed.length < MIN_BASIS || trimmed.length > MAX_BASIS) {
@@ -346,7 +412,12 @@ export default function DisputeDetailPage() {
       return;
     }
 
-    setBusy(true);
+    const targetOrderId = detail.orderId;
+    const conclusion = selectedConclusion;
+    const mutationId = ++mutationSeqRef.current;
+    busyRef.current = true;
+    setActiveAction(conclusion === 'HOAN_TAT' ? 'complete' : 'cancel');
+    setStale('');
     setActionError('');
     setActionSuccess('');
     setBasisError('');
@@ -354,15 +425,20 @@ export default function DisputeDetailPage() {
     try {
       const payload = { basis: trimmed, expectedVersion: detail.version };
       const updated =
-        selectedConclusion === 'HOAN_TAT'
-          ? await completeDispute(detail.orderId, payload)
-          : await cancelDispute(detail.orderId, payload);
+        conclusion === 'HOAN_TAT'
+          ? await completeDispute(targetOrderId, payload)
+          : await cancelDispute(targetOrderId, payload);
+
+      if (!isMountedRef.current || activeOrderIdRef.current !== targetOrderId) {
+        return;
+      }
 
       const doneMsg =
-        selectedConclusion === 'HOAN_TAT'
+        conclusion === 'HOAN_TAT'
           ? `Đã xác nhận hoàn tất giao dịch ${formatShortOrderId(updated.orderId)}.`
           : `Đã hủy giao dịch ${formatShortOrderId(updated.orderId)}.`;
 
+      loadedOrderIdRef.current = updated.orderId;
       setDetail(updated);
       setStale('');
       setSelectedConclusion(null);
@@ -371,6 +447,10 @@ export default function DisputeDetailPage() {
       setActionSuccess(`${doneMsg} Quyết định đã được lưu và thông báo cho hai bên.`);
       setDoneFlashMessage(doneMsg);
     } catch (cause: unknown) {
+      if (!isMountedRef.current || activeOrderIdRef.current !== targetOrderId) {
+        return;
+      }
+
       const status = cause instanceof ApiError ? cause.status : 0;
       const code = cause instanceof ApiError ? cause.code : undefined;
       const message =
@@ -400,48 +480,80 @@ export default function DisputeDetailPage() {
         setActionError(message);
       }
     } finally {
-      setBusy(false);
+      if (mutationSeqRef.current === mutationId) {
+        busyRef.current = false;
+        if (isMountedRef.current) {
+          setActiveAction(null);
+        }
+      }
     }
   }
 
   async function handleSubmitEvidenceRequest(event: FormEvent) {
     event.preventDefault();
-    if (!detail) return;
+    if (busyRef.current) return;
+    if (!detail || detail.hasActiveEvidenceRequest) return;
 
     const trimmed = instruction.trim();
-    if (trimmed.length < MIN_EVIDENCE_INSTRUCTION || trimmed.length > MAX_EVIDENCE_INSTRUCTION) {
-      setEvidenceError(
-        `Nội dung yêu cầu bổ sung cần từ ${MIN_EVIDENCE_INSTRUCTION} đến ${MAX_EVIDENCE_INSTRUCTION} ký tự.`,
+    const parsedHours = Number(dueInHours);
+    const hasInstructionError =
+      trimmed.length < MIN_EVIDENCE_INSTRUCTION || trimmed.length > MAX_EVIDENCE_INSTRUCTION;
+    const hasDueHoursError =
+      dueInHours.trim() === '' ||
+      !Number.isInteger(parsedHours) ||
+      parsedHours < MIN_DUE_HOURS ||
+      parsedHours > MAX_DUE_HOURS;
+
+    if (hasInstructionError || hasDueHoursError) {
+      setEvidenceInstructionError(
+        hasInstructionError
+          ? `Nội dung yêu cầu bổ sung cần từ ${MIN_EVIDENCE_INSTRUCTION} đến ${MAX_EVIDENCE_INSTRUCTION} ký tự.`
+          : '',
+      );
+      setEvidenceDueHoursError(
+        hasDueHoursError
+          ? `Thời hạn bổ sung phải là số nguyên từ ${MIN_DUE_HOURS} đến ${MAX_DUE_HOURS} giờ.`
+          : '',
       );
       return;
     }
 
-    const parsedHours = Number(dueInHours);
-    if (!Number.isInteger(parsedHours) || parsedHours < MIN_DUE_HOURS || parsedHours > MAX_DUE_HOURS) {
-      setEvidenceError(`Thời hạn bổ sung phải là số nguyên từ ${MIN_DUE_HOURS} đến ${MAX_DUE_HOURS} giờ.`);
-      return;
-    }
-
-    setBusy(true);
-    setEvidenceError('');
+    const targetOrderId = detail.orderId;
+    const submittedTargetParty = targetParty;
+    const mutationId = ++mutationSeqRef.current;
+    busyRef.current = true;
+    setActiveAction('evidence');
+    setStale('');
+    setEvidenceInstructionError('');
+    setEvidenceDueHoursError('');
     setActionError('');
     setActionSuccess('');
 
     try {
-      const updated = await requestDisputeEvidence(detail.orderId, {
-        targetParty,
+      const updated = await requestDisputeEvidence(targetOrderId, {
+        targetParty: submittedTargetParty,
         instruction: trimmed,
         dueInHours: parsedHours,
         expectedVersion: detail.version,
       });
+
+      if (!isMountedRef.current || activeOrderIdRef.current !== targetOrderId) {
+        return;
+      }
+
+      loadedOrderIdRef.current = updated.orderId;
       setDetail(updated);
       setStale('');
       setInstruction('');
       setDueInHours('48');
       setActionSuccess(
-        `Đã gửi yêu cầu bổ sung bằng chứng tới ${formatPartyRole(targetParty).toLowerCase()}. Giao dịch giữ trạng thái Chờ xử lý.`,
+        `Đã gửi yêu cầu bổ sung bằng chứng tới ${formatPartyRole(submittedTargetParty).toLowerCase()}. Giao dịch giữ trạng thái Chờ xử lý.`,
       );
     } catch (cause: unknown) {
+      if (!isMountedRef.current || activeOrderIdRef.current !== targetOrderId) {
+        return;
+      }
+
       const status = cause instanceof ApiError ? cause.status : 0;
       const code = cause instanceof ApiError ? cause.code : undefined;
       const message =
@@ -468,32 +580,46 @@ export default function DisputeDetailPage() {
         );
         setRefreshNonce((n) => n + 1);
       } else if (status === 400) {
-        setEvidenceError(message);
+        if (/thời hạn|dueInHours|giờ/i.test(message)) {
+          setEvidenceDueHoursError(message);
+        } else {
+          setEvidenceInstructionError(message);
+        }
       } else {
         setActionError(message);
       }
     } finally {
-      setBusy(false);
+      if (mutationSeqRef.current === mutationId) {
+        busyRef.current = false;
+        if (isMountedRef.current) {
+          setActiveAction(null);
+        }
+      }
     }
   }
 
   function renderPhotoTile(descriptor: MediaDescriptor, subtitle?: string) {
     const entry = mediaMap[descriptor.key];
     const status = entry?.status ?? 'loading';
+    const displayUrl = entry?.objectUrl ?? entry?.directUrl;
 
-    if (status === 'loaded' && entry?.objectUrl) {
+    if (displayUrl && (status === 'loaded' || (entry?.isExternal && status === 'loading'))) {
       return (
         <figure key={descriptor.key} className="dispute-photo-tile">
-          <a href={entry.objectUrl} target="_blank" rel="noreferrer">
+          <a href={displayUrl} target="_blank" rel="noopener noreferrer">
             <img
+              key={`${descriptor.key}:${entry.runId}`}
               className="dispute-photo-img"
-              src={entry.objectUrl}
+              src={displayUrl}
               alt={descriptor.label}
-              onError={() => handleImageRenderError(descriptor)}
+              referrerPolicy={entry.isExternal ? 'no-referrer' : undefined}
+              onLoad={entry.isExternal ? () => handleImageRenderLoad(descriptor, entry.runId) : undefined}
+              onError={() => handleImageRenderError(descriptor, entry.runId)}
             />
           </a>
           <figcaption className="dispute-photo-caption">
             <strong>{descriptor.label}</strong>
+            {status === 'loading' ? <div>Đang tải ảnh…</div> : null}
             {subtitle ? <div>{subtitle}</div> : null}
           </figcaption>
         </figure>
@@ -670,7 +796,7 @@ export default function DisputeDetailPage() {
 
       <p className="dispute-no-rep-note">
         <strong>Nguyên tắc UC-29:</strong> Quyết định trong UC-29 không làm thay đổi điểm uy tín của hai bên. Hành vi
-        vi phạm phát hiện trong quá trình xem xét được xử lý riêng qua quy trình báo cáo vi phạm (UC-25/UC-26).
+        vi phạm phát hiện trong quá trình xem xét được xử lý riêng qua quy trình báo cáo vi phạm (UC-35/UC-36/UC-37).
       </p>
 
       {stale && (
@@ -703,9 +829,10 @@ export default function DisputeDetailPage() {
       {failedMediaCount > 0 && (
         <div className="notice notice-error dispute-media-alert" role="alert" data-testid="media-error-alert">
           <p style={{ margin: 0 }}>
-            <strong>Không tải được ảnh bằng chứng ({failedMediaCount}/{mediaDescriptors.length} ảnh).</strong> Theo
-            ngoại lệ UC-29 §3.3, hệ thống chưa cho phép ra quyết định hoàn tất hoặc hủy giao dịch cho đến khi toàn bộ
-            ảnh bàn giao và ảnh bằng chứng được tải đầy đủ.
+            <strong>Không tải được ảnh bằng chứng ({failedMediaCount}/{mediaDescriptors.length} ảnh).</strong>{' '}
+            {detail.decidable
+              ? 'Theo ngoại lệ UC-29 §3.3, hệ thống chưa cho phép ra quyết định hoàn tất hoặc hủy giao dịch cho đến khi toàn bộ ảnh bàn giao và ảnh bằng chứng được tải đầy đủ.'
+              : 'Vui lòng thử tải lại để xem đầy đủ ảnh bàn giao và ảnh bằng chứng trong hồ sơ lưu trữ.'}
           </p>
           <div className="dispute-media-alert-actions">
             <button
@@ -949,7 +1076,7 @@ export default function DisputeDetailPage() {
                       <span className="status-badge dispute-badge-cancel">{formatCancelStatus(req.status)}</span>
                     </div>
                     <p>
-                      {req.reasonCode ? <strong>[{req.reasonCode}] </strong> : null}
+                      {req.reasonCode ? <strong>[{formatCancelReasonCode(req.reasonCode)}] </strong> : null}
                       {req.reasonNote || 'Không kèm ghi chú chi tiết.'}
                     </p>
                     {req.responderName && (
@@ -1107,6 +1234,13 @@ export default function DisputeDetailPage() {
 
         {/* Cột phải: Bảng thao tác Kiểm duyệt viên */}
         <aside className="dispute-actions-col" aria-label="Bảng xử lý kiểm duyệt">
+          {(stale || actionError) && (
+            <div className="dispute-actions-inline-feedback" data-testid="actions-inline-feedback">
+              {stale && <p className="notice notice-error">{stale}</p>}
+              {actionError && <p className="notice notice-error">{actionError}</p>}
+            </div>
+          )}
+
           {/* Panel A: Ra quyết định Hoàn tất / Hủy */}
           <section className="disputes-card">
             <div>
@@ -1235,7 +1369,9 @@ export default function DisputeDetailPage() {
                             disabled={decisionButtonsDisabled}
                             onClick={() => void handleConfirmDecision()}
                           >
-                            {busy ? 'Đang lưu quyết định…' : 'Xác nhận gửi quyết định'}
+                            {activeAction === 'complete' || activeAction === 'cancel'
+                              ? 'Đang lưu quyết định…'
+                              : 'Xác nhận gửi quyết định'}
                           </button>
                           <button
                             type="button"
@@ -1294,15 +1430,21 @@ export default function DisputeDetailPage() {
                     maxLength={MAX_EVIDENCE_INSTRUCTION}
                     disabled={busy || refreshing || hasActiveEvidenceRequest}
                     value={instruction}
-                    aria-invalid={Boolean(evidenceError)}
-                    aria-describedby={evidenceError ? 'evidence-instruction-error' : undefined}
+                    aria-invalid={Boolean(evidenceInstructionError)}
+                    aria-describedby={evidenceInstructionError ? 'evidence-instruction-error' : undefined}
                     placeholder="Ví dụ: Đề nghị người mua cung cấp ảnh chụp sản phẩm hoặc xác nhận thời điểm đã gặp giao nhận…"
                     onChange={(event) => {
                       setInstruction(event.target.value);
-                      setEvidenceError('');
+                      setEvidenceInstructionError('');
                     }}
                   />
                 </label>
+
+                {evidenceInstructionError && (
+                  <p id="evidence-instruction-error" className="error" role="alert">
+                    {evidenceInstructionError}
+                  </p>
+                )}
 
                 <label htmlFor="evidence-due-hours">
                   Thời hạn phản hồi (giờ, mặc định 48 giờ)
@@ -1313,16 +1455,18 @@ export default function DisputeDetailPage() {
                     max={MAX_DUE_HOURS}
                     disabled={busy || refreshing || hasActiveEvidenceRequest}
                     value={dueInHours}
+                    aria-invalid={Boolean(evidenceDueHoursError)}
+                    aria-describedby={evidenceDueHoursError ? 'evidence-due-hours-error' : undefined}
                     onChange={(event) => {
                       setDueInHours(event.target.value);
-                      setEvidenceError('');
+                      setEvidenceDueHoursError('');
                     }}
                   />
                 </label>
 
-                {evidenceError && (
-                  <p id="evidence-instruction-error" className="error" role="alert">
-                    {evidenceError}
+                {evidenceDueHoursError && (
+                  <p id="evidence-due-hours-error" className="error" role="alert">
+                    {evidenceDueHoursError}
                   </p>
                 )}
 
@@ -1332,7 +1476,7 @@ export default function DisputeDetailPage() {
                   data-testid="submit-evidence-request-btn"
                   disabled={busy || refreshing || hasActiveEvidenceRequest}
                 >
-                  {busy ? 'Đang gửi yêu cầu…' : 'Gửi yêu cầu bổ sung'}
+                  {activeAction === 'evidence' ? 'Đang gửi yêu cầu…' : 'Gửi yêu cầu bổ sung'}
                 </button>
               </form>
             </section>

@@ -199,6 +199,7 @@ export default function DisputesQueuePage() {
             <input
               id="dispute-search-input"
               type="search"
+              maxLength={200}
               placeholder="Mã giao dịch, tiêu đề tin đăng, tên người mua hoặc người bán…"
               value={searchDraft}
               onChange={(event) => setSearchDraft(event.target.value)}
@@ -249,14 +250,38 @@ export default function DisputesQueuePage() {
         ) : items.length === 0 ? (
           <div className="dispute-empty" role="status">
             <p>
-              {hasFilters
-                ? 'Không có hồ sơ tranh chấp nào khớp với bộ lọc hiện tại.'
-                : 'Hiện không có giao dịch quá hạn hoặc tranh chấp nào cần xem xét.'}
+              {page > 0
+                ? `Trang ${page + 1} hiện không còn hồ sơ tranh chấp nào.`
+                : hasFilters
+                  ? 'Không có hồ sơ tranh chấp nào khớp với bộ lọc hiện tại.'
+                  : 'Hiện không có giao dịch quá hạn hoặc tranh chấp nào cần xem xét.'}
             </p>
-            {hasFilters && (
-              <button type="button" className="button button-compact" onClick={handleResetFilters}>
-                Xem tất cả hồ sơ
-              </button>
+            {(page > 0 || hasFilters) && (
+              <div className="filter-actions">
+                {page > 0 && (
+                  <button
+                    type="button"
+                    className="button button-primary button-compact"
+                    onClick={() => setPage(0)}
+                  >
+                    Quay về trang đầu
+                  </button>
+                )}
+                {page > 1 && (
+                  <button
+                    type="button"
+                    className="button button-compact"
+                    onClick={() => setPage((prev) => Math.max(0, prev - 1))}
+                  >
+                    Trang trước
+                  </button>
+                )}
+                {hasFilters && (
+                  <button type="button" className="button button-compact" onClick={handleResetFilters}>
+                    Xem tất cả hồ sơ
+                  </button>
+                )}
+              </div>
             )}
           </div>
         ) : (
