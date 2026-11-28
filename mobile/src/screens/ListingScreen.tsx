@@ -29,6 +29,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { Nav, RootStack } from '../navigation';
 import { buildMediaImageSource } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
+import { useChat } from '../chat/store';
 import type { InventoryItemStatus } from '../inventory/types';
 import { useDiscovery } from '../listings/discoveryStore';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
@@ -132,6 +133,8 @@ export default function ListingScreen() {
   const [ownerBusy, setOwnerBusy] = useState(false);
   const [ownerNotice, setOwnerNotice] = useState('');
   const [ownerError, setOwnerError] = useState('');
+  const [chatBusyMode, setChatBusyMode] = useState<'message' | 'offer' | null>(null);
+  const chatSubmittingRef = useRef(false);
 
   useEffect(() => {
     setActivePhotoIndex(0);
@@ -475,22 +478,44 @@ export default function ListingScreen() {
     }
   };
 
+  const openConversationFromListing = async (autoOpenOffer: boolean) => {
+    if (!display || chatSubmittingRef.current) return;
+    chatSubmittingRef.current = true;
+    setChatBusyMode(autoOpenOffer ? 'offer' : 'message');
+    setOwnerError('');
+    try {
+      const conv = await useChat.getState().openOrCreateConversation(display.id);
+      navigation.navigate('Chat', {
+        conversationId: conv.id,
+        autoOpenOffer,
+      });
+    } catch (err) {
+      if (!isRestrictedError(err)) {
+        const parsed = extractApiError(err, 'Không thể mở cuộc hội thoại.');
+        setOwnerError(parsed.message);
+      }
+    } finally {
+      chatSubmittingRef.current = false;
+      setChatBusyMode(null);
+    }
+  };
+
   const handleMessagePress = () => {
-    if (messageDisabled) return;
+    if (messageDisabled || chatBusyMode !== null) return;
     if (!isAuthenticated) {
       navigation.navigate('Login');
       return;
     }
-    showUpcomingFeatureNotice('Nhắn tin');
+    void openConversationFromListing(false);
   };
 
   const handleOfferPress = () => {
-    if (offerDisabled) return;
+    if (offerDisabled || chatBusyMode !== null) return;
     if (!isAuthenticated) {
       navigation.navigate('Login');
       return;
     }
-    showUpcomingFeatureNotice('Đề nghị giá');
+    void openConversationFromListing(true);
   };
 
   const handleReservePress = () => {
@@ -1326,15 +1351,18 @@ export default function ListingScreen() {
           <View style={styles.stickyRow}>
             <Pressable
               testID="message-button"
-              disabled={messageDisabled}
+              disabled={messageDisabled || chatBusyMode !== null}
               onPress={handleMessagePress}
               accessibilityRole="button"
               accessibilityLabel="Nhắn tin"
-              accessibilityState={{ disabled: messageDisabled }}
+              accessibilityState={{
+                disabled: messageDisabled || chatBusyMode !== null,
+                busy: chatBusyMode === 'message',
+              }}
               style={({ pressed }) => [
                 styles.iconActionBtn,
-                messageDisabled && styles.disabledControl,
-                pressed && !messageDisabled && styles.secondaryBtnPressed,
+                (messageDisabled || chatBusyMode !== null) && styles.disabledControl,
+                pressed && !messageDisabled && chatBusyMode === null && styles.secondaryBtnPressed,
               ]}
             >
               <Icon name="message-circle" size={18} color={semantic.color.textPrimary} />
@@ -1346,16 +1374,19 @@ export default function ListingScreen() {
             {!isFree ? (
               <Pressable
                 testID="make-offer-button"
-                disabled={offerDisabled}
+                disabled={offerDisabled || chatBusyMode !== null}
                 onPress={handleOfferPress}
                 accessibilityRole="button"
                 accessibilityLabel="Đề nghị giá"
-                accessibilityState={{ disabled: offerDisabled }}
+                accessibilityState={{
+                  disabled: offerDisabled || chatBusyMode !== null,
+                  busy: chatBusyMode === 'offer',
+                }}
                 style={({ pressed }) => [
                   styles.secondaryBtn,
                   styles.offerBtn,
-                  offerDisabled && styles.disabledControl,
-                  pressed && !offerDisabled && styles.secondaryBtnPressed,
+                  (offerDisabled || chatBusyMode !== null) && styles.disabledControl,
+                  pressed && !offerDisabled && chatBusyMode === null && styles.secondaryBtnPressed,
                 ]}
               >
                 <Text style={styles.secondaryBtnText} numberOfLines={1}>

@@ -18,6 +18,8 @@ import InventoryFormScreen from '../screens/InventoryFormScreen';
 import ReservationRequestScreen from '../screens/ReservationRequestScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import OrderDetailScreen from '../screens/OrderDetailScreen';
+import ConversationsScreen from '../screens/ConversationsScreen';
+import ChatScreen from '../screens/ChatScreen';
 import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -123,6 +125,16 @@ export default function AppNavigator() {
           name="OrderDetail"
           component={OrderDetailScreen}
           options={{ title: 'Chi tiết giao dịch' }}
+        />
+        <Stack.Screen
+          name="Conversations"
+          component={ConversationsScreen}
+          options={{ title: 'Hộp thư cá nhân' }}
+        />
+        <Stack.Screen
+          name="Chat"
+          component={ChatScreen}
+          options={{ title: 'Trò chuyện & Thương lượng' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

@@ -779,3 +779,33 @@ test('refreshes then retries a protected attachment download, clears the session
   await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
   expect(store.clear).toHaveBeenCalled();
 });
+
+test('leaves caller session intact on 403 COUNTERPARTY_RESTRICTED from chat endpoints', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  useSession.setState({ token: 'valid-jwt', user: activeUser, loading: false, restriction: null });
+  store.get.mockResolvedValue('valid-jwt');
+  fetchMock.mockResolvedValueOnce({
+    status: 403,
+    ok: false,
+    text: async () =>
+      JSON.stringify({
+        code: 'COUNTERPARTY_RESTRICTED',
+        message: 'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+      }),
+  });
+
+  await expect(
+    api('/conversations/conv-1/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'Xin chào' }),
+    }),
+  ).rejects.toMatchObject({
+    status: 403,
+    code: 'COUNTERPARTY_RESTRICTED',
+    message: 'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+  });
+  expect(store.clear).not.toHaveBeenCalled();
+  expect(useSession.getState().token).toBe('valid-jwt');
+  expect(useSession.getState().user).toEqual(activeUser);
+  expect(useSession.getState().restriction).toBeNull();
+});
