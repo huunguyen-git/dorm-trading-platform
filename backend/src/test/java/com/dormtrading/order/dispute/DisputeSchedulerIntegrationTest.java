@@ -205,34 +205,47 @@ class DisputeSchedulerIntegrationTest extends BaseIntegrationTest {
 
         UUID[] order1 = createAcceptedOrder(seller, buyer, "Đơn hết hạn bổ sung");
         UUID[] order2 = createAcceptedOrder(seller, buyer, "Đơn còn hạn bổ sung");
+        UUID[] order3 = createAcceptedOrder(seller, buyer, "Đơn đã hoàn tất bỏ qua hết hạn bổ sung");
 
         db.update("UPDATE giao_dichs SET trang_thai = 'CHO_XU_LY', ly_do_cho_xu_ly = 'OVERDUE_24H', thoi_diem_chuyen_xu_ly = NOW() WHERE ma_giao_dich IN (?, ?)",
                 order1[0], order2[0]);
+        db.update("UPDATE giao_dichs SET trang_thai = 'HOAN_TAT', thoi_diem_hoan_tat = NOW() WHERE ma_giao_dich = ?",
+                order3[0]);
 
         UUID expiredReqId = UUID.randomUUID();
         UUID activeReqId = UUID.randomUUID();
+        UUID terminalOrderReqId = UUID.randomUUID();
         db.update(
                 """
                 INSERT INTO yeu_cau_bo_sung_giao_dichs(id, ma_giao_dich, nguoi_yeu_cau_id, ben_duoc_yeu_cau, noi_dung, han_bo_sung, trang_thai)
                 VALUES (?, ?, ?, 'BUYER', 'Yêu cầu đã hết hạn', NOW() - INTERVAL '1 hour', 'CHO_BO_SUNG'),
-                       (?, ?, ?, 'SELLER', 'Yêu cầu còn hạn', NOW() + INTERVAL '24 hours', 'CHO_BO_SUNG')
+                       (?, ?, ?, 'SELLER', 'Yêu cầu còn hạn', NOW() + INTERVAL '24 hours', 'CHO_BO_SUNG'),
+                       (?, ?, ?, 'BUYER', 'Yêu cầu trên đơn đã hoàn tất', NOW() - INTERVAL '2 hours', 'CHO_BO_SUNG')
                 """,
                 expiredReqId, order1[0], mod.id(),
-                activeReqId, order2[0], mod.id()
+                activeReqId, order2[0], mod.id(),
+                terminalOrderReqId, order3[0], mod.id()
         );
 
         int expiredCount = scheduler.expireOverdueEvidenceRequests();
-        assertThat(expiredCount).isGreaterThanOrEqualTo(1);
+        assertThat(expiredCount).isEqualTo(1);
 
         assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, expiredReqId))
                 .isEqualTo("QUA_HAN");
         assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, activeReqId))
+                .isEqualTo("CHO_BO_SUNG");
+        assertThat(db.queryForObject("SELECT trang_thai FROM yeu_cau_bo_sung_giao_dichs WHERE id = ?", String.class, terminalOrderReqId))
                 .isEqualTo("CHO_BO_SUNG");
         assertThat(db.queryForObject(
                 "SELECT COUNT(*) FROM lich_su_trang_thai_giao_dich WHERE ma_giao_dich = ? AND hanh_dong = 'EVIDENCE_REQUEST_EXPIRED'",
                 Integer.class,
                 order1[0]
         )).isEqualTo(1);
+        assertThat(db.queryForObject(
+                "SELECT COUNT(*) FROM lich_su_trang_thai_giao_dich WHERE ma_giao_dich = ? AND hanh_dong = 'EVIDENCE_REQUEST_EXPIRED'",
+                Integer.class,
+                order3[0]
+        )).isZero();
     }
 
     @Test

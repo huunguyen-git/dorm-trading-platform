@@ -1179,6 +1179,10 @@ public class DisputeService {
     /**
      * UC-29 Alt 2: Expires overdue supplementary evidence requests ({@code han_bo_sung <= now})
      * to {@code QUA_HAN} so the dispute automatically returns to the READY queue.
+     *
+     * <p>Follows canonical lock ordering ({@code giao_dichs -> yeu_cau_bo_sung_giao_dichs},
+     * sorted by {@code ma_giao_dich ASC}) to remain deadlock-free with {@code completeDispute},
+     * {@code cancelDispute}, {@code requestEvidence}, and {@code submitEvidenceResponse}.
      */
     @Transactional
     public int expireOverdueEvidenceRequestsBatch(int batchSize) {
@@ -1186,7 +1190,7 @@ public class DisputeService {
         Instant current = now();
         Timestamp tsNow = Timestamp.from(current);
 
-        List<ExpiredEvidenceRow> expired = db.query(
+        List<ExpiredEvidenceRow> candidates = new ArrayList<>(db.query(
                 """
                 SELECT id, ma_giao_dich
                 FROM yeu_cau_bo_sung_giao_dichs
@@ -1194,7 +1198,6 @@ public class DisputeService {
                   AND han_bo_sung <= ?
                 ORDER BY han_bo_sung ASC, id ASC
                 LIMIT ?
-                FOR UPDATE SKIP LOCKED
                 """,
                 (rs, rowNum) -> new ExpiredEvidenceRow(
                         rs.getObject("id", UUID.class),
@@ -1202,31 +1205,58 @@ public class DisputeService {
                 ),
                 tsNow,
                 safeBatchSize
-        );
+        ));
+        candidates.sort(Comparator.comparing(row -> row.orderId().toString()));
 
-        for (ExpiredEvidenceRow row : expired) {
-            db.update(
-                    "UPDATE yeu_cau_bo_sung_giao_dichs SET trang_thai = 'QUA_HAN' WHERE id = ? AND trang_thai = 'CHO_BO_SUNG'",
-                    row.requestId()
-            );
-            db.update(
-                    "UPDATE giao_dichs SET updated_at = ?, version = version + 1 WHERE ma_giao_dich = ? AND trang_thai = 'CHO_XU_LY'",
-                    tsNow,
+        int expiredCount = 0;
+        for (ExpiredEvidenceRow row : candidates) {
+            List<UUID> lockedOrders = db.queryForList(
+                    """
+                    SELECT ma_giao_dich
+                    FROM giao_dichs
+                    WHERE ma_giao_dich = ?
+                      AND trang_thai = 'CHO_XU_LY'
+                    FOR NO KEY UPDATE SKIP LOCKED
+                    """,
+                    UUID.class,
                     row.orderId()
             );
-            insertTimeline(
-                    row.orderId(),
-                    "EVIDENCE_REQUEST_EXPIRED",
-                    "CHO_XU_LY",
-                    "CHO_XU_LY",
-                    null,
-                    "SYSTEM",
-                    "Yêu cầu bổ sung bằng chứng đã hết thời hạn nộp. Hồ sơ quay lại hàng đợi sẵn sàng xử lý.",
+            if (lockedOrders.isEmpty()) {
+                continue;
+            }
+
+            int updated = db.update(
+                    """
+                    UPDATE yeu_cau_bo_sung_giao_dichs
+                    SET trang_thai = 'QUA_HAN'
+                    WHERE id = ?
+                      AND trang_thai = 'CHO_BO_SUNG'
+                      AND han_bo_sung <= ?
+                    """,
+                    row.requestId(),
                     tsNow
             );
+            if (updated == 1) {
+                db.update(
+                        "UPDATE giao_dichs SET updated_at = ?, version = version + 1 WHERE ma_giao_dich = ?",
+                        tsNow,
+                        row.orderId()
+                );
+                insertTimeline(
+                        row.orderId(),
+                        "EVIDENCE_REQUEST_EXPIRED",
+                        "CHO_XU_LY",
+                        "CHO_XU_LY",
+                        null,
+                        "SYSTEM",
+                        "Yêu cầu bổ sung bằng chứng đã hết thời hạn nộp. Hồ sơ quay lại hàng đợi sẵn sàng xử lý.",
+                        tsNow
+                );
+                expiredCount++;
+            }
         }
 
-        return expired.size();
+        return expiredCount;
     }
 
     // =========================================================================
