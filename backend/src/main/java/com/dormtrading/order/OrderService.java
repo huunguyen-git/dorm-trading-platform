@@ -5,6 +5,8 @@ import com.dormtrading.catalog.ListingLifecycleHelper;
 import com.dormtrading.catalog.ListingValidation;
 import com.dormtrading.iam.auth.AccountRestrictedFailure;
 import com.dormtrading.iam.auth.AuthFailure;
+import com.dormtrading.review.ReviewDtos;
+import com.dormtrading.review.ReviewPolicy;
 import com.dormtrading.review.reputation.ReputationLedgerService;
 import java.sql.Array;
 import java.sql.PreparedStatement;
@@ -1078,7 +1080,7 @@ public class OrderService {
                        g.trang_thai, g.lich_hen_da_xac_nhan, g.thoi_gian_hen, g.dia_diem_hen,
                        g.thoi_gian_hen_du_kien, g.dia_diem_hen_du_kien,
                        g.thoi_diem_tao, g.thoi_diem_giu_cho, g.thoi_diem_bat_dau_giao,
-                       g.thoi_diem_bao_giao, g.thoi_diem_huy, g.version,
+                       g.thoi_diem_bao_giao, g.thoi_diem_hoan_tat, g.thoi_diem_huy, g.version,
                        t.tieu_de, t.gia_vnd, t.hinh_thuc, t.trang_thai AS listing_status, t.hinh_anh,
                        COALESCE(k.ten, t.khu_vuc) AS location_name,
                        s.ho_ten AS seller_name, s.diem_uy_tin AS seller_score,
@@ -1091,7 +1093,14 @@ public class OrderService {
                        EXISTS (
                            SELECT 1 FROM lich_hen_giao_dichs lh
                            WHERE lh.ma_giao_dich = g.ma_giao_dich AND lh.trang_thai = 'CHO_XAC_NHAN'
-                       ) AS has_pending_schedule
+                       ) AS has_pending_schedule,
+                       (
+                           SELECT dg.trang_thai
+                           FROM danh_gias dg
+                           WHERE dg.ma_giao_dich = g.ma_giao_dich
+                             AND dg.trang_thai <> 'DA_XOA'
+                           LIMIT 1
+                       ) AS active_review_status
                 FROM giao_dichs g
                 JOIN tin_dangs t ON t.ma_tin = g.ma_tin
                 LEFT JOIN khu_vucs k ON k.ma_khu_vuc = t.ma_khu_vuc
@@ -1107,6 +1116,14 @@ public class OrderService {
                     int itemCount = Math.max(1, rs.getInt("item_count"));
                     boolean isCombo = ListingDtos.ListingType.BAN_COMBO.name().equals(listingType) || itemCount >= 2;
                     boolean isFree = listedPrice == 0;
+                    UUID buyerIdRow = rs.getObject("nguoi_mua_id", UUID.class);
+                    String rawReviewStatus = rs.getString("active_review_status");
+                    String visibleReviewStatus = buyerIdRow.equals(userId)
+                            ? rawReviewStatus
+                            : (ReviewDtos.ReviewStatus.CHAP_NHAN.name().equals(rawReviewStatus)
+                                    || ReviewDtos.ReviewStatus.DA_GO.name().equals(rawReviewStatus)
+                                    ? rawReviewStatus
+                                    : null);
 
                     return new OrderDtos.OrderSummaryDto(
                             rs.getObject("ma_giao_dich", UUID.class),
@@ -1127,7 +1144,7 @@ public class OrderService {
                                     rs.getInt("seller_score")
                             ),
                             new OrderDtos.PartySummaryDto(
-                                    rs.getObject("nguoi_mua_id", UUID.class),
+                                    buyerIdRow,
                                     rs.getString("buyer_name"),
                                     rs.getInt("buyer_score")
                             ),
@@ -1144,7 +1161,9 @@ public class OrderService {
                             toInstant(rs.getTimestamp("thoi_diem_giu_cho")),
                             toInstant(rs.getTimestamp("thoi_diem_bat_dau_giao")),
                             toInstant(rs.getTimestamp("thoi_diem_bao_giao")),
+                            toInstant(rs.getTimestamp("thoi_diem_hoan_tat")),
                             toInstant(rs.getTimestamp("thoi_diem_huy")),
+                            visibleReviewStatus,
                             rs.getLong("version")
                     );
                 },
@@ -1172,7 +1191,8 @@ public class OrderService {
                        g.thoi_gian_hen_du_kien, g.dia_diem_hen_du_kien,
                        g.nguoi_huy_id, g.ly_do_huy,
                        g.thoi_diem_tao, g.thoi_diem_giu_cho, g.thoi_diem_bat_dau_giao,
-                       g.thoi_diem_bao_giao, g.thoi_diem_hoan_tat, g.thoi_diem_huy, g.updated_at, g.version,
+                       g.thoi_diem_bao_giao, g.thoi_diem_hoan_tat, g.da_cong_diem_khong_danh_gia,
+                       g.thoi_diem_huy, g.updated_at, g.version,
                        t.tieu_de, t.gia_vnd, t.hinh_thuc, t.trang_thai AS listing_status, t.hinh_anh,
                        COALESCE(k.ten, t.khu_vuc) AS location_name,
                        s.ho_ten AS seller_name, s.diem_uy_tin AS seller_score,
@@ -1214,6 +1234,7 @@ public class OrderService {
                         toInstant(rs.getTimestamp("thoi_diem_bat_dau_giao")),
                         toInstant(rs.getTimestamp("thoi_diem_bao_giao")),
                         toInstant(rs.getTimestamp("thoi_diem_hoan_tat")),
+                        rs.getBoolean("da_cong_diem_khong_danh_gia"),
                         toInstant(rs.getTimestamp("thoi_diem_huy")),
                         toInstant(rs.getTimestamp("updated_at")),
                         rs.getLong("version")
@@ -1258,6 +1279,7 @@ public class OrderService {
 
         boolean isCombo = ListingDtos.ListingType.BAN_COMBO.name().equals(row.listingType()) || items.size() >= 2;
         boolean isFree = row.listedPriceVnd() == 0;
+        OrderDtos.OrderReviewSummaryDto reviewSummary = loadOrderReviewSummary(row, isBuyer);
 
         return new OrderDtos.OrderDetailDto(
                 row.id(),
@@ -1295,7 +1317,75 @@ public class OrderService {
                 row.cancelledAt(),
                 row.updatedAt(),
                 row.version(),
-                viewer
+                viewer,
+                reviewSummary
+        );
+    }
+
+    private OrderDtos.OrderReviewSummaryDto loadOrderReviewSummary(OrderDetailRow row, boolean viewerIsBuyer) {
+        if (!OrderDtos.OrderStatus.HOAN_TAT.name().equals(row.status())) {
+            return null;
+        }
+        List<Map<String, Object>> activeReviews = db.queryForList(
+                """
+                SELECT d.ma_danh_gia, d.so_sao, d.trang_thai, d.thoi_diem_xet, d.nguoi_xet_id, d.version,
+                       (
+                           SELECT CASE WHEN k.trang_thai = 'CHO_XU_LY' THEN 'CHO_XU_LY' ELSE 'DA_XU_LY' END
+                           FROM khieu_nais k
+                           WHERE k.ma_danh_gia = d.ma_danh_gia
+                             AND (
+                                 k.trang_thai IN ('CHO_XU_LY', 'DA_XU_LY')
+                                 OR EXISTS (SELECT 1 FROM quyet_dinhs q WHERE q.ma_khieu_nai = k.ma_khieu_nai)
+                             )
+                           ORDER BY CASE WHEN k.trang_thai = 'CHO_XU_LY' THEN 0 ELSE 1 END, k.thoi_diem_tao DESC
+                           LIMIT 1
+                       ) AS locking_complaint_status
+                FROM danh_gias d
+                WHERE d.ma_giao_dich = ?
+                  AND d.trang_thai <> 'DA_XOA'
+                LIMIT 1
+                """,
+                row.id()
+        );
+        Map<String, Object> active = activeReviews.isEmpty() ? null : activeReviews.getFirst();
+        String activeStatus = active != null ? String.valueOf(active.get("trang_thai")) : null;
+        Instant moderatedAt = active != null ? toInstant((Timestamp) active.get("thoi_diem_xet")) : null;
+        Object moderatorId = active != null ? active.get("nguoi_xet_id") : null;
+        String complaintStatus = active != null ? (String) active.get("locking_complaint_status") : null;
+
+        ReviewPolicy.Capabilities caps = ReviewPolicy.evaluateCapabilities(
+                viewerIsBuyer,
+                row.status(),
+                row.completedAt(),
+                row.noReviewBonusApplied(),
+                active != null,
+                activeStatus,
+                moderatedAt,
+                moderatorId,
+                complaintStatus,
+                now()
+        );
+
+        boolean hasPendingModeration = active != null
+                && ReviewDtos.ReviewStatus.CHO_XET.name().equals(activeStatus);
+        boolean exposeReviewFields = active != null && (viewerIsBuyer
+                || ReviewDtos.ReviewStatus.CHAP_NHAN.name().equals(activeStatus)
+                || ReviewDtos.ReviewStatus.DA_GO.name().equals(activeStatus));
+
+        return new OrderDtos.OrderReviewSummaryDto(
+                caps.canReview(),
+                caps.canEdit(),
+                caps.canDelete(),
+                caps.withinReviewWindow(),
+                caps.reviewDeadlineAt(),
+                caps.daysRemaining(),
+                row.noReviewBonusApplied(),
+                caps.lockReason(),
+                exposeReviewFields ? (UUID) active.get("ma_danh_gia") : null,
+                exposeReviewFields ? ((Number) active.get("so_sao")).intValue() : null,
+                exposeReviewFields ? activeStatus : null,
+                exposeReviewFields ? ((Number) active.get("version")).longValue() : null,
+                hasPendingModeration
         );
     }
 
@@ -1329,6 +1419,7 @@ public class OrderService {
             Instant deliveryStartedAt,
             Instant reportedDeliveredAt,
             Instant completedAt,
+            boolean noReviewBonusApplied,
             Instant cancelledAt,
             Instant updatedAt,
             long version

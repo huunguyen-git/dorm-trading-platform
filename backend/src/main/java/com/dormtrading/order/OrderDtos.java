@@ -50,7 +50,12 @@ public final class OrderDtos {
         SCHEDULE_PROPOSED,
         SCHEDULE_CONFIRMED,
         SCHEDULE_REJECTED,
-        DELIVERY_STARTED
+        DELIVERY_STARTED,
+        REVIEW_RECEIVED,
+        REVIEW_PENDING_MODERATION,
+        REVIEW_UPDATED,
+        REVIEW_DELETED,
+        ORDER_NO_REVIEW_BONUS
     }
 
     public record CreateOrderRequest(
@@ -158,6 +163,23 @@ public final class OrderDtos {
     ) {
     }
 
+    public record OrderReviewSummaryDto(
+            boolean canReview,
+            boolean canEdit,
+            boolean canDelete,
+            boolean withinReviewWindow,
+            Instant reviewDeadlineAt,
+            int daysRemaining,
+            boolean noReviewBonusApplied,
+            String lockReason,
+            UUID reviewId,
+            Integer rating,
+            String reviewStatus,
+            Long reviewVersion,
+            boolean hasPendingModerationReview
+    ) {
+    }
+
     public record OrderSummaryDto(
             UUID id,
             OrderListingSummaryDto listing,
@@ -176,7 +198,9 @@ public final class OrderDtos {
             Instant reservedAt,
             Instant deliveryStartedAt,
             Instant reportedDeliveredAt,
+            Instant completedAt,
             Instant cancelledAt,
+            String reviewStatus,
             long version
     ) {
     }
@@ -207,7 +231,8 @@ public final class OrderDtos {
             Instant cancelledAt,
             Instant updatedAt,
             long version,
-            OrderViewerFlagsDto viewer
+            OrderViewerFlagsDto viewer,
+            OrderReviewSummaryDto reviewSummary
     ) {
     }
 

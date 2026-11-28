@@ -332,6 +332,34 @@ public class ReputationLedgerService {
         );
     }
 
+    /**
+     * Records an atomic, idempotent reversal of a previously applied review bonus (UC-31 / UC-32)
+     * without evaluating FR-12 violation threshold locks, because withdrawing a buyer's +2 compliment
+     * is not a new violation under FR-12 and must not falsely lock an unlocked seller.
+     */
+    public ReputationLedgerEntry recordReviewReversal(
+            UUID userId,
+            int requestedDelta,
+            String reason,
+            String referenceSource,
+            String referenceId,
+            String idempotencyKey,
+            UUID actorId
+    ) {
+        return recordScoreChangeInternal(
+                userId,
+                CHANGE_TRANSACTION_REVIEW,
+                requestedDelta,
+                reason,
+                referenceSource,
+                referenceId,
+                idempotencyKey,
+                actorId,
+                false,
+                true
+        );
+    }
+
     private ReputationLedgerEntry recordScoreChangeInternal(
             UUID userId,
             String changeType,
