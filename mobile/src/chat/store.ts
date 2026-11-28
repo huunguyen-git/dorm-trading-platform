@@ -13,6 +13,8 @@ import type {
 
 let clientMsgCounter = 0;
 const draftClientIds = new Map<string, string>();
+let requestSeqCounter = 0;
+const lockAppliedAtSeq = new Map<string, number>();
 
 export function generateClientMessageId(): string {
   clientMsgCounter += 1;
@@ -30,6 +32,19 @@ function isNonRetryableBusinessError(err: unknown): boolean {
         ? (err as { status: number }).status
         : undefined;
   return status === 400 || status === 403 || status === 404 || status === 409;
+}
+
+function isCounterpartyUnlocked(
+  incoming: Pick<
+    ConversationSummary,
+    'restrictionReason' | 'counterpartyRestricted' | 'counterpartyStatus'
+  >,
+): boolean {
+  return (
+    incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED' &&
+    !incoming.counterpartyRestricted &&
+    incoming.counterpartyStatus === 'HOAT_DONG'
+  );
 }
 
 function preserveCounterpartyRestrictedOnSummary(
@@ -116,6 +131,7 @@ function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
 function upsertSummaryWithVersionGuard(
   list: ConversationSummary[],
   incoming: ConversationSummary,
+  fetchSeq: number,
 ): ConversationSummary[] {
   const existing = list.find((c) => c.id === incoming.id);
   if (
@@ -126,15 +142,27 @@ function upsertSummaryWithVersionGuard(
   ) {
     return list;
   }
-  const nextIncoming =
+  const lockSeq = lockAppliedAtSeq.get(incoming.id);
+  const startedBeforeLock = typeof lockSeq === 'number' && fetchSeq < lockSeq;
+  const shouldPreserveLock =
     existing &&
     typeof existing.version === 'number' &&
     typeof incoming.version === 'number' &&
     incoming.version === existing.version &&
+    startedBeforeLock &&
     existing.restrictionReason === 'COUNTERPARTY_RESTRICTED' &&
-    incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED'
-      ? preserveCounterpartyRestrictedOnSummary(incoming)
-      : incoming;
+    incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED';
+  const nextIncoming = shouldPreserveLock
+    ? preserveCounterpartyRestrictedOnSummary(incoming)
+    : incoming;
+  const isHigherVersion =
+    existing &&
+    typeof existing.version === 'number' &&
+    typeof incoming.version === 'number' &&
+    incoming.version > existing.version;
+  if ((!startedBeforeLock || isHigherVersion) && isCounterpartyUnlocked(nextIncoming)) {
+    lockAppliedAtSeq.delete(incoming.id);
+  }
   const filtered = list.filter((c) => c.id !== incoming.id);
   return sortConversations([nextIncoming, ...filtered]);
 }
@@ -201,7 +229,10 @@ export const useChat = create<ChatState>((set, get) => {
     return true;
   };
 
-  const applyDetailWithVersionGuard = (detail: ConversationDetail): ConversationDetail => {
+  const applyDetailWithVersionGuard = (
+    detail: ConversationDetail,
+    fetchSeq: number,
+  ): ConversationDetail => {
     const existing = get().detailsById[detail.id];
     if (
       existing &&
@@ -256,8 +287,11 @@ export const useChat = create<ChatState>((set, get) => {
     }
 
     const existingSummary = get().conversations.find((c) => c.id === detail.id);
+    const lockSeq = lockAppliedAtSeq.get(detail.id);
+    const startedBeforeLock = typeof lockSeq === 'number' && fetchSeq < lockSeq;
     const shouldPreserveCounterpartyLock =
       typeof detail.version === 'number' &&
+      startedBeforeLock &&
       effectiveDetail.restrictionReason !== 'COUNTERPARTY_RESTRICTED' &&
       ((existing &&
         typeof existing.version === 'number' &&
@@ -281,6 +315,19 @@ export const useChat = create<ChatState>((set, get) => {
           canRespond: false,
         })),
       };
+    } else {
+      const isHigherVersion =
+        (existing &&
+          typeof existing.version === 'number' &&
+          typeof detail.version === 'number' &&
+          detail.version > existing.version) ||
+        (existingSummary &&
+          typeof existingSummary.version === 'number' &&
+          typeof detail.version === 'number' &&
+          detail.version > existingSummary.version);
+      if ((!startedBeforeLock || isHigherVersion) && isCounterpartyUnlocked(effectiveDetail)) {
+        lockAppliedAtSeq.delete(detail.id);
+      }
     }
 
     const deliveredClientIds = new Set(
@@ -301,6 +348,7 @@ export const useChat = create<ChatState>((set, get) => {
       conversations: upsertSummaryWithVersionGuard(
         state.conversations,
         detailToSummary(effectiveDetail),
+        fetchSeq,
       ),
       pendingMessagesByConversation: {
         ...state.pendingMessagesByConversation,
@@ -312,40 +360,34 @@ export const useChat = create<ChatState>((set, get) => {
   };
 
   const applyCounterpartyRestrictedLock = (conversationId: string) => {
-    const existingDetail = get().detailsById[conversationId];
-    if (existingDetail) {
-      const lockedMessages = existingDetail.messages.map((m) => ({
-        ...m,
-        canRespond: false,
-      }));
-      const updatedDetail: ConversationDetail = {
-        ...existingDetail,
-        counterpartyStatus: 'HAN_CHE',
-        counterpartyRestricted: true,
-        canSendMessage: false,
-        canMakeOffer: false,
-        restrictionReason: 'COUNTERPARTY_RESTRICTED',
-        messages: lockedMessages,
-      };
-      set((state) => ({
-        detailsById: {
-          ...state.detailsById,
-          [conversationId]: updatedDetail,
-        },
+    const lockSeq = ++requestSeqCounter;
+    lockAppliedAtSeq.set(conversationId, lockSeq);
+    set((state) => {
+      const existingDetail = state.detailsById[conversationId];
+      const nextDetailsById = existingDetail
+        ? {
+            ...state.detailsById,
+            [conversationId]: {
+              ...existingDetail,
+              counterpartyStatus: 'HAN_CHE',
+              counterpartyRestricted: true,
+              canSendMessage: false,
+              canMakeOffer: false,
+              restrictionReason: 'COUNTERPARTY_RESTRICTED' as const,
+              messages: existingDetail.messages.map((m) => ({
+                ...m,
+                canRespond: false,
+              })),
+            },
+          }
+        : state.detailsById;
+      return {
+        detailsById: nextDetailsById,
         conversations: state.conversations.map((c) =>
-          c.id === conversationId
-            ? {
-                ...c,
-                counterpartyStatus: 'HAN_CHE',
-                counterpartyRestricted: true,
-                canSendMessage: false,
-                canMakeOffer: false,
-                restrictionReason: 'COUNTERPARTY_RESTRICTED',
-              }
-            : c,
+          c.id === conversationId ? preserveCounterpartyRestrictedOnSummary(c) : c,
         ),
-      }));
-    }
+      };
+    });
   };
 
   return {
@@ -361,6 +403,7 @@ export const useChat = create<ChatState>((set, get) => {
 
     reset: () => {
       draftClientIds.clear();
+      lockAppliedAtSeq.clear();
       set((state) => ({
         conversations: [],
         detailsById: {},
@@ -378,12 +421,15 @@ export const useChat = create<ChatState>((set, get) => {
         set({ loadingList: true, error: null });
       }
       try {
+        const fetchSeq = ++requestSeqCounter;
         const fetched = await chatApi.fetchConversations();
         if (!isGuardActive(guard)) {
           return get().conversations;
         }
         const currentById = new Map(get().conversations.map((c) => [c.id, c]));
         const detailsById = get().detailsById;
+        const nextDetailsById: Record<string, ConversationDetail> = { ...detailsById };
+        let detailsChanged = false;
         const merged = fetched.map((incoming) => {
           const prev = currentById.get(incoming.id);
           const existingDetail = detailsById[incoming.id];
@@ -395,8 +441,20 @@ export const useChat = create<ChatState>((set, get) => {
           ) {
             return prev;
           }
+          if (
+            existingDetail &&
+            typeof existingDetail.version === 'number' &&
+            typeof incoming.version === 'number' &&
+            incoming.version < existingDetail.version
+          ) {
+            return prev ?? detailToSummary(existingDetail);
+          }
+
+          const lockSeq = lockAppliedAtSeq.get(incoming.id);
+          const startedBeforeLock = typeof lockSeq === 'number' && fetchSeq < lockSeq;
           const lockedSameVersion =
             typeof incoming.version === 'number' &&
+            startedBeforeLock &&
             incoming.restrictionReason !== 'COUNTERPARTY_RESTRICTED' &&
             ((prev &&
               typeof prev.version === 'number' &&
@@ -409,10 +467,53 @@ export const useChat = create<ChatState>((set, get) => {
           if (lockedSameVersion) {
             return preserveCounterpartyRestrictedOnSummary(incoming);
           }
+
+          const isHigherVersion =
+            (prev &&
+              typeof prev.version === 'number' &&
+              typeof incoming.version === 'number' &&
+              incoming.version > prev.version) ||
+            (existingDetail &&
+              typeof existingDetail.version === 'number' &&
+              typeof incoming.version === 'number' &&
+              incoming.version > existingDetail.version);
+
+          if ((!startedBeforeLock || isHigherVersion) && isCounterpartyUnlocked(incoming)) {
+            lockAppliedAtSeq.delete(incoming.id);
+            if (
+              existingDetail &&
+              typeof existingDetail.version === 'number' &&
+              typeof incoming.version === 'number' &&
+              incoming.version === existingDetail.version &&
+              existingDetail.restrictionReason === 'COUNTERPARTY_RESTRICTED'
+            ) {
+              nextDetailsById[incoming.id] = {
+                ...existingDetail,
+                canSendMessage: incoming.canSendMessage,
+                canMakeOffer: incoming.canMakeOffer,
+                restrictionReason: incoming.restrictionReason,
+                counterpartyStatus: incoming.counterpartyStatus,
+                counterpartyRestricted: incoming.counterpartyRestricted,
+                messages: incoming.lastMessage
+                  ? existingDetail.messages.map((m) =>
+                      m.id === incoming.lastMessage?.id
+                        ? { ...m, canRespond: incoming.lastMessage.canRespond }
+                        : m,
+                    )
+                  : existingDetail.messages,
+              };
+              detailsChanged = true;
+            }
+          }
+
           return incoming;
         });
         const sorted = sortConversations(merged);
-        set({ conversations: sorted, error: null });
+        set(
+          detailsChanged
+            ? { conversations: sorted, detailsById: nextDetailsById, error: null }
+            : { conversations: sorted, error: null },
+        );
         return sorted;
       } catch (err: any) {
         if (isGuardActive(guard)) {
@@ -431,11 +532,12 @@ export const useChat = create<ChatState>((set, get) => {
       const guard = captureSessionGuard();
       set({ loadingDetail: true, error: null });
       try {
+        const fetchSeq = ++requestSeqCounter;
         const detail = await chatApi.openOrCreateConversation(listingId);
         if (!isGuardActive(guard)) {
           return detail;
         }
-        const applied = applyDetailWithVersionGuard(detail);
+        const applied = applyDetailWithVersionGuard(detail, fetchSeq);
         set({ error: null });
         return applied;
       } catch (err: any) {
@@ -457,11 +559,12 @@ export const useChat = create<ChatState>((set, get) => {
         set({ loadingDetail: true, error: null });
       }
       try {
+        const fetchSeq = ++requestSeqCounter;
         const detail = await chatApi.fetchConversationDetail(conversationId);
         if (!isGuardActive(guard)) {
           return get().detailsById[conversationId] ?? detail;
         }
-        const applied = applyDetailWithVersionGuard(detail);
+        const applied = applyDetailWithVersionGuard(detail, fetchSeq);
         set({ error: null });
         return applied;
       } catch (err: any) {
@@ -527,6 +630,7 @@ export const useChat = create<ChatState>((set, get) => {
       });
 
       try {
+        const fetchSeq = ++requestSeqCounter;
         const sent = await chatApi.sendChatMessage(conversationId, {
           content: trimmed,
           clientMessageId,
@@ -579,6 +683,7 @@ export const useChat = create<ChatState>((set, get) => {
             nextConversations = upsertSummaryWithVersionGuard(
               state.conversations,
               detailToSummary(updatedDetail),
+              fetchSeq,
             );
           }
 
@@ -664,6 +769,7 @@ export const useChat = create<ChatState>((set, get) => {
 
       set({ error: null });
       try {
+        const fetchSeq = ++requestSeqCounter;
         const detail = await chatApi.createPriceOffer(conversationId, {
           ...input,
           clientMessageId,
@@ -672,7 +778,7 @@ export const useChat = create<ChatState>((set, get) => {
           return get().detailsById[conversationId] ?? detail;
         }
         draftClientIds.delete(draftKey);
-        const applied = applyDetailWithVersionGuard(detail);
+        const applied = applyDetailWithVersionGuard(detail, fetchSeq);
         set({ error: null });
         return applied;
       } catch (err: any) {
@@ -711,6 +817,7 @@ export const useChat = create<ChatState>((set, get) => {
 
       set({ error: null });
       try {
+        const fetchSeq = ++requestSeqCounter;
         const detail = await chatApi.respondToPriceOffer(conversationId, messageId, {
           ...input,
           clientMessageId,
@@ -719,7 +826,7 @@ export const useChat = create<ChatState>((set, get) => {
           return get().detailsById[conversationId] ?? detail;
         }
         draftClientIds.delete(draftKey);
-        const applied = applyDetailWithVersionGuard(detail);
+        const applied = applyDetailWithVersionGuard(detail, fetchSeq);
         set({ error: null });
         return applied;
       } catch (err: any) {
@@ -748,6 +855,7 @@ useSession.subscribe((state, prevState) => {
   const prevUserId = prevState.user?.id ?? null;
   const nextUserId = state.user?.id ?? null;
   if ((!state.token && prevState.token) || prevUserId !== nextUserId) {
+    lockAppliedAtSeq.clear();
     useChat.getState().reset();
   }
 });

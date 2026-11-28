@@ -140,6 +140,7 @@ export default function ListingsScreen() {
     restriction ?? (dismissed ? null : resolveUserRestriction(user)),
   );
   const isMember = Boolean(token && user?.roles.includes('MEMBER'));
+  const inboxDisabled = Boolean(token && !isMember);
 
   const legacyLoad = useListings((state) => state.load);
   const legacyListings = useListings((state) => state.listings);
@@ -905,11 +906,20 @@ export default function ListingsScreen() {
 
             <Pressable
               testID="open-inbox-button"
-              onPress={() => navigation.navigate(isMember ? 'Conversations' : 'Login')}
+              disabled={inboxDisabled}
+              onPress={() => {
+                if (inboxDisabled) return;
+                navigation.navigate(token ? 'Conversations' : 'Login');
+              }}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Hộp thư cá nhân"
-              style={({ pressed }) => [styles.refreshBtn, pressed && styles.refreshBtnPressed]}
+              accessibilityState={{ disabled: inboxDisabled }}
+              style={({ pressed }) => [
+                styles.refreshBtn,
+                pressed && !inboxDisabled && styles.refreshBtnPressed,
+                inboxDisabled && styles.refreshBtnDisabled,
+              ]}
             >
               <Icon name="message-circle" size={16} color={semantic.color.textInverse} />
             </Pressable>

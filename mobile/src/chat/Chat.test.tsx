@@ -13,6 +13,7 @@ import type { ChatMessage, ConversationDetail, ConversationSummary } from './typ
 import ConversationsScreen from '../screens/ConversationsScreen';
 import ChatScreen from '../screens/ChatScreen';
 import ListingScreen from '../screens/ListingScreen';
+import ListingsScreen from '../screens/ListingsScreen';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -1622,7 +1623,7 @@ describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, 
     expect(counterId5).not.toBe(counterId4);
   });
 
-  test('stale same-version poll response does not overwrite COUNTERPARTY_RESTRICTED lock in detail or conversation list', async () => {
+  test('same-version poll started before 403 COUNTERPARTY_RESTRICTED keeps lock, while post-lock poll/refresh at the same version unlocks detail and list', async () => {
     const pendingOffer = makeOfferMessage({
       id: 'offer-lock-1',
       senderId: sellerUser.id,
@@ -1631,21 +1632,48 @@ describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, 
       canRespond: true,
     });
 
-    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(
-      makeSampleDetail({
-        id: 'conv-1',
-        version: 2,
-        canSendMessage: true,
-        canMakeOffer: true,
-        restrictionReason: null,
-        counterpartyStatus: 'HOAT_DONG',
-        counterpartyRestricted: false,
-        messages: [pendingOffer],
-      }),
-    );
+    const unlockedDetailV2 = makeSampleDetail({
+      id: 'conv-1',
+      version: 2,
+      canSendMessage: true,
+      canMakeOffer: true,
+      restrictionReason: null,
+      counterpartyStatus: 'HOAT_DONG',
+      counterpartyRestricted: false,
+      messages: [pendingOffer],
+    });
+    const unlockedSummaryV2 = makeSampleSummary({
+      id: 'conv-1',
+      version: 2,
+      canSendMessage: true,
+      canMakeOffer: true,
+      restrictionReason: null,
+      counterpartyStatus: 'HOAT_DONG',
+      counterpartyRestricted: false,
+      lastMessage: pendingOffer,
+    });
+
+    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(unlockedDetailV2);
     await useChat.getState().loadConversationDetail('conv-1');
 
-    // Trigger 403 COUNTERPARTY_RESTRICTED -> locks detail & summary locally at version 2
+    // Start overlapping detail & list polls BEFORE 403 COUNTERPARTY_RESTRICTED (fetchSeq < lockSeq)
+    let resolvePreLockDetail!: (value: ConversationDetail) => void;
+    mockedChatApi.fetchConversationDetail.mockReturnValueOnce(
+      new Promise<ConversationDetail>((resolve) => {
+        resolvePreLockDetail = resolve;
+      }),
+    );
+    const preLockDetailPoll = useChat.getState().loadConversationDetail('conv-1', { silent: true });
+
+    let resolvePreLockList!: (value: ConversationSummary[]) => void;
+    mockedChatApi.fetchConversations.mockReturnValueOnce(
+      new Promise<ConversationSummary[]>((resolve) => {
+        resolvePreLockList = resolve;
+      }),
+    );
+    const preLockListPoll = useChat.getState().loadConversations({ silent: true });
+
+    // Trigger 403 COUNTERPARTY_RESTRICTED -> locks detail & summary locally at version 2 (lockSeq > pre-lock polls)
     mockedChatApi.sendChatMessage.mockRejectedValueOnce(
       new ApiError(
         403,
@@ -1662,20 +1690,9 @@ describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, 
     );
     expect(useChat.getState().detailsById['conv-1'].messages[0].canRespond).toBe(false);
 
-    // Overlapping stale poll returns same version 2 without restriction -> lock must stay preserved
-    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(
-      makeSampleDetail({
-        id: 'conv-1',
-        version: 2,
-        canSendMessage: true,
-        canMakeOffer: true,
-        restrictionReason: null,
-        counterpartyStatus: 'HOAT_DONG',
-        counterpartyRestricted: false,
-        messages: [pendingOffer],
-      }),
-    );
-    await useChat.getState().loadConversationDetail('conv-1', { silent: true });
+    // 1. Pre-lock detail poll (fetchSeq < lockSeq) resolves late with same version 2 -> lock MUST stay preserved
+    resolvePreLockDetail(unlockedDetailV2);
+    await preLockDetailPoll;
 
     const lockedDetail = useChat.getState().detailsById['conv-1'];
     expect(lockedDetail.canSendMessage).toBe(false);
@@ -1690,20 +1707,9 @@ describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, 
     expect(lockedSummaryFromDetail?.canSendMessage).toBe(false);
     expect(lockedSummaryFromDetail?.canMakeOffer).toBe(false);
 
-    // Stale same-version list poll also must not unlock the summary
-    mockedChatApi.fetchConversations.mockResolvedValueOnce([
-      makeSampleSummary({
-        id: 'conv-1',
-        version: 2,
-        canSendMessage: true,
-        canMakeOffer: true,
-        restrictionReason: null,
-        counterpartyStatus: 'HOAT_DONG',
-        counterpartyRestricted: false,
-        lastMessage: pendingOffer,
-      }),
-    ]);
-    await useChat.getState().loadConversations({ silent: true });
+    // 2. Pre-lock list poll (fetchSeq < lockSeq) resolves late with same version 2 -> lock MUST stay preserved
+    resolvePreLockList([unlockedSummaryV2]);
+    await preLockListPoll;
 
     const lockedSummaryFromList = useChat.getState().conversations.find((c) => c.id === 'conv-1');
     expect(lockedSummaryFromList?.restrictionReason).toBe('COUNTERPARTY_RESTRICTED');
@@ -1712,6 +1718,157 @@ describe('P2-03 V12 Review Fixes: draft clientMessageId retry, double-tap refs, 
     expect(lockedSummaryFromList?.counterpartyStatus).toBe('HAN_CHE');
     expect(lockedSummaryFromList?.counterpartyRestricted).toBe(true);
     expect(lockedSummaryFromList?.lastMessage?.canRespond).toBe(false);
+
+    // 3. Post-lock detail refresh (fetchSeq > lockSeq) after restriction expires at SAME version 2 -> MUST unlock!
+    mockedChatApi.fetchConversationDetail.mockResolvedValueOnce(unlockedDetailV2);
+    await useChat.getState().loadConversationDetail('conv-1', { silent: true });
+
+    const unlockedDetail = useChat.getState().detailsById['conv-1'];
+    expect(unlockedDetail.canSendMessage).toBe(true);
+    expect(unlockedDetail.canMakeOffer).toBe(true);
+    expect(unlockedDetail.restrictionReason).toBeNull();
+    expect(unlockedDetail.counterpartyStatus).toBe('HOAT_DONG');
+    expect(unlockedDetail.counterpartyRestricted).toBe(false);
+    expect(unlockedDetail.messages[0].canRespond).toBe(true);
+
+    const unlockedSummaryAfterDetail = useChat
+      .getState()
+      .conversations.find((c) => c.id === 'conv-1');
+    expect(unlockedSummaryAfterDetail?.canSendMessage).toBe(true);
+    expect(unlockedSummaryAfterDetail?.canMakeOffer).toBe(true);
+    expect(unlockedSummaryAfterDetail?.restrictionReason).toBeNull();
+    expect(unlockedSummaryAfterDetail?.counterpartyStatus).toBe('HOAT_DONG');
+    expect(unlockedSummaryAfterDetail?.counterpartyRestricted).toBe(false);
+    expect(unlockedSummaryAfterDetail?.lastMessage?.canRespond).toBe(true);
+
+    // 4. Re-lock at version 2, then unlock via post-lock list refresh (loadConversations) at SAME version 2
+    mockedChatApi.sendChatMessage.mockRejectedValueOnce(
+      new ApiError(
+        403,
+        'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+        'COUNTERPARTY_RESTRICTED',
+      ),
+    );
+    await expect(useChat.getState().sendMessage('conv-1', 'Alo lần 2')).rejects.toThrow(
+      'Tài khoản của đối phương hiện đang bị khóa hoặc hạn chế giao dịch.',
+    );
+    expect(useChat.getState().detailsById['conv-1'].restrictionReason).toBe(
+      'COUNTERPARTY_RESTRICTED',
+    );
+
+    mockedChatApi.fetchConversations.mockResolvedValueOnce([unlockedSummaryV2]);
+    await useChat.getState().loadConversations({ silent: true });
+
+    const unlockedSummaryAfterList = useChat
+      .getState()
+      .conversations.find((c) => c.id === 'conv-1');
+    expect(unlockedSummaryAfterList?.canSendMessage).toBe(true);
+    expect(unlockedSummaryAfterList?.canMakeOffer).toBe(true);
+    expect(unlockedSummaryAfterList?.restrictionReason).toBeNull();
+    expect(unlockedSummaryAfterList?.counterpartyStatus).toBe('HOAT_DONG');
+    expect(unlockedSummaryAfterList?.counterpartyRestricted).toBe(false);
+    expect(unlockedSummaryAfterList?.lastMessage?.canRespond).toBe(true);
+
+    const syncedDetailAfterList = useChat.getState().detailsById['conv-1'];
+    expect(syncedDetailAfterList.canSendMessage).toBe(true);
+    expect(syncedDetailAfterList.canMakeOffer).toBe(true);
+    expect(syncedDetailAfterList.restrictionReason).toBeNull();
+    expect(syncedDetailAfterList.counterpartyStatus).toBe('HOAT_DONG');
+    expect(syncedDetailAfterList.counterpartyRestricted).toBe(false);
+    expect(syncedDetailAfterList.messages[0].canRespond).toBe(true);
+  });
+
+  test('ListingsScreen disables open-inbox-button for authenticated non-MEMBER accounts (CHO_KICH_HOAT / BI_KHOA) without navigating to Login, while keeping anonymous -> Login and MEMBER -> Conversations', async () => {
+    mockedDiscoveryApi.fetchCategories.mockResolvedValue({ items: [], tree: [] });
+    mockedDiscoveryApi.fetchLocations.mockResolvedValue([]);
+    mockedDiscoveryApi.searchListings.mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 20,
+      totalElements: 0,
+      totalPages: 0,
+    });
+
+    // 1. Authenticated pending-activation user (CHO_KICH_HOAT, no MEMBER role)
+    useSession.setState({
+      token: 'pending-token',
+      user: {
+        ...buyerUser,
+        roles: [],
+        profileApproved: false,
+        accountStatus: 'CHO_KICH_HOAT',
+      },
+      restriction: null,
+      restrictionDismissed: false,
+    });
+
+    const { rerender } = render(<ListingsScreen />);
+
+    const inboxPending = await screen.findByTestId('open-inbox-button');
+    expect(inboxPending.props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(inboxPending);
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // 2. Authenticated locked/suspended user (BI_KHOA, no MEMBER role)
+    act(() => {
+      useSession.setState({
+        token: 'locked-token',
+        user: {
+          ...buyerUser,
+          roles: [],
+          accountStatus: 'BI_KHOA',
+        },
+        restriction: {
+          accountStatus: 'BI_KHOA',
+          lockType: 'KHOA_TAM_THOI',
+          reason: 'Vi phạm quy định giao dịch',
+          lockedUntil: '2026-12-10T00:00:00Z',
+          appealable: false,
+          reputationScore: 40,
+          message: 'Tài khoản đang bị khóa tạm thời.',
+        },
+        restrictionDismissed: false,
+      });
+    });
+    rerender(<ListingsScreen />);
+
+    const inboxLocked = screen.getByTestId('open-inbox-button');
+    expect(inboxLocked.props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(inboxLocked);
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // 3. Anonymous user (!token) -> navigates to Login
+    act(() => {
+      useSession.setState({
+        token: null,
+        user: null,
+        restriction: null,
+        restrictionDismissed: false,
+      });
+    });
+    rerender(<ListingsScreen />);
+
+    const inboxAnon = screen.getByTestId('open-inbox-button');
+    expect(inboxAnon.props.accessibilityState.disabled).toBe(false);
+    fireEvent.press(inboxAnon);
+    expect(mockNavigate).toHaveBeenCalledWith('Login');
+
+    // 4. Active MEMBER user -> navigates to Conversations
+    mockNavigate.mockClear();
+    act(() => {
+      useSession.setState({
+        token: 'buyer-token',
+        user: buyerUser,
+        restriction: null,
+        restrictionDismissed: false,
+      });
+    });
+    rerender(<ListingsScreen />);
+
+    const inboxMember = screen.getByTestId('open-inbox-button');
+    expect(inboxMember.props.accessibilityState.disabled).toBe(false);
+    fireEvent.press(inboxMember);
+    expect(mockNavigate).toHaveBeenCalledWith('Conversations');
   });
 
   test('ChatScreen stops 5s polling immediately when getConversation returns 404 CONVERSATION_NOT_FOUND', async () => {
