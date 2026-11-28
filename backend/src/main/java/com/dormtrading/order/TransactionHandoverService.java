@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -35,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -77,6 +79,7 @@ public class TransactionHandoverService {
     private final HandoverProofStorage proofStorage;
     private final HandoverOtpCrypto otpCrypto;
     private final ReputationLedgerService reputationLedger;
+    private final TransactionTemplate txTemplate;
     private final Clock clock;
     private final long maxProofSizeBytes;
     private final int otpTtlSeconds;
@@ -89,6 +92,7 @@ public class TransactionHandoverService {
             HandoverProofStorage proofStorage,
             HandoverOtpCrypto otpCrypto,
             ReputationLedgerService reputationLedger,
+            TransactionTemplate txTemplate,
             Clock clock,
             @Value("${app.media.max-file-size-bytes:5242880}") long maxProofSizeBytes,
             @Value("${app.order.otp-ttl-seconds:600}") int otpTtlSeconds,
@@ -99,6 +103,7 @@ public class TransactionHandoverService {
         this.proofStorage = proofStorage;
         this.otpCrypto = otpCrypto;
         this.reputationLedger = reputationLedger;
+        this.txTemplate = txTemplate;
         this.clock = clock != null ? clock : Clock.systemUTC();
         this.maxProofSizeBytes = maxProofSizeBytes > 0 ? maxProofSizeBytes : DEFAULT_MAX_PROOF_SIZE_BYTES;
         this.otpTtlSeconds = otpTtlSeconds > 0 ? otpTtlSeconds : DEFAULT_OTP_TTL_SECONDS;
@@ -556,7 +561,6 @@ public class TransactionHandoverService {
     // UC-27 Steps 1-5: Seller uploads handover proof photo(s) & reports delivered
     // =========================================================================
 
-    @Transactional
     public TransactionDtos.TransactionDetailDto reportDelivered(
             UUID sellerId,
             UUID transactionId,
@@ -577,73 +581,53 @@ public class TransactionHandoverService {
                 "Ghi chú bàn giao không được vượt quá " + MAX_NOTE_LENGTH + " ký tự."
         );
 
-        TransactionLookup lookup = lookupTransactionOrThrow(transactionId);
-        if (!lookup.sellerId().equals(sellerId)) {
+        // Phase 1 (No DB transaction or row locks): preflight transaction/seller check & in-memory image sanitization
+        List<Map<String, Object>> preflightRows = db.queryForList(
+                """
+                SELECT g.ma_tin, g.nguoi_ban_id, g.trang_thai, g.thoi_diem_bao_giao, g.version,
+                       tv.diem_uy_tin, tv.trang_thai_tai_khoan, tv.email_verified, tv.profile_approved,
+                       tv.khoa_den_ngay, tv.loai_han_che, tv.ly_do_han_che, tv.cho_phep_khieu_nai
+                FROM giao_dichs g
+                JOIN thanh_viens tv ON tv.user_id = g.nguoi_ban_id
+                WHERE g.ma_giao_dich = ?
+                """,
+                transactionId
+        );
+        if (preflightRows.isEmpty()) {
+            throw new AuthFailure(404, "TRANSACTION_NOT_FOUND", "Không tìm thấy giao dịch.");
+        }
+        Map<String, Object> preflight = preflightRows.getFirst();
+        UUID preflightSellerId = (UUID) preflight.get("nguoi_ban_id");
+        if (!sellerId.equals(preflightSellerId)) {
             throw new AuthFailure(403, "TRANSACTION_FORBIDDEN", "Chỉ người bán mới có thể gửi ảnh và báo đã giao.");
         }
+        UUID listingId = (UUID) preflight.get("ma_tin");
 
-        // Validate & sanitize proof photos in memory before acquiring DB row locks to keep critical section short
+        preflightSellerMember(preflight);
+
         List<ValidatedProofPhoto> validatedPhotos = validateAndSanitizeProofs(transactionId, rawFiles);
 
-        // Strict lock order: (1) thanh_viens(seller) -> (2) tin_dangs -> (3) giao_dichs
-        lockAndVerifyActiveMember(sellerId);
-        lockListingForNoKeyUpdate(lookup.listingId());
-        LockedTransaction tx = lockTransactionForNoKeyUpdate(transactionId);
-
-        if (!TransactionDtos.TransactionStatus.DANG_GIAO.name().equals(tx.status())
-                || tx.reportedDeliveredAt() != null) {
+        String preflightStatus = String.valueOf(preflight.get("trang_thai"));
+        Timestamp preflightDeliveredAt = (Timestamp) preflight.get("thoi_diem_bao_giao");
+        long preflightVersion = ((Number) preflight.get("version")).longValue();
+        if (!TransactionDtos.TransactionStatus.DANG_GIAO.name().equals(preflightStatus)
+                || preflightDeliveredAt != null) {
             throw new AuthFailure(
                     409,
                     "INVALID_STATE_TRANSITION",
                     "Chỉ có thể báo đã giao khi giao dịch đang ở trạng thái đang giao."
             );
         }
-        if (expectedVersion != null && expectedVersion != tx.version()) {
+        if (expectedVersion != null && expectedVersion != preflightVersion) {
             throw new AuthFailure(409, "VERSION_CONFLICT", "Giao dịch vừa được cập nhật. Vui lòng tải lại trước khi thao tác.");
         }
 
-        Instant current = now();
-        Timestamp tsNow = Timestamp.from(current);
-        Timestamp otpExpiresAt = Timestamp.from(current.plusSeconds(otpTtlSeconds));
-
+        // Phase 2 (No DB transaction or row locks): upload sanitized objects to storage before acquiring DB locks
         List<String> storedKeys = new ArrayList<>(validatedPhotos.size());
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCompletion(int status) {
-                    if (status != STATUS_COMMITTED) {
-                        for (String key : storedKeys) {
-                            proofStorage.deleteQuietly(key);
-                        }
-                    }
-                }
-            });
-        }
-
         try {
-            for (int i = 0; i < validatedPhotos.size(); i++) {
-                ValidatedProofPhoto photo = validatedPhotos.get(i);
+            for (ValidatedProofPhoto photo : validatedPhotos) {
                 proofStorage.store(photo.storageKey(), photo.bytes(), photo.contentType());
                 storedKeys.add(photo.storageKey());
-
-                db.update(
-                        """
-                        INSERT INTO anh_ban_giao_giao_dichs(
-                            id, ma_giao_dich, nguoi_tai_len_id, storage_key, original_filename,
-                            content_type, size_bytes, sha256, thu_tu, uploaded_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        photo.id(),
-                        transactionId,
-                        sellerId,
-                        photo.storageKey(),
-                        photo.originalFilename(),
-                        photo.contentType(),
-                        photo.sizeBytes(),
-                        photo.sha256(),
-                        i,
-                        tsNow
-                );
             }
         } catch (RuntimeException e) {
             List<String> keysToClean = new ArrayList<>(storedKeys);
@@ -654,55 +638,160 @@ public class TransactionHandoverService {
             throw e;
         }
 
-        String primaryPhotoUrl = "/api/v1/transactions/" + transactionId + "/handover-photo";
-        db.update(
-                """
-                UPDATE giao_dichs
-                SET trang_thai = 'CHO_XAC_NHAN',
-                    anh_ban_giao = ?,
-                    ghi_chu_ban_giao = ?,
-                    thoi_diem_bao_giao = ?,
-                    updated_at = ?,
-                    version = version + 1
-                WHERE ma_giao_dich = ?
-                """,
-                primaryPhotoUrl,
-                note,
-                tsNow,
-                tsNow,
-                transactionId
-        );
+        // Phase 3 (Short atomic transaction): lock rows, re-verify invariants, insert metadata/OTP, and commit
+        AtomicBoolean rollbackCleanupRegistered = new AtomicBoolean(false);
+        try {
+            return txTemplate.execute(txStatus -> {
+                if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCompletion(int status) {
+                            if (status != STATUS_COMMITTED) {
+                                for (String key : storedKeys) {
+                                    proofStorage.deleteQuietly(key);
+                                }
+                            }
+                        }
+                    });
+                    rollbackCleanupRegistered.set(true);
+                }
 
-        // Invalidate any stale un-used OTP rows defensively before issuing the fresh 6-digit OTP
-        db.update(
-                """
-                UPDATE ma_xac_nhan_otp
-                SET bi_vo_hieu = TRUE,
-                    ly_do_vo_hieu = COALESCE(
-                        ly_do_vo_hieu,
-                        CASE WHEN thoi_diem_het_han <= ? THEN 'HET_HAN' ELSE 'CAP_LAI' END
-                    ),
-                    otp_ciphertext = NULL
-                WHERE ma_giao_dich = ? AND da_dung = FALSE AND bi_vo_hieu = FALSE
-                """,
-                tsNow,
-                transactionId
-        );
+                // Strict lock order: (1) thanh_viens(seller) -> (2) tin_dangs -> (3) giao_dichs
+                lockAndVerifyActiveMember(sellerId);
+                lockListingForNoKeyUpdate(listingId);
+                LockedTransaction tx = lockTransactionForNoKeyUpdate(transactionId);
 
-        issueFreshOtpRow(transactionId, sellerId, tsNow, otpExpiresAt);
+                if (!TransactionDtos.TransactionStatus.DANG_GIAO.name().equals(tx.status())
+                        || tx.reportedDeliveredAt() != null) {
+                    throw new AuthFailure(
+                            409,
+                            "INVALID_STATE_TRANSITION",
+                            "Chỉ có thể báo đã giao khi giao dịch đang ở trạng thái đang giao."
+                    );
+                }
+                if (expectedVersion != null && expectedVersion != tx.version()) {
+                    throw new AuthFailure(409, "VERSION_CONFLICT", "Giao dịch vừa được cập nhật. Vui lòng tải lại trước khi thao tác.");
+                }
 
-        recordTimelineEvent(
-                transactionId,
-                "REPORT_DELIVERED",
-                TransactionDtos.TransactionStatus.DANG_GIAO.name(),
-                TransactionDtos.TransactionStatus.CHO_XAC_NHAN.name(),
-                sellerId,
-                "SELLER",
-                note != null ? note : "Người bán đã gửi ảnh bàn giao và báo đã giao.",
-                tsNow
-        );
+                Instant current = now();
+                Timestamp tsNow = Timestamp.from(current);
+                Timestamp otpExpiresAt = Timestamp.from(current.plusSeconds(otpTtlSeconds));
 
-        return loadTransactionDetail(sellerId, TransactionDtos.AdminViewerRole.NONE, transactionId);
+                for (int i = 0; i < validatedPhotos.size(); i++) {
+                    ValidatedProofPhoto photo = validatedPhotos.get(i);
+                    db.update(
+                            """
+                            INSERT INTO anh_ban_giao_giao_dichs(
+                                id, ma_giao_dich, nguoi_tai_len_id, storage_key, original_filename,
+                                content_type, size_bytes, sha256, thu_tu, uploaded_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            photo.id(),
+                            transactionId,
+                            sellerId,
+                            photo.storageKey(),
+                            photo.originalFilename(),
+                            photo.contentType(),
+                            photo.sizeBytes(),
+                            photo.sha256(),
+                            i,
+                            tsNow
+                    );
+                }
+
+                String primaryPhotoUrl = "/api/v1/transactions/" + transactionId + "/handover-photo";
+                db.update(
+                        """
+                        UPDATE giao_dichs
+                        SET trang_thai = 'CHO_XAC_NHAN',
+                            anh_ban_giao = ?,
+                            ghi_chu_ban_giao = ?,
+                            thoi_diem_bao_giao = ?,
+                            updated_at = ?,
+                            version = version + 1
+                        WHERE ma_giao_dich = ?
+                        """,
+                        primaryPhotoUrl,
+                        note,
+                        tsNow,
+                        tsNow,
+                        transactionId
+                );
+
+                // Invalidate any stale un-used OTP rows defensively before issuing the fresh 6-digit OTP
+                db.update(
+                        """
+                        UPDATE ma_xac_nhan_otp
+                        SET bi_vo_hieu = TRUE,
+                            ly_do_vo_hieu = COALESCE(
+                                ly_do_vo_hieu,
+                                CASE WHEN thoi_diem_het_han <= ? THEN 'HET_HAN' ELSE 'CAP_LAI' END
+                            ),
+                            otp_ciphertext = NULL
+                        WHERE ma_giao_dich = ? AND da_dung = FALSE AND bi_vo_hieu = FALSE
+                        """,
+                        tsNow,
+                        transactionId
+                );
+
+                issueFreshOtpRow(transactionId, sellerId, tsNow, otpExpiresAt);
+
+                recordTimelineEvent(
+                        transactionId,
+                        "REPORT_DELIVERED",
+                        TransactionDtos.TransactionStatus.DANG_GIAO.name(),
+                        TransactionDtos.TransactionStatus.CHO_XAC_NHAN.name(),
+                        sellerId,
+                        "SELLER",
+                        note != null ? note : "Người bán đã gửi ảnh bàn giao và báo đã giao.",
+                        tsNow
+                );
+
+                return loadTransactionDetail(sellerId, TransactionDtos.AdminViewerRole.NONE, transactionId);
+            });
+        } catch (RuntimeException e) {
+            if (!rollbackCleanupRegistered.get()) {
+                for (String key : storedKeys) {
+                    proofStorage.deleteQuietly(key);
+                }
+            }
+            throw e;
+        }
+    }
+
+    private void preflightSellerMember(Map<String, Object> row) {
+        String status = String.valueOf(row.get("trang_thai_tai_khoan"));
+        if ("VO_HIEU_HOA".equals(status)) {
+            throw new AuthFailure(401, "UNAUTHORIZED", "Tài khoản đã bị vô hiệu hóa.");
+        }
+        if ("BI_KHOA".equals(status)) {
+            Timestamp lockedUntilTs = (Timestamp) row.get("khoa_den_ngay");
+            boolean expiredTempLock = "KHOA_TAM_THOI".equals(row.get("loai_han_che"))
+                    && lockedUntilTs != null
+                    && !lockedUntilTs.toInstant().isAfter(now());
+            if (expiredTempLock) {
+                // Allow expired temporary lock to reach Phase 3 where reconcileExpiredTemporaryLock unlocks it under lock
+                return;
+            }
+            int score = ((Number) row.get("diem_uy_tin")).intValue();
+            throw new AccountRestrictedFailure(new AccountRestrictedFailure.RestrictionPayload(
+                    status,
+                    (String) row.get("loai_han_che"),
+                    (String) row.get("ly_do_han_che"),
+                    lockedUntilTs != null ? lockedUntilTs.toInstant() : null,
+                    Boolean.TRUE.equals(row.get("cho_phep_khieu_nai")),
+                    score
+            ));
+        }
+        boolean emailVerified = Boolean.TRUE.equals(row.get("email_verified"));
+        boolean profileApproved = Boolean.TRUE.equals(row.get("profile_approved"));
+        if (!"HOAT_DONG".equals(status) || !emailVerified || !profileApproved) {
+            throw new AuthFailure(
+                    403,
+                    "FORBIDDEN",
+                    "Tài khoản cần được xác minh email và phê duyệt hồ sơ trước khi thực hiện giao dịch."
+            );
+        }
     }
 
     // =========================================================================
@@ -1469,7 +1558,6 @@ public class TransactionHandoverService {
                             tsNow,
                             listing.id()
                     );
-                    bumpUnreleasedItemsVersion(itemIds, itemsToRelease, tsNow);
                 } else if (sellerActiveForReopen && areAllListingItemsAvailable(listing.id())) {
                     db.update(
                             "UPDATE tin_dangs SET trang_thai = 'CONG_KHAI', updated_at = ?, version = version + 1 WHERE ma_tin = ?",
@@ -1483,7 +1571,6 @@ public class TransactionHandoverService {
                             tsNow,
                             listing.id()
                     );
-                    bumpUnreleasedItemsVersion(itemIds, itemsToRelease, tsNow);
                 }
             }
 
@@ -2475,24 +2562,6 @@ public class TransactionHandoverService {
                 listingId
         );
         return unavailable == null || unavailable == 0;
-    }
-
-    private void bumpUnreleasedItemsVersion(List<UUID> allItemIds, List<UUID> releasedItems, Timestamp tsNow) {
-        List<UUID> unbumped = allItemIds.stream()
-                .filter(id -> !releasedItems.contains(id))
-                .toList();
-        if (unbumped.isEmpty()) {
-            return;
-        }
-        UUID[] arr = unbumped.toArray(new UUID[0]);
-        db.update(con -> {
-            PreparedStatement ps = con.prepareStatement(
-                    "UPDATE do_vats SET version = version + 1, updated_at = ? WHERE ma_vat = ANY(?)"
-            );
-            ps.setTimestamp(1, tsNow);
-            ps.setArray(2, con.createArrayOf("uuid", arr));
-            return ps;
-        });
     }
 
     private List<TransactionDtos.TransactionItemDto> loadListingItems(UUID listingId) {

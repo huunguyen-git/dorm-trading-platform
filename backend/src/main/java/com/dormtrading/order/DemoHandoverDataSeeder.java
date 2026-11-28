@@ -29,10 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
  * and post-delivery mutual cancellation immediately on Mobile and Admin Web without manual SQL.
  *
  * <p>Strictly disabled in production and test environments: requires BOTH an active {@code dev} or
- * {@code demo} Spring profile AND {@code app.demo.seed-enabled=true}.
+ * {@code demo} Spring profile (never {@code prod}) AND {@code app.demo.seed-enabled=true}.
  */
 @Component
-@Profile({"dev", "demo"})
+@Profile("(dev | demo) & !prod")
 @ConditionalOnProperty(name = "app.demo.seed-enabled", havingValue = "true")
 public class DemoHandoverDataSeeder implements ApplicationRunner {
 
@@ -378,18 +378,28 @@ public class DemoHandoverDataSeeder implements ApplicationRunner {
             int score,
             boolean moderator
     ) {
-        List<UUID> existing = db.queryForList(
-                "SELECT user_id FROM thanh_viens WHERE user_id = ? OR lower(email) = lower(?) OR mssv = ? LIMIT 1",
-                UUID.class,
+        List<java.util.Map<String, Object>> existing = db.queryForList(
+                "SELECT user_id, email FROM thanh_viens WHERE user_id = ? OR lower(email) = lower(?) LIMIT 1",
                 preferredId,
-                email,
-                mssv
+                email
         );
         UUID userId;
+        String resolvedEmail;
         if (!existing.isEmpty()) {
-            userId = existing.getFirst();
+            userId = (UUID) existing.getFirst().get("user_id");
+            resolvedEmail = String.valueOf(existing.getFirst().get("email"));
         } else {
             userId = preferredId;
+            resolvedEmail = email;
+            String effectiveMssv = mssv;
+            Integer mssvCount = db.queryForObject(
+                    "SELECT COUNT(*) FROM thanh_viens WHERE mssv = ?",
+                    Integer.class,
+                    mssv
+            );
+            if (mssvCount != null && mssvCount > 0) {
+                effectiveMssv = "DM" + preferredId.toString().replace("-", "").substring(0, 12);
+            }
             db.update(
                     """
                     INSERT INTO thanh_viens(
@@ -398,11 +408,11 @@ public class DemoHandoverDataSeeder implements ApplicationRunner {
                         email_verified, profile_approved
                     ) VALUES (?, ?, ?, ?, ?, 'ĐHQG-HCM - UIT', ?, ?, '2022-2026', 'DANG_HOC', ?, 'HOAT_DONG', TRUE, TRUE)
                     """,
-                    userId, email, encodedPassword, fullName, mssv, campus, major, score
+                    userId, email, encodedPassword, fullName, effectiveMssv, campus, major, score
             );
         }
 
-        if (moderator) {
+        if (moderator && MODERATOR_EMAIL.equalsIgnoreCase(resolvedEmail)) {
             Integer modCount = db.queryForObject(
                     "SELECT COUNT(*) FROM vai_tro_quan_tri WHERE user_id = ? AND loai_vai_tro = 'KIEM_DUYET_VIEN' AND trang_thai_hieu_luc = TRUE",
                     Integer.class,
