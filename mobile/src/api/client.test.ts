@@ -8,6 +8,11 @@ import {
   toPersistableMediaUrl,
   upload,
 } from './client';
+import {
+  appendMultipartFile,
+  createWinterCGFilePart,
+  readLocalUriBytes,
+} from './multipart';
 import { tokenStore } from '../auth/tokenStore';
 import { useSession, type AccountRestriction, type User } from '../auth/session';
 
@@ -721,6 +726,40 @@ test('preserves server error code on ApiError for 409 inventory conflicts', asyn
   });
 });
 
+test('preserves structured OTP error details on ApiError for P3-02 handover verification', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
+  store.get.mockResolvedValue('valid-jwt');
+  fetchMock.mockResolvedValueOnce({
+    status: 400,
+    ok: false,
+    text: async () =>
+      JSON.stringify({
+        code: 'OTP_INVALID',
+        message: 'Mã xác nhận không đúng. Còn 4/5 lần thử.',
+        attemptsUsed: 1,
+        maxAttempts: 5,
+        remainingAttempts: 4,
+        locked: false,
+        expiresAt: '2026-11-28T01:10:00Z',
+      }),
+  });
+
+  await expect(
+    api('/transactions/tx-1/complete', { method: 'POST', body: JSON.stringify({ otp: '000000', version: 2 }) }),
+  ).rejects.toMatchObject({
+    status: 400,
+    code: 'OTP_INVALID',
+    message: 'Mã xác nhận không đúng. Còn 4/5 lần thử.',
+    details: {
+      attemptsUsed: 1,
+      maxAttempts: 5,
+      remainingAttempts: 4,
+      locked: false,
+      expiresAt: '2026-11-28T01:10:00Z',
+    },
+  });
+});
+
 test('refreshes once and retries a multipart upload with a fresh form body', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8082/api/v1';
   let access: string | null = 'expired';
@@ -778,4 +817,95 @@ test('refreshes then retries a protected attachment download, clears the session
   fetchMock.mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired()).mockResolvedValueOnce(expired());
   await expect(attachment('/profile/me/student-card')).rejects.toMatchObject({ status: 401 });
   expect(store.clear).toHaveBeenCalled();
+});
+
+test('multipart helper produces WinterCG-compatible FormData parts accepted by Expo SDK 58 convertFormDataAsync for file://, content://, and data: URIs', async () => {
+  const RNFormData = (
+    jest.requireActual('react-native/Libraries/Network/FormData') as { default: new () => FormData }
+  ).default;
+  const { installFormDataPatch } = jest.requireActual('expo/build/winter/FormData') as {
+    installFormDataPatch: (ctor: new () => FormData) => new () => FormData;
+  };
+  const { convertFormDataAsync } = jest.requireActual('expo/build/winter/fetch/convertFormData') as {
+    convertFormDataAsync: (
+      formData: FormData,
+      boundary?: string,
+    ) => Promise<{ body: Uint8Array; boundary: string }>;
+  };
+
+  class TestExpoFormData extends RNFormData {}
+  const ExpoFormData = installFormDataPatch(TestExpoFormData);
+
+  // 1. file:// URI read via fetch(uri).arrayBuffer() (Expo 58 OkHttpFileUrlInterceptor / iOS URLSession path)
+  const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    arrayBuffer: async () => jpegBytes.buffer,
+  });
+
+  const form = new ExpoFormData();
+  await appendMultipartFile(form, 'files', {
+    uri: 'file:///cache/ImagePicker/ktx_handover_lamp.jpg',
+    name: 'ktx_handover_lamp.jpg',
+    type: 'image/jpeg',
+  });
+  form.append('note', 'Đã bàn giao tại sảnh A');
+
+  // Non-enumerable `bytes` keeps `{ uri, name, type }` clean for legacy RN getParts() while satisfying `'bytes' in entry`
+  const entries = Array.from(form.entries());
+  const filePart = entries[0]?.[1] as unknown as Record<string, unknown>;
+  expect(Object.keys(filePart)).toEqual(['uri', 'name', 'type']);
+  expect('bytes' in filePart).toBe(true);
+  expect(typeof filePart.bytes).toBe('function');
+
+  // Execute Expo SDK 58's actual WinterCG convertFormDataAsync — must NOT throw Unsupported FormDataPart implementation
+  const boundary = '----ExpoFetchFormBoundaryTest123456';
+  const converted = await convertFormDataAsync(form, boundary);
+  const bodyText = Buffer.from(converted.body).toString('latin1');
+  expect(converted.boundary).toBe(boundary);
+  expect(bodyText).toContain('content-disposition: form-data; name="files"; filename="ktx_handover_lamp.jpg"');
+  expect(bodyText).toContain('content-type: image/jpeg');
+  expect(bodyText).toContain('content-disposition: form-data; name="note"');
+  expect(Buffer.from(converted.body).includes(Buffer.from(jpegBytes))).toBe(true);
+
+  // Calling bytes() a second time (e.g. on 401 refresh retry) reuses cached bytes cleanly
+  const part = createWinterCGFilePart({
+    uri: 'data:image/png;base64,iVBORw0KGgo=',
+    name: 'proof.png',
+    type: 'image/png',
+  });
+  const firstRead = await part.bytes();
+  const secondRead = await part.bytes();
+  expect(firstRead).toEqual(secondRead);
+  expect(Array.from(firstRead.slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+  // 2. content:// URI (Android 15 Photo Picker) reads via XMLHttpRequest blob + ContentResolver path without touching fetch()
+  const contentBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+  const originalXhr = globalThis.XMLHttpRequest;
+  const closeSpy = jest.fn();
+  class MockXhr {
+    responseType = '';
+    response: unknown = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    open = jest.fn();
+    send = jest.fn(() => {
+      this.response = {
+        size: contentBytes.byteLength,
+        arrayBuffer: async () => contentBytes.buffer,
+        close: closeSpy,
+      };
+      this.onload?.();
+    });
+  }
+  globalThis.XMLHttpRequest = MockXhr as unknown as typeof XMLHttpRequest;
+  try {
+    fetchMock.mockClear();
+    const readContent = await readLocalUriBytes('content://media/picker_get_content/0/123');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(Array.from(readContent)).toEqual([0x52, 0x49, 0x46, 0x46]);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  } finally {
+    globalThis.XMLHttpRequest = originalXhr;
+  }
 });
