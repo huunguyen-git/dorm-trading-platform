@@ -113,6 +113,7 @@ export interface ListingSummary {
   createdAt: string | null;
   updatedAt: string | null;
   version: number;
+  activeTransactionId?: string | null;
 }
 
 export interface ListingDetail extends ListingSummary {
@@ -522,6 +523,9 @@ export function normalizeListingSummary(raw: unknown): ListingSummary {
     createdAt: asNullableString(rec.createdAt ?? rec.created_at),
     updatedAt: asNullableString(rec.updatedAt ?? rec.updated_at),
     version: Math.max(0, asNumber(rec.version, 0)),
+    ...(asNullableString(rec.activeTransactionId ?? rec.active_transaction_id)
+      ? { activeTransactionId: asNullableString(rec.activeTransactionId ?? rec.active_transaction_id) }
+      : {}),
   };
 }
 
