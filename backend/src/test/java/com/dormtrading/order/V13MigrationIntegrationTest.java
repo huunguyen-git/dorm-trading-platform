@@ -1,25 +1,31 @@
 package com.dormtrading.order;
 
 import com.dormtrading.common.BaseIntegrationTest;
+import com.dormtrading.config.PostgresTestContainer;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.util.List;
+import java.util.UUID;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class V10MigrationIntegrationTest extends BaseIntegrationTest {
+class V13MigrationIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate db;
 
     @Test
-    void migrationV10CreatesOrderTablesColumnsConstraintsAndPartialUniqueIndexes() {
-        Boolean v10Applied = db.queryForObject(
-                "SELECT success FROM flyway_schema_history WHERE version = '10'",
+    void migrationV13CreatesOrderTablesColumnsConstraintsAndPartialUniqueIndexes() {
+        Boolean v13Applied = db.queryForObject(
+                "SELECT success FROM flyway_schema_history WHERE version = '13'",
                 Boolean.class
         );
-        assertThat(v10Applied).isTrue();
+        assertThat(v13Applied).isTrue();
         List<String> tables = db.queryForList(
                 """
                 SELECT table_name
@@ -137,5 +143,63 @@ class V10MigrationIntegrationTest extends BaseIntegrationTest {
                 String.class
         );
         assertThat(itemFkDeleteRule).isEqualTo("SET NULL");
+    }
+
+    @Test
+    void cleanMigrateV1ThroughV13AndUpgradeV12ToV13PreserveExistingData() throws Exception {
+        var pg = PostgresTestContainer.getInstance();
+
+        String cleanSchema = "v13_clean_" + UUID.randomUUID().toString().replace("-", "");
+        var cleanResult = Flyway.configure()
+                .dataSource(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword())
+                .schemas(cleanSchema)
+                .defaultSchema(cleanSchema)
+                .target("13")
+                .load()
+                .migrate();
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(13);
+
+        String upgradeSchema = "v13_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        var upgradeConfig = Flyway.configure()
+                .dataSource(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword())
+                .schemas(upgradeSchema)
+                .defaultSchema(upgradeSchema);
+        var v12Result = upgradeConfig.target("12").load().migrate();
+        assertThat(v12Result.migrationsExecuted).isEqualTo(12);
+
+        UUID sellerId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+
+        try (Connection conn = DriverManager.getConnection(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword());
+                Statement stmt = conn.createStatement()) {
+            stmt.execute("SET search_path TO " + upgradeSchema);
+            stmt.execute(
+                    "INSERT INTO thanh_viens(user_id, email, mat_khau_hash, ho_ten, mssv, trang_thai_tai_khoan) "
+                            + "VALUES ('" + sellerId + "', 'v13seller@student.edu.vn', 'hash', 'Seller', '23521001', 'HOAT_DONG'), "
+                            + "('" + buyerId + "', 'v13buyer@student.edu.vn', 'hash', 'Buyer', '23521002', 'HOAT_DONG')"
+            );
+            stmt.execute(
+                    "INSERT INTO tin_dangs(ma_tin, nguoi_dang_id, tieu_de, gia_vnd, trang_thai) "
+                            + "VALUES ('" + listingId + "', '" + sellerId + "', 'Tin V12', 50000, 'CONG_KHAI')"
+            );
+            stmt.execute(
+                    "INSERT INTO giao_dichs(ma_giao_dich, ma_tin, nguoi_ban_id, nguoi_mua_id, gia_thoa_thuan, trang_thai) "
+                            + "VALUES ('" + orderId + "', '" + listingId + "', '" + sellerId + "', '" + buyerId + "', 50000, 'YEU_CAU')"
+            );
+
+            var v13Upgrade = upgradeConfig.target("13").load().migrate();
+            assertThat(v13Upgrade.migrationsExecuted).isEqualTo(1);
+
+            try (var rs = stmt.executeQuery(
+                    "SELECT trang_thai, lich_hen_da_xac_nhan, thoi_diem_bat_dau_giao "
+                            + "FROM giao_dichs WHERE ma_giao_dich = '" + orderId + "'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("trang_thai")).isEqualTo("YEU_CAU");
+                assertThat(rs.getBoolean("lich_hen_da_xac_nhan")).isFalse();
+                assertThat(rs.getObject("thoi_diem_bat_dau_giao")).isNull();
+            }
+        }
     }
 }

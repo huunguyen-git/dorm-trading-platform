@@ -1056,6 +1056,31 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
   test('ProfileScreen loads unread order notifications badge and MyListingsScreen links GIU_CHO listings to Orders with initialStatus ALL', async () => {
     useSession.setState({ token: 'seller-jwt', user: sellerUser, loading: false });
     mockedApi.mockImplementation(async (path: string) => {
+      if (path === '/profile/me') {
+        return {
+          id: sellerUser.id,
+          name: sellerUser.name,
+          studentId: sellerUser.studentId,
+          email: sellerUser.email,
+          phone: null,
+          school: 'UIT',
+          campus: 'KTX Khu A',
+          major: 'KTPM',
+          cohort: 'K18',
+          studyStatus: 'DANG_HOC',
+          reputation: 120,
+          emailVerified: true,
+          profileApproved: true,
+          profileStatus: 'DA_DUYET',
+          rejectReason: null,
+          pendingUpdate: false,
+          hasStudentCard: false,
+          accountStatus: 'HOAT_DONG',
+        };
+      }
+      if (path === '/auth/me') {
+        return sellerUser;
+      }
       if (path.startsWith('/notifications')) {
         return {
           items: [makeNotification('n-1'), makeNotification('n-2'), makeNotification('n-3')],
@@ -1142,7 +1167,7 @@ describe('P2-04 & P2-05 Mobile Orders, Reservation, Scheduling & Start Delivery'
     });
 
     const { unmount } = render(<ProfileScreen />);
-    const orderShortcuts = screen.getAllByTestId('profile-shortcut-orders');
+    const orderShortcuts = await screen.findAllByTestId('profile-shortcut-orders');
     expect(orderShortcuts).toHaveLength(1);
     const unreadBadge = await screen.findByTestId('profile-orders-unread-badge');
     expect(unreadBadge).toBeTruthy();

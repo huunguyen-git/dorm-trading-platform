@@ -1,10 +1,10 @@
 -- ==============================================================================
--- Flyway Migration V10: Giữ chỗ nguyên tử, Lịch hẹn hai bên & Thông báo giao dịch
+-- Flyway Migration V13: Giữ chỗ nguyên tử, Lịch hẹn hai bên & Thông báo giao dịch
 -- Tasks: P2-04 (UC-22, UC-23, UC-24), P2-05 (UC-25, UC-26)
 -- Tham chiếu: FR-04, FR-07, FR-08, FR-09, NFR-01, NFR-02, NFR-03
 -- ==============================================================================
 
--- 1. Bổ sung cột trên giao_dichs (tương thích ngược 100% với V1-V6)
+-- 1. Bổ sung cột trên giao_dichs (tương thích ngược 100% với V1-V12)
 -- Tách biệt thoi_diem_bat_dau_giao (UC-26) với thoi_diem_bao_giao / anh_ban_giao (UC-27)
 ALTER TABLE giao_dichs
   ADD COLUMN IF NOT EXISTS ghi_chu TEXT,
