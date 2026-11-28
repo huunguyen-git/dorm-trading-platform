@@ -1,6 +1,6 @@
 # P3-04 · Thiết kế đánh giá giao dịch, bằng chứng riêng tư và đồng bộ điểm uy tín
 
-Ngày: **28–29/11/2026** · Trạng thái: **Đã triển khai, hoàn tất 16 mục sửa review PR #40 và kiểm chứng độc lập trên nhánh `huunguyen-git/feat/p3` (Chờ review)**.
+Ngày: **28–29/11/2026** · Trạng thái: **Đã triển khai, hoàn tất 16 mục sửa review PR #40 và kiểm chứng độc lập trên nhánh `feat/p3-04-transaction-reviews` (Chờ review)**.
 
 ## Bối cảnh và căn cứ
 
