@@ -1,5 +1,6 @@
 package com.dormtrading.iam.auth;
 
+import com.dormtrading.order.HandoverOtpFailure;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import org.springframework.http.*;
@@ -17,6 +18,21 @@ public class AuthErrors {
     @ExceptionHandler(AccountRestrictedFailure.class)
     ResponseEntity<AccountRestrictedFailure.ErrorBody> restricted(AccountRestrictedFailure e) {
         return ResponseEntity.status(e.status).body(e.toBody());
+    }
+
+    @ExceptionHandler(HandoverOtpFailure.class)
+    ResponseEntity<Map<String, Object>> handoverOtp(HandoverOtpFailure e) {
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("code", e.code);
+        body.put("message", e.getMessage());
+        body.put("attemptsUsed", e.attemptsUsed);
+        body.put("maxAttempts", e.maxAttempts);
+        body.put("remainingAttempts", e.remainingAttempts);
+        body.put("locked", e.locked);
+        if (e.expiresAt != null) {
+            body.put("expiresAt", e.expiresAt);
+        }
+        return ResponseEntity.status(e.status).body(body);
     }
 
     @ExceptionHandler(AuthFailure.class)
@@ -57,20 +73,46 @@ public class AuthErrors {
             MultipartException.class
     })
     ResponseEntity<Map<String, String>> invalidMedia(Exception e, HttpServletRequest request) {
-        if (e instanceof MaxUploadSizeExceededException) {
+        if (isUploadSizeExceeded(e)) {
             return fileTooLarge(request);
         }
         if (isProfileEndpoint(request)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("code", "INVALID_INPUT", "message", "Thiếu tệp ảnh thẻ."));
         }
+        if (isHandoverDeliverEndpoint(request)) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("code", "HANDOVER_PHOTO_REQUIRED", "message", "Vui lòng chọn ít nhất 1 ảnh bàn giao."));
+        }
         return ResponseEntity.badRequest()
                 .body(Map.of("code", "INVALID_MEDIA", "message", "Yêu cầu tải lên hình ảnh không hợp lệ."));
+    }
+
+    private static boolean isUploadSizeExceeded(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 10; depth++) {
+            if (current instanceof MaxUploadSizeExceededException) {
+                return true;
+            }
+            String simpleName = current.getClass().getSimpleName();
+            if ("SizeLimitExceededException".equals(simpleName)
+                    || "FileSizeLimitExceededException".equals(simpleName)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static boolean isProfileEndpoint(HttpServletRequest request) {
         return request != null && request.getRequestURI() != null
                 && request.getRequestURI().startsWith("/api/v1/profile/");
+    }
+
+    private static boolean isHandoverDeliverEndpoint(HttpServletRequest request) {
+        return request != null && request.getRequestURI() != null
+                && request.getRequestURI().startsWith("/api/v1/transactions/")
+                && request.getRequestURI().endsWith("/deliver");
     }
 
     @ExceptionHandler({
