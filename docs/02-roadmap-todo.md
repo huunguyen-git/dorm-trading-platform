@@ -73,7 +73,7 @@ Nghiệm thu từ báo giao qua xác nhận hoặc tranh chấp tới đánh gi�
 |---|---|---|---|---|---|
 | P3-01 | Xóa Tài khoản Cá nhân & Người dùng ([UC-15](use-cases/UC-15.md), [UC-16](use-cases/UC-16.md)) | — | 06/12 | Chưa thực hiện | — |
 | P3-02 | Hoàn tất giao dịch & Yêu cầu hủy sau báo giao ([UC-27](use-cases/UC-27.md), [UC-28](use-cases/UC-28.md)) | — | 08/12 | Chưa thực hiện | — |
-| P3-03 | Xử lý Giao dịch Quá hạn / Tranh chấp ([UC-29](use-cases/UC-29.md)) | — | 08/12 | Chưa thực hiện | — |
+| P3-03 | Xử lý Giao dịch Quá hạn / Tranh chấp ([UC-29](use-cases/UC-29.md)) | Nguyễn Quốc Nguyên | 08/12 | Đang thực hiện | [Spec P3-03](specs/P3-03.md) · [ADR P3-03](decisions/P3-03-xu-ly-giao-dich-qua-han-tranh-chap.md) |
 | P3-04 | Đánh giá, Sửa & Xóa Đánh giá ([UC-30](use-cases/UC-30.md), [UC-31](use-cases/UC-31.md), [UC-32](use-cases/UC-32.md)) | — | 10/12 | Chưa thực hiện | — |
 | P3-05 | Khiếu nại & Kiểm duyệt Đánh giá ([UC-33](use-cases/UC-33.md), [UC-34](use-cases/UC-34.md)) | — | 12/12 | Chưa thực hiện | — |
 | P3-06 | Kiểm duyệt Báo cáo & Xem Thống kê ([UC-37](use-cases/UC-37.md), [UC-38](use-cases/UC-38.md)) | — | 12/12 | Chưa thực hiện | — |
