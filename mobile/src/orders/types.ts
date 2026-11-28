@@ -319,6 +319,11 @@ export function getOrderStepperState(order: OrderDetail): OrderStepperState {
 
 export function getNotificationTone(type: string): CollapsibleAlertTone {
   const normalized = (type || '').toUpperCase();
+  if (normalized === 'DISPUTE_RESOLVED_COMPLETED') return 'success';
+  if (normalized === 'DISPUTE_RESOLVED_CANCELLED') return 'danger';
+  if (normalized === 'DISPUTE_EVIDENCE_REQUESTED') return 'warning';
+  if (normalized === 'DISPUTE_EVIDENCE_SUBMITTED') return 'accent';
+  if (normalized.startsWith('ORDER_ESCALATED_')) return 'warning';
   if (normalized.includes('CANCEL') || normalized.includes('REJECT')) return 'danger';
   if (
     normalized.includes('ACCEPTED') ||
@@ -327,7 +332,13 @@ export function getNotificationTone(type: string): CollapsibleAlertTone {
   ) {
     return 'success';
   }
-  if (normalized.includes('UPDATED') || normalized.includes('WARNING')) return 'warning';
+  if (
+    normalized.includes('UPDATED') ||
+    normalized.includes('WARNING') ||
+    normalized.startsWith('DISPUTE_')
+  ) {
+    return 'warning';
+  }
   return 'accent';
 }
 

@@ -15,6 +15,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
+import { resolveUserRestriction, useSession } from '../auth/session';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
@@ -31,6 +32,7 @@ import {
   QUICK_MEETING_LOCATIONS,
   SCHEDULE_REJECT_REASONS,
 } from '../orders/types';
+import { OrderDisputeSection } from '../components/OrderDisputeSection';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
   BottomSheet,
@@ -52,6 +54,15 @@ export default function OrderDetailScreen() {
   const insets = useContext(SafeAreaInsetsContext);
   const stickyBottomPad = Math.max(insets?.bottom ?? 0, primitive.space[3]);
   const orderId = params.id;
+
+  const sessionUser = useSession((s) => s.user);
+  const sessionRestriction = useSession((s) => s.restriction);
+  const isRestricted = Boolean(
+    sessionRestriction ||
+      resolveUserRestriction(sessionUser) ||
+      sessionUser?.accountStatus === 'BI_KHOA' ||
+      sessionUser?.accountStatus === 'VO_HIEU_HOA',
+  );
 
   const {
     selectedOrder,
@@ -447,6 +458,16 @@ export default function OrderDetailScreen() {
               />
             ) : null}
           </View>
+
+          {order.status === 'CHO_XU_LY' ||
+          order.status === 'HOAN_TAT' ||
+          order.status === 'HUY' ? (
+            <OrderDisputeSection
+              order={order}
+              isRestricted={isRestricted}
+              onDisputeUpdated={refresh}
+            />
+          ) : null}
 
           <View style={styles.sectionGap} />
 
