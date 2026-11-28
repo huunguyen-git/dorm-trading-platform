@@ -10,8 +10,8 @@
 
 ## 2. Các quyết định kỹ thuật đã chốt
 
-### 2.1. Mở rộng lược đồ tại `V8__chat_and_price_negotiation.sql` (không sửa các migration đã có)
-- Chọn phiên bản **`V8`** để tránh xung đột với các PR đang mở trong repo (`V6` ở PR #33, `V7` ở PR #34).
+### 2.1. Mở rộng lược đồ tại `V15__chat_and_price_negotiation.sql` (không sửa các migration đã có)
+- Chọn phiên bản **`V15`** theo thứ tự điều phối trên `main` (`V12` ở PR #33 đã merge, `V13` ở PR #38, `V14` ở PR #39, `V15` ở PR #35, `V16` ở PR #34).
 - **`hoi_thoais`**:
   - Bổ sung `gia_thoa_thuan INT NULL CHECK (gia_thoa_thuan > 0)`, `de_nghi_da_dong_y_id UUID NULL REFERENCES tin_nhans(ma_tin_nhan)`, `updated_at TIMESTAMPTZ`, `version BIGINT`.
   - Bổ sung `CHECK (nguoi_mua_id <> nguoi_ban_id)` để bảo đảm chủ tin không tự tạo hội thoại với chính mình ở cả tầng ứng dụng và cơ sở dữ liệu.
