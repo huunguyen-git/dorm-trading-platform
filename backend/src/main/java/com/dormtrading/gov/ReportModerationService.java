@@ -37,7 +37,7 @@ public class ReportModerationService {
 
     public record ReportGroup(String targetType, UUID targetId, String targetLabel, String targetStatus,
                               String category, long reportCount, Instant latestReportAt, String status,
-                              DecisionSummary decision) {}
+                              UUID decisionId, DecisionSummary decision) {}
 
     public record ReportItem(UUID reportId, UUID reporterId, String reporterName, String reporterStudentId,
                              String description, List<String> evidence, Instant createdAt, String status) {}
@@ -162,6 +162,7 @@ public class ReportModerationService {
                             rs.getLong("report_count"),
                             toInstant(rs.getTimestamp("latest_report_at")),
                             effectiveStatus,
+                            decisionId,
                             decision);
                 },
                 pageArgs.toArray());
@@ -170,7 +171,8 @@ public class ReportModerationService {
     }
 
     @Transactional(readOnly = true)
-    public ReportGroupDetail groupDetail(Jwt jwt, String targetType, UUID targetId, String category, String status) {
+    public ReportGroupDetail groupDetail(Jwt jwt, String targetType, UUID targetId, String category, String status,
+                                         UUID decisionId) {
         UUID moderatorId = actorId(jwt);
         String cleanType = requireTargetType(targetType);
         if (targetId == null) throw invalid("Thiếu mã đối tượng báo cáo.");
@@ -184,14 +186,23 @@ public class ReportModerationService {
                 ? "b.trang_thai IN ('CHO_XU_LY', 'DANG_XU_LY')"
                 : "b.trang_thai = 'DA_XU_LY'";
 
+        // Một nhóm (đối tượng + danh mục) có thể mang nhiều quyết định lịch sử sau các đợt báo cáo lại;
+        // decisionId chọn đúng quyết định cần xem, nếu thiếu lấy quyết định của báo cáo mới nhất.
+        List<Object> detailArgs = new ArrayList<>(List.of(cleanType, targetId, cleanCategory));
+        String decisionCondition = "";
+        if (decisionId != null) {
+            decisionCondition = " AND b.quyet_dinh_id = ?";
+            detailArgs.add(decisionId);
+        }
+
         List<Map<String, Object>> rows = db.queryForList(
                 "SELECT b.ma_bao_cao, b.nguoi_bao_cao_id, rep.ho_ten AS reporter_name, rep.mssv AS reporter_mssv, " +
                         "b.noi_dung, b.bang_chung, b.thoi_diem_tao, b.trang_thai, b.quyet_dinh_id " +
                         "FROM bao_caos b " +
                         "JOIN thanh_viens rep ON rep.user_id = b.nguoi_bao_cao_id " +
                         "WHERE b.loai_doi_tuong = ? AND b.doi_tuong_id = ? AND b.danh_muc_vi_pham = ? AND " +
-                        statusCondition + " ORDER BY b.thoi_diem_tao DESC, b.ma_bao_cao",
-                cleanType, targetId, cleanCategory);
+                        statusCondition + decisionCondition + " ORDER BY b.thoi_diem_tao DESC, b.ma_bao_cao",
+                detailArgs.toArray());
 
         if (rows.isEmpty()) {
             throw missing("Không tìm thấy nhóm báo cáo.");
@@ -210,8 +221,8 @@ public class ReportModerationService {
                 toInstant((Timestamp) row.get("thoi_diem_tao")),
                 (String) row.get("trang_thai"))).toList();
 
-        UUID decisionId = (UUID) rows.getFirst().get("quyet_dinh_id");
-        DecisionSummary decision = decisionId == null ? null : loadDecision(decisionId);
+        UUID linkedDecisionId = (UUID) rows.getFirst().get("quyet_dinh_id");
+        DecisionSummary decision = linkedDecisionId == null ? null : loadDecision(linkedDecisionId);
 
         return new ReportGroupDetail(cleanType, targetId, target.label(), target.status(),
                 cleanCategory, effectiveStatus, reports, decision);
@@ -232,16 +243,20 @@ public class ReportModerationService {
     @Transactional(readOnly = true)
     public List<DuplicateCandidate> duplicateCandidates(Jwt jwt) {
         actorId(jwt);
+        // DISTINCT ON yêu cầu ORDER BY đầu theo khóa khử trùng; sắp xếp theo thoi_diem phải bọc lớp ngoài,
+        // nếu không LIMIT 50 sẽ cắt theo thứ tự UUID ngẫu nhiên và rớt quyết định mới nhất.
         return db.query(
-                "SELECT DISTINCT ON (qd.ma_quyet_dinh) qd.ma_quyet_dinh, b.loai_doi_tuong, b.doi_tuong_id, " +
+                "SELECT * FROM (" +
+                        "SELECT DISTINCT ON (qd.ma_quyet_dinh) qd.ma_quyet_dinh, b.loai_doi_tuong, b.doi_tuong_id, " +
                         "COALESCE(u.ho_ten || ' (' || u.mssv || ')', t.tieu_de, b.doi_tuong_id::text) AS target_label, " +
                         "b.danh_muc_vi_pham, qd.ket_luan, qd.thoi_diem " +
                         "FROM quyet_dinhs qd " +
                         "JOIN bao_caos b ON b.quyet_dinh_id = qd.ma_quyet_dinh " +
                         "LEFT JOIN thanh_viens u ON b.loai_doi_tuong = 'NGUOI_DUNG' AND u.user_id = b.doi_tuong_id " +
                         "LEFT JOIN tin_dangs t ON b.loai_doi_tuong = 'TIN_DANG' AND t.ma_tin = b.doi_tuong_id " +
-                        "WHERE qd.ket_luan <> 'TRUNG' " +
-                        "ORDER BY qd.ma_quyet_dinh, qd.thoi_diem DESC LIMIT 50",
+                        "WHERE qd.ket_luan <> 'TRUNG' AND qd.ma_bao_cao IS NOT NULL " +
+                        "ORDER BY qd.ma_quyet_dinh, qd.thoi_diem DESC" +
+                        ") latest ORDER BY thoi_diem DESC LIMIT 50",
                 (rs, n) -> new DuplicateCandidate(
                         rs.getObject("ma_quyet_dinh", UUID.class),
                         rs.getString("loai_doi_tuong"),
@@ -269,8 +284,12 @@ public class ReportModerationService {
 
         if ("VI_PHAM".equals(conclusion)) {
             penaltyId = requireText(input.penaltyId(), 50, "Vui lòng chọn mức phạt.");
-            basis = requireText(input.basis(), 2000, "Vui lòng nhập căn cứ xử lý.");
+            // Căn cứ VI_PHAM được truyền thẳng vào sổ điểm uy tín (lý do tối đa 1000 ký tự).
+            basis = requireText(input.basis(), 1000, "Căn cứ xử lý tối đa 1000 ký tự.");
         } else if ("TRUNG".equals(conclusion)) {
+            if (input.penaltyId() != null && !input.penaltyId().isBlank()) {
+                throw invalid("Chỉ được chọn mức phạt khi kết luận là Vi phạm.");
+            }
             if (input.originalDecisionId() == null) {
                 throw invalid("Vui lòng chọn nhóm/quyết định gốc để liên kết trùng.");
             }
@@ -309,11 +328,15 @@ public class ReportModerationService {
         enforceNoConflictOfInterest(moderatorId, targetType, input.targetId(), target.ownerId(), pendingRows);
 
         if (originalDecisionId != null) {
-            Integer origCount = db.queryForObject(
-                    "SELECT count(*) FROM quyet_dinhs WHERE ma_quyet_dinh = ?",
-                    Integer.class, originalDecisionId);
-            if (origCount == null || origCount == 0) {
+            // Quyết định gốc phải là quyết định báo cáo (gắn ma_bao_cao) và không phải một quyết định TRUNG.
+            List<Map<String, Object>> originalRows = db.queryForList(
+                    "SELECT ket_luan, ma_bao_cao FROM quyet_dinhs WHERE ma_quyet_dinh = ? FOR UPDATE",
+                    originalDecisionId);
+            if (originalRows.isEmpty() || originalRows.getFirst().get("ma_bao_cao") == null) {
                 throw missing("Không tìm thấy quyết định gốc được liên kết.");
+            }
+            if ("TRUNG".equals(originalRows.getFirst().get("ket_luan"))) {
+                throw invalid("Quyết định gốc không được là kết luận Trùng.");
             }
         }
 
@@ -364,9 +387,14 @@ public class ReportModerationService {
                     String.class, target.ownerId());
 
             if ("TIN_DANG".equals(targetType)) {
+                // UC-37 buoc 9: an tin vi pham. Chi an cac trang thai con hieu luc hien thi/lien ket
+                // (CONG_KHAI, CHO_DUYET, GIU_CHO). KET_THUC la trang thai dong cua giao dich HOAN_TAT;
+                // chuyen ve 'AN' (van thuoc isActiveForInventoryLink) se khoi dong lai lien ket do vat
+                // DA_CHUYEN_GIAO va lech voi InventoryService. DA_RUT/HET_HAN/AN/NHAP da khong cong khai,
+                // gi nguyen de giu ly dong dong cua chu so huu.
                 int hidden = db.update(
                         "UPDATE tin_dangs SET trang_thai = 'AN', ly_do_an = ?, updated_at = ?, version = version + 1 " +
-                                "WHERE ma_tin = ? AND trang_thai <> 'AN'",
+                                "WHERE ma_tin = ? AND trang_thai IN ('CONG_KHAI', 'CHO_DUYET', 'GIU_CHO')",
                         basis, Timestamp.from(now), input.targetId());
                 listingHidden = hidden > 0;
             }

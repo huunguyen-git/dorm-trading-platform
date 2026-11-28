@@ -68,4 +68,30 @@ class ReportModerationServiceUnitTest {
                 .isInstanceOf(GovernanceFailure.class)
                 .hasMessageContaining("Kết luận xử lý không hợp lệ");
     }
+
+    @Test
+    void resolveCapsViolationBasisAtLedgerReasonLimit() {
+        // ReputationLedgerService.applyPenaltyScale từ chối lý do >1000 ký tự; nếu service cho qua 2000
+        // thì người dùng nhận lỗi ở tầng sổ điểm thay vì 400 đầu vào.
+        Jwt jwt = adminWebJwt(UUID.randomUUID());
+        var svc = service();
+
+        assertThatThrownBy(() -> svc.resolve(jwt,
+                new ReportModerationService.ResolveInput("TIN_DANG", UUID.randomUUID(), "SPAM", "VI_PHAM",
+                        "SPAM_01", "x".repeat(1001), null)))
+                .isInstanceOf(GovernanceFailure.class)
+                .hasMessageContaining("1000");
+    }
+
+    @Test
+    void resolveRejectsPenaltyOnDuplicateConclusionBeforeDbAccess() {
+        Jwt jwt = adminWebJwt(UUID.randomUUID());
+        var svc = service();
+
+        assertThatThrownBy(() -> svc.resolve(jwt,
+                new ReportModerationService.ResolveInput("TIN_DANG", UUID.randomUUID(), "SPAM", "TRUNG",
+                        "SPAM_01", "Trùng nhóm trước", UUID.randomUUID())))
+                .isInstanceOf(GovernanceFailure.class)
+                .hasMessageContaining("Chỉ được chọn mức phạt");
+    }
 }

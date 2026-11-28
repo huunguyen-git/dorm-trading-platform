@@ -105,3 +105,16 @@ describe('role-based session', () => {
     expect(request).not.toHaveBeenCalledWith(expect.stringMatching('/admin/senior/penalties'), expect.anything());
   });
 });
+
+describe('senior admin governance routes', () => {
+  it('renders the report queue for an admin visiting /reports', async () => {
+    request.mockImplementation(async (path) => {
+      if (path === '/auth/me') return { ...moderator, role: 'admin' } as never;
+      if (path.startsWith('/admin/reports/groups?')) return { items: [], page: 0, size: 20, total: 0 } as never;
+      return {} as never;
+    });
+    render(<MemoryRouter initialEntries={['/reports']}><App /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Kiểm duyệt báo cáo' })).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith(expect.stringContaining('/admin/reports/groups'), expect.anything());
+  });
+});

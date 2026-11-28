@@ -44,6 +44,7 @@ export type ReportGroup = {
   reportCount: number;
   latestReportAt: string;
   status: 'CHO_XU_LY' | 'DA_XU_LY';
+  decisionId: string | null;
   decision: DecisionSummary | null;
 };
 

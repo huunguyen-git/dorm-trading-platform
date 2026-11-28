@@ -9,6 +9,7 @@ export const rolePages: Record<Role, { path: string; label: string }[]> = {
     { path: 'categories', label: 'Danh mục' },
     { path: 'moderators', label: 'Kiểm duyệt viên' },
     { path: 'penalties', label: 'Thang phạt' },
+    { path: 'reports', label: 'Báo cáo' },
     { path: 'statistics', label: 'Thống kê' },
   ],
   moderator: [

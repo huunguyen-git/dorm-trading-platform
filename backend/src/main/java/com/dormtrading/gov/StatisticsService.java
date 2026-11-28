@@ -84,6 +84,8 @@ public class StatisticsService {
                 "         count(*) AS listing_cnt " +
                 "  FROM tin_dangs t " +
                 "  WHERE t.trang_thai = 'CONG_KHAI' " +
+                "    AND COALESCE(t.published_at, t.created_at) >= ? AND COALESCE(t.published_at, t.created_at) < ? " +
+                "    AND (t.expires_at IS NULL OR t.expires_at >= ?) " +
                 "    AND (NULLIF(trim(t.ma_mon_hoc), '') IS NOT NULL OR NULLIF(trim(t.ten_mon_hoc), '') IS NOT NULL) " +
                 "  GROUP BY 1, 2" +
                 ") " +
@@ -102,7 +104,9 @@ public class StatisticsService {
                 rs.getLong("exchanged_count"),
                 rs.getLong("active_listing_count"),
                 0L),
-                Timestamp.from(period.from()), Timestamp.from(period.to()), limit);
+                Timestamp.from(period.from()), Timestamp.from(period.to()),
+                Timestamp.from(period.from()), Timestamp.from(period.to()), Timestamp.from(period.to()),
+                limit);
 
         return new TopSubjectsResponse(period, items, false);
     }
@@ -116,27 +120,42 @@ public class StatisticsService {
             throw invalid("Tham số phân trang không hợp lệ.");
         }
 
+        // UC-29: giao dịch tranh chấp / chờ quản trị xử lý có trạng thái 'CHO_XU_LY' (schema không có 'TRANH_CHAP').
+        // FR-16: đếm vi phạm theo quyết định DISTINCT (một quyết định gộp nhiều báo cáo = 1 vi phạm) và loại
+        // tài khoản CHO_KICH_HOAT (chưa kích hoạt, điểm mặc định) để không kéo user mới lên đầu bảng.
         String cte = "WITH user_stats AS (" +
                 "  SELECT u.user_id, u.ho_ten, u.mssv, u.diem_uy_tin, u.trang_thai_tai_khoan, " +
                 "    (SELECT count(*) FROM giao_dichs gd " +
                 "     JOIN tin_dangs t ON t.ma_tin = gd.ma_tin " +
-                "     WHERE gd.trang_thai = 'TRANH_CHAP' " +
+                "     WHERE gd.trang_thai = 'CHO_XU_LY' " +
                 "       AND (gd.nguoi_mua_id = u.user_id OR t.nguoi_dang_id = u.user_id)) AS dispute_count, " +
-                "    (SELECT count(*) FROM quyet_dinhs qd " +
+                "    (SELECT count(DISTINCT qd.ma_quyet_dinh) FROM quyet_dinhs qd " +
                 "     JOIN bao_caos b ON b.quyet_dinh_id = qd.ma_quyet_dinh " +
                 "     LEFT JOIN tin_dangs t ON b.loai_doi_tuong = 'TIN_DANG' AND t.ma_tin = b.doi_tuong_id " +
                 "     WHERE qd.ket_luan = 'VI_PHAM' " +
                 "       AND ((b.loai_doi_tuong = 'NGUOI_DUNG' AND b.doi_tuong_id = u.user_id) " +
                 "         OR (b.loai_doi_tuong = 'TIN_DANG' AND t.nguoi_dang_id = u.user_id))) AS violation_count " +
                 "  FROM thanh_viens u " +
-                "  WHERE u.trang_thai_tai_khoan <> 'CHO_DUYET'" +
+                "  WHERE u.trang_thai_tai_khoan <> 'CHO_KICH_HOAT'" +
                 ") ";
 
-        String filter = " WHERE diem_uy_tin <= ? OR dispute_count >= ?";
+        // minDisputes = 0 nghĩa là không lọc theo tranh chấp; chỉ OR dispute_count khi ngưỡng > 0.
+        String filter = minDisputes > 0
+                ? " WHERE (diem_uy_tin <= ? OR dispute_count >= ?)"
+                : " WHERE diem_uy_tin <= ?";
+        List<Object> totalArgs = new ArrayList<>();
+        totalArgs.add(maxScore);
+        if (minDisputes > 0) {
+            totalArgs.add(minDisputes);
+        }
         Long totalObj = db.queryForObject(
                 cte + "SELECT count(*) FROM user_stats" + filter,
-                Long.class, maxScore, minDisputes);
+                Long.class, totalArgs.toArray());
         long total = totalObj == null ? 0L : totalObj;
+
+        List<Object> pageArgs = new ArrayList<>(totalArgs);
+        pageArgs.add(size);
+        pageArgs.add((long) page * size);
 
         List<LowReputationUser> items = db.query(
                 cte + "SELECT user_id, ho_ten, mssv, diem_uy_tin, trang_thai_tai_khoan, dispute_count, violation_count " +
@@ -150,7 +169,7 @@ public class StatisticsService {
                         rs.getString("trang_thai_tai_khoan"),
                         rs.getLong("dispute_count"),
                         rs.getLong("violation_count")),
-                maxScore, minDisputes, size, (long) page * size);
+                pageArgs.toArray());
 
         return new GovernanceService.Page<>(items, page, size, total);
     }

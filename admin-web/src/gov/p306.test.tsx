@@ -33,6 +33,7 @@ it('loads report groups, opens detail, and resolves group as VI_PHAM', async () 
           reportCount: 2,
           latestReportAt: '2026-11-28T07:00:00Z',
           status: 'CHO_XU_LY',
+          decisionId: null,
           decision: null,
         }],
         page: 0,
@@ -110,6 +111,7 @@ it('shows conflict error when report group was already processed concurrently', 
           reportCount: 1,
           latestReportAt: '2026-11-28T07:00:00Z',
           status: 'CHO_XU_LY',
+          decisionId: null,
           decision: null,
         }],
         page: 0,
@@ -236,6 +238,7 @@ it('resolves duplicate report group with originalDecisionId and handles conflict
           reportCount: 1,
           latestReportAt: '2026-11-28T07:00:00Z',
           status: 'CHO_XU_LY',
+          decisionId: null,
           decision: null,
         }],
         page: 0,
@@ -317,6 +320,7 @@ it('shows conflict of interest alert when moderator opens self-related report gr
           reportCount: 1,
           latestReportAt: '2026-11-28T07:00:00Z',
           status: 'CHO_XU_LY',
+          decisionId: null,
           decision: null,
         }],
         page: 0,
@@ -337,4 +341,92 @@ it('shows conflict of interest alert when moderator opens self-related report gr
 
   await user.click(await screen.findByRole('button', { name: 'Xem & xử lý' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(/xung đột lợi ích/);
+});
+
+it('caps the violation basis at the ledger limit of 1000 characters', async () => {
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/admin/reports/groups?')) {
+      return {
+        items: [{
+          targetType: 'TIN_DANG', targetId: 't-len', targetLabel: 'Tin căn cứ dài',
+          targetStatus: 'CONG_KHAI', category: 'SPAM', reportCount: 1,
+          latestReportAt: '2026-11-28T07:00:00Z', status: 'CHO_XU_LY',
+          decisionId: null, decision: null,
+        }],
+        page: 0, size: 20, total: 1,
+      } as never;
+    }
+    if (path.startsWith('/admin/reports/groups/detail?')) {
+      return {
+        targetType: 'TIN_DANG', targetId: 't-len', targetLabel: 'Tin căn cứ dài',
+        targetStatus: 'CONG_KHAI', category: 'SPAM', status: 'CHO_XU_LY',
+        reports: [], decision: null,
+      } as never;
+    }
+    if (path === '/admin/reports/penalties') return [] as never;
+    if (path === '/admin/reports/duplicate-candidates') return [] as never;
+    return undefined as never;
+  });
+
+  const user = userEvent.setup();
+  render(<ReportsModerationPage />);
+  await user.click(await screen.findByRole('button', { name: 'Xem & xử lý' }));
+  const dialog = await screen.findByRole('dialog');
+
+  // VI_PHAM phải khớp trần 1000 ký tự của sổ điểm uy tín, không phải 2000.
+  expect(within(dialog).getByLabelText(/Căn cứ xử lý/)).toHaveAttribute('maxLength', '1000');
+  await user.selectOptions(within(dialog).getByLabelText(/Kết luận/), 'KHONG_VI_PHAM');
+  expect(within(dialog).getByLabelText(/Căn cứ xử lý/)).toHaveAttribute('maxLength', '2000');
+});
+
+it('keys and requests each resolved decision of a re-reported group separately', async () => {
+  const detailCalls: string[] = [];
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/admin/reports/groups?')) {
+      return {
+        items: [
+          {
+            targetType: 'TIN_DANG', targetId: 't-twice', targetLabel: 'Tin hai quyết định',
+            targetStatus: 'CONG_KHAI', category: 'SPAM', reportCount: 1,
+            latestReportAt: '2026-11-28T08:00:00Z', status: 'DA_XU_LY',
+            decisionId: 'd-new',
+            decision: { decisionId: 'd-new', conclusion: 'VI_PHAM', penaltyId: 'P1', penaltyName: 'Phạt 1',
+              penaltyPoints: 10, basis: 'Đợt hai', originalDecisionId: null, moderatorId: 'm',
+              moderatorName: 'Mod', decidedAt: '2026-11-28T08:00:00Z' },
+          },
+          {
+            targetType: 'TIN_DANG', targetId: 't-twice', targetLabel: 'Tin hai quyết định',
+            targetStatus: 'CONG_KHAI', category: 'SPAM', reportCount: 1,
+            latestReportAt: '2026-11-28T07:00:00Z', status: 'DA_XU_LY',
+            decisionId: 'd-old',
+            decision: { decisionId: 'd-old', conclusion: 'KHONG_VI_PHAM', penaltyId: null, penaltyName: null,
+              penaltyPoints: null, basis: 'Đợt một', originalDecisionId: null, moderatorId: 'm',
+              moderatorName: 'Mod', decidedAt: '2026-11-28T07:00:00Z' },
+          },
+        ],
+        page: 0, size: 20, total: 2,
+      } as never;
+    }
+    if (path.startsWith('/admin/reports/groups/detail?')) {
+      detailCalls.push(new URL(path, 'http://localhost').searchParams.get('decisionId') ?? '');
+      return {
+        targetType: 'TIN_DANG', targetId: 't-twice', targetLabel: 'Tin hai quyết định',
+        targetStatus: 'CONG_KHAI', category: 'SPAM', status: 'DA_XU_LY',
+        reports: [], decision: null,
+      } as never;
+    }
+    return undefined as never;
+  });
+
+  const user = userEvent.setup();
+  const { container } = render(<ReportsModerationPage />);
+  const buttons = await screen.findAllByRole('button', { name: 'Xem chi tiết' });
+  // Hai dong cung (doi tuong, danh muc, trang thai) phai khong bi React gộp key.
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+  expect(buttons).toHaveLength(2);
+
+  await user.click(buttons[1]);
+  await user.click(buttons[0]);
+  expect(detailCalls).toContain('d-old');
+  expect(detailCalls).toContain('d-new');
 });

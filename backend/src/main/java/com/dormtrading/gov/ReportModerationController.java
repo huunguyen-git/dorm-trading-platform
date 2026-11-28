@@ -34,8 +34,9 @@ public class ReportModerationController {
             @RequestParam String targetType,
             @RequestParam UUID targetId,
             @RequestParam String category,
-            @RequestParam(defaultValue = "CHO_XU_LY") String status) {
-        return service.groupDetail(jwt, targetType, targetId, category, status);
+            @RequestParam(defaultValue = "CHO_XU_LY") String status,
+            @RequestParam(required = false) UUID decisionId) {
+        return service.groupDetail(jwt, targetType, targetId, category, status, decisionId);
     }
 
     @GetMapping("/penalties")

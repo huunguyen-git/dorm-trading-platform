@@ -73,6 +73,7 @@ export default function ReportsModerationPage() {
         category: group.category,
         status: group.status,
       });
+      if (group.decisionId) params.set('decisionId', group.decisionId);
       const detailPromise = request<ReportGroupDetail>(`${reportsApi}/groups/detail?${params.toString()}`);
       if (group.status === 'CHO_XU_LY') {
         const [d, p, dup] = await Promise.all([
@@ -214,7 +215,7 @@ export default function ReportsModerationPage() {
               </thead>
               <tbody>
                 {state.data.items.map((group) => (
-                  <tr key={`${group.targetType}-${group.targetId}-${group.category}-${group.status}`}>
+                  <tr key={`${group.targetType}-${group.targetId}-${group.category}-${group.status}-${group.decisionId ?? 'pending'}`}>
                     <td>
                       <strong>{group.targetLabel}</strong>
                       <div>
@@ -389,6 +390,7 @@ export default function ReportsModerationPage() {
                     <textarea
                       id="resolve-basis"
                       rows={3}
+                      maxLength={conclusion === 'VI_PHAM' ? 1000 : 2000}
                       value={basis}
                       onChange={(e) => setBasis(e.target.value)}
                       required={conclusion !== 'TRUNG'}
