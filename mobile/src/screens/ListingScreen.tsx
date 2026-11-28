@@ -499,7 +499,10 @@ export default function ListingScreen() {
       navigation.navigate('Login');
       return;
     }
-    showUpcomingFeatureNotice('Giữ chỗ');
+    navigation.navigate('ReservationRequest', {
+      listingId: display.id,
+      listing: display,
+    });
   };
 
   const handleReportPress = () => {
@@ -597,6 +600,23 @@ export default function ListingScreen() {
               },
             ]
           : []),
+        {
+          key: 'orders',
+          label:
+            detail && detail.pendingRequestCount > 0
+              ? `Yêu cầu giữ chỗ (${detail.pendingRequestCount})`
+              : 'Giao dịch của tin này',
+          icon: 'shopping-bag',
+          onPress: () =>
+            navigation.navigate('Orders', {
+              initialRole: 'SELLER',
+              initialStatus:
+                detail && detail.pendingRequestCount > 0 ? 'YEU_CAU' : 'ALL',
+              listingId: display.id,
+              listingTitle: display.title,
+            }),
+          testID: 'action-sheet-orders',
+        },
         {
           key: 'manage',
           label: 'Quản lý tin của tôi',
@@ -960,6 +980,42 @@ export default function ListingScreen() {
                   : display.status === 'AN'
                     ? `Tin đang bị ẩn.${detail?.hiddenReason ? ` Lý do: ${detail.hiddenReason}` : ''}`
                     : 'Tin hiện không hiển thị công khai trong kết quả tìm kiếm.'
+              }
+              actionLabel={display.status === 'GIU_CHO' ? 'Xem giao dịch giữ chỗ' : undefined}
+              actionTestID={
+                display.status === 'GIU_CHO' ? 'owner-view-reserved-order-button' : undefined
+              }
+              onActionPress={
+                display.status === 'GIU_CHO'
+                  ? () =>
+                      navigation.navigate('Orders', {
+                        initialRole: 'SELLER',
+                        initialStatus: 'ALL',
+                        listingId: display.id,
+                        listingTitle: display.title,
+                      })
+                  : undefined
+              }
+              style={styles.statusBannerSpacing}
+            />
+          ) : null}
+
+          {isOwner && detail && detail.pendingRequestCount > 0 ? (
+            <InlineBanner
+              testID="owner-pending-requests-banner"
+              tone="warning"
+              icon="inbox"
+              title={`Có ${detail.pendingRequestCount} yêu cầu giữ chỗ đang chờ duyệt`}
+              message="Xem thông tin người mua và phản hồi để chính thức khóa giữ chỗ cho tin này."
+              actionLabel="Xem yêu cầu giữ chỗ"
+              actionTestID="owner-view-pending-requests-button"
+              onActionPress={() =>
+                navigation.navigate('Orders', {
+                  initialRole: 'SELLER',
+                  initialStatus: 'YEU_CAU',
+                  listingId: display.id,
+                  listingTitle: display.title,
+                })
               }
               style={styles.statusBannerSpacing}
             />
