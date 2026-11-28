@@ -10,12 +10,14 @@ import PenaltiesPage from '../gov/PenaltiesPage';
 import RolePage from '../pages/RolePage';
 import PendingProfilesPage from '../profiles/PendingProfilesPage';
 import ProfileDetailPage from '../profiles/ProfileDetailPage';
+import ReviewModerationPage from '../reviews/ReviewModerationPage';
 import UsersManagementPage from '../users/UsersManagementPage';
 function ProtectedPage({ user, permission, detail = false }: { user: User; permission: string; detail?: boolean }) {
   const allowed = rolePages[user.role].some((page) => page.path === permission);
   if (!allowed) return <Navigate to="/account" replace />;
   if (permission === 'profiles') return detail ? <ProfileDetailPage /> : <PendingProfilesPage />;
   if (permission === 'users') return <UsersManagementPage />;
+  if (permission === 'reviews') return <ReviewModerationPage />;
   if (permission === 'moderators') return <ModeratorsPage />;
   if (permission === 'penalties') return <PenaltiesPage />;
   return <RolePage permission={permission} role={user.role} />;

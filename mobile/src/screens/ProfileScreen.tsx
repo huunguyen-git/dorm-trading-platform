@@ -648,6 +648,14 @@ export default function ProfileScreen() {
                         }}
                       />
                       <Action
+                        title="Đánh giá & Khiếu nại"
+                        testID="profile-reviews"
+                        variant="secondary"
+                        icon="award"
+                        disabled={busy}
+                        onPress={() => nav.navigate('MyReviews')}
+                      />
+                      <Action
                         title="Cài đặt tài khoản"
                         variant="secondary"
                         icon="settings"

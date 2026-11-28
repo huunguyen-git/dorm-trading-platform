@@ -3,6 +3,7 @@ import type { Listing } from './listings/store';
 import type { ListingSummary } from './listings/types';
 import type { InventoryItem } from './inventory/types';
 import type { ReportRouteParams } from './reports/types';
+import type { ReviewComplaintRouteParams } from './reviews/types';
 
 export type RootStack = {
   Listings: undefined;
@@ -18,6 +19,8 @@ export type RootStack = {
   InventoryDetail: { id: string };
   InventoryForm: { mode: 'create' | 'edit'; id?: string; item?: InventoryItem };
   Report: ReportRouteParams;
+  MyReviews: undefined;
+  ReviewComplaint: ReviewComplaintRouteParams;
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;

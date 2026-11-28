@@ -16,6 +16,8 @@ import InventoryListScreen from '../screens/InventoryListScreen';
 import InventoryDetailScreen from '../screens/InventoryDetailScreen';
 import InventoryFormScreen from '../screens/InventoryFormScreen';
 import ReportScreen from '../screens/ReportScreen';
+import MyReviewsScreen from '../screens/MyReviewsScreen';
+import ReviewComplaintScreen from '../screens/ReviewComplaintScreen';
 import { semantic } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -116,6 +118,16 @@ export default function AppNavigator() {
                 ? 'Báo cáo người dùng'
                 : 'Báo cáo tin đăng',
           })}
+        />
+        <Stack.Screen
+          name="MyReviews"
+          component={MyReviewsScreen}
+          options={{ title: 'Đánh giá & Khiếu nại' }}
+        />
+        <Stack.Screen
+          name="ReviewComplaint"
+          component={ReviewComplaintScreen}
+          options={{ title: 'Khiếu nại đánh giá' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
