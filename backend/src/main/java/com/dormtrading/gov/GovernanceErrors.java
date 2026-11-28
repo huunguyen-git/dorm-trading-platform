@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = GovernanceController.class)
+@RestControllerAdvice(assignableTypes = {GovernanceController.class, ReportModerationController.class, StatisticsController.class})
 class GovernanceErrors {
     private static final Logger LOG = LoggerFactory.getLogger(GovernanceErrors.class);
 
