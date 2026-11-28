@@ -18,6 +18,13 @@ import { resolveMediaUrl } from '../api/client';
 import { extractApiError, isRestrictedError } from '../listings/sellerApi';
 import { formatReputationSummary } from '../listings/types';
 import { useOrders } from '../orders/store';
+import { useReviews } from '../reviews/store';
+import type { CreateReviewPayload, UpdateReviewPayload } from '../reviews/types';
+import {
+  DeleteReviewSheet,
+  OrderReviewSection,
+  ReviewFormSheet,
+} from '../components/reviews';
 import {
   buildPresetMeetingTime,
   formatExactVnd,
@@ -67,6 +74,20 @@ export default function OrderDetailScreen() {
     rejectSchedule,
     startDelivery,
   } = useOrders();
+
+  const {
+    orderReviewByOrderId,
+    orderReviewLoading,
+    orderReviewError,
+    submitting: reviewSubmitting,
+    loadOrderReview,
+    createReview,
+    editReview,
+    removeReview,
+  } = useReviews();
+
+  const [reviewSheetMode, setReviewSheetMode] = useState<'create' | 'edit' | null>(null);
+  const [deleteReviewSheetOpen, setDeleteReviewSheetOpen] = useState(false);
 
   const [actionNotice, setActionNotice] = useState(
     params.justCreated
@@ -120,14 +141,69 @@ export default function OrderDetailScreen() {
         return;
       }
       refresh();
+      const current = useOrders.getState().selectedOrder;
+      if (current?.id === orderId && current.status === 'HOAN_TAT') {
+        void loadOrderReview(orderId);
+      }
     });
     return () => {
       unsubBlur?.();
       unsubFocus?.();
     };
-  }, [navigation, refresh]);
+  }, [navigation, refresh, orderId, loadOrderReview]);
 
   const order = selectedOrder?.id === orderId ? selectedOrder : null;
+  const orderReviewState = orderReviewByOrderId[orderId] ?? null;
+
+  useEffect(() => {
+    if (order?.status === 'HOAN_TAT') {
+      void loadOrderReview(order.id);
+    }
+  }, [order?.id, order?.status, loadOrderReview]);
+
+  const handleCreateReview = async (payload: CreateReviewPayload) => {
+    if (!order) return;
+    setActionError('');
+    setActionNotice('');
+    const res = await createReview(order.id, payload);
+    setActionNotice(
+      res.review.status === 'CHO_XET'
+        ? 'Đã gửi đánh giá 1–3 sao. Đánh giá đang ở trạng thái Chờ kiểm duyệt và chưa trừ điểm người bán.'
+        : 'Đã gửi đánh giá thành công và công khai trên hồ sơ người bán.',
+    );
+    void loadOrderDetail(order.id);
+  };
+
+  const handleEditReview = async (reviewId: string, payload: UpdateReviewPayload) => {
+    if (!order) return;
+    setActionError('');
+    setActionNotice('');
+    const res = await editReview(reviewId, order.id, payload);
+    setActionNotice(
+      res.review.status === 'CHO_XET'
+        ? 'Đã lưu thay đổi đánh giá. Phiên bản mới đang chờ Kiểm duyệt viên xem xét.'
+        : 'Đã lưu thay đổi đánh giá và cập nhật hiển thị công khai.',
+    );
+    void loadOrderDetail(order.id);
+  };
+
+  const handleDeleteReview = async (reviewId: string, expectedVersion: number) => {
+    if (!order) return;
+    setActionError('');
+    setActionNotice('');
+    const res = await removeReview(reviewId, order.id, expectedVersion);
+    setActionNotice(
+      res.orderReviewState.canReview
+        ? 'Đã xóa đánh giá và hoàn lại tác động điểm (nếu có). Bạn có thể đánh giá lại trong hạn 15 ngày.'
+        : 'Đã xóa đánh giá và hoàn lại tác động điểm (nếu có).',
+    );
+    void loadOrderDetail(order.id);
+  };
+
+  const handleRefreshReviewState = async () => {
+    if (!order) return;
+    await Promise.all([loadOrderReview(order.id), loadOrderDetail(order.id)]);
+  };
 
   const runAction = async (fn: () => Promise<void>, successMessage: string): Promise<boolean> => {
     if (submitting) return false;
@@ -406,6 +482,12 @@ export default function OrderDetailScreen() {
                 <View style={styles.timestampItem}>
                   <Text style={styles.timestampLabel}>Giữ chỗ lúc</Text>
                   <Text style={styles.timestampValue}>{formatOrderDateTime(order.reservedAt)}</Text>
+                </View>
+              ) : null}
+              {order.completedAt ? (
+                <View style={styles.timestampItem}>
+                  <Text style={styles.timestampLabel}>Hoàn tất lúc</Text>
+                  <Text style={styles.timestampValue}>{formatOrderDateTime(order.completedAt)}</Text>
                 </View>
               ) : null}
             </View>
@@ -803,6 +885,33 @@ export default function OrderDetailScreen() {
                   </View>
                 ) : null}
               </View>
+            </>
+          ) : null}
+
+          {/* Section 5 — Transaction Review (UC-30, UC-31, UC-32) when HOAN_TAT */}
+          {order.status === 'HOAN_TAT' ? (
+            <>
+              <View style={styles.sectionGap} />
+              <OrderReviewSection
+                reviewState={orderReviewState}
+                loading={orderReviewLoading}
+                error={orderReviewError}
+                isBuyer={order.viewer.isBuyer}
+                isSeller={order.viewer.isSeller}
+                submitting={reviewSubmitting}
+                onRetry={() => void loadOrderReview(order.id)}
+                onOpenCreate={() => setReviewSheetMode('create')}
+                onOpenEdit={() => setReviewSheetMode('edit')}
+                onOpenDelete={() => setDeleteReviewSheetOpen(true)}
+                onViewSellerReviews={() =>
+                  navigation.navigate('SellerReviews', {
+                    sellerId: order.seller.id,
+                    sellerName: order.seller.displayName,
+                    reputationScore: order.seller.reputationScore,
+                    isOwnProfile: order.viewer.isSeller,
+                  })
+                }
+              />
             </>
           ) : null}
         </ScrollView>
@@ -1276,6 +1385,33 @@ export default function OrderDetailScreen() {
           />
         </View>
       </BottomSheet>
+
+      {/* P3-04 BottomSheets: Create / Edit Review (UC-30 / UC-31) & Delete Confirmation (UC-32) */}
+      {orderReviewState ? (
+        <ReviewFormSheet
+          visible={reviewSheetMode !== null}
+          mode={reviewSheetMode ?? 'create'}
+          orderReviewState={orderReviewState}
+          submitting={reviewSubmitting}
+          onClose={() => setReviewSheetMode(null)}
+          onSubmitCreate={handleCreateReview}
+          onSubmitEdit={handleEditReview}
+          onRefreshState={handleRefreshReviewState}
+        />
+      ) : null}
+
+      {orderReviewState?.review ? (
+        <DeleteReviewSheet
+          visible={deleteReviewSheetOpen}
+          review={orderReviewState.review}
+          withinReviewWindow={orderReviewState.withinReviewWindow}
+          daysRemaining={orderReviewState.daysRemaining}
+          submitting={reviewSubmitting}
+          onClose={() => setDeleteReviewSheetOpen(false)}
+          onConfirmDelete={handleDeleteReview}
+          onRefreshState={handleRefreshReviewState}
+        />
+      ) : null}
     </View>
   );
 }

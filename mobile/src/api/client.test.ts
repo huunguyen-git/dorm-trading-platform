@@ -3,7 +3,9 @@ import {
   api,
   attachment,
   buildMediaImageSource,
+  buildReviewEvidenceImageSource,
   resolveMediaUrl,
+  resolveReviewEvidenceUrl,
   RestrictedAccountError,
   toPersistableMediaUrl,
   upload,
@@ -653,6 +655,48 @@ test('buildMediaImageSource attaches Bearer Authorization header only to same-or
     buildMediaImageSource('http://192.168.1.99:8080/api/v1/media/not-a-uuid', 'secret-jwt'),
   ).toEqual({
     uri: 'http://192.168.1.99:8080/api/v1/media/not-a-uuid',
+  });
+});
+
+test('resolveReviewEvidenceUrl and buildReviewEvidenceImageSource attach Bearer auth only to same-origin canonical review evidence URLs (NFR-01)', () => {
+  const evId = 'a8d451c2-9f4e-4b3a-8b11-62e78b9104df';
+  process.env.EXPO_PUBLIC_API_URL = 'https://api.dormtrading.vn/api/v1';
+
+  expect(resolveReviewEvidenceUrl(`/api/v1/reviews/evidence/${evId}`)).toBe(
+    `https://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`,
+  );
+  expect(resolveReviewEvidenceUrl(`http://10.0.2.2:8082/api/v1/reviews/evidence/${evId}`)).toBe(
+    `https://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`,
+  );
+
+  expect(buildReviewEvidenceImageSource(`/api/v1/reviews/evidence/${evId}`, 'buyer-jwt')).toEqual({
+    uri: `https://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`,
+    headers: { Authorization: 'Bearer buyer-jwt' },
+  });
+  expect(buildReviewEvidenceImageSource(`/api/v1/reviews/evidence/${evId}`, null)).toEqual({
+    uri: `https://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`,
+  });
+
+  // Must NEVER attach Bearer token to external host, downgraded protocol, wrong port, or path traversal
+  expect(
+    buildReviewEvidenceImageSource('https://evil.example.com/api/v1/reviews/evidence/' + evId, 'buyer-jwt'),
+  ).toEqual({
+    uri: 'https://evil.example.com/api/v1/reviews/evidence/' + evId,
+  });
+  expect(
+    buildReviewEvidenceImageSource(`http://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`, 'buyer-jwt'),
+  ).toEqual({
+    uri: `http://api.dormtrading.vn/api/v1/reviews/evidence/${evId}`,
+  });
+  expect(
+    buildReviewEvidenceImageSource(`https://api.dormtrading.vn:9443/api/v1/reviews/evidence/${evId}`, 'buyer-jwt'),
+  ).toEqual({
+    uri: `https://api.dormtrading.vn:9443/api/v1/reviews/evidence/${evId}`,
+  });
+  expect(
+    buildReviewEvidenceImageSource('/api/v1/reviews/evidence/../../admin/secret', 'buyer-jwt'),
+  ).toEqual({
+    uri: '/api/v1/reviews/evidence/../../admin/secret',
   });
 });
 

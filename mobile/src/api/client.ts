@@ -75,6 +75,9 @@ function isLocalOrPrivateHost(hostname: string): boolean {
 const CANONICAL_MEDIA_PATH_RE =
   /^\/api\/v1\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const CANONICAL_REVIEW_EVIDENCE_PATH_RE =
+  /^\/api\/v1\/reviews\/evidence\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function getConfiguredApiOrigin(): string {
   return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '') ?? '';
 }
@@ -204,6 +207,86 @@ export function buildMediaImageSource(
   const resolvedToken = token === undefined ? useSessionStore.getState().token : token;
   const authToken = typeof resolvedToken === 'string' ? resolvedToken.trim() : '';
   if (authToken && isAppMediaUrl(uri)) {
+    return {
+      uri,
+      headers: { Authorization: `Bearer ${authToken}` },
+    };
+  }
+  return { uri };
+}
+
+/**
+ * Chuẩn hóa URL bằng chứng đánh giá riêng tư `/api/v1/reviews/evidence/{uuid}` sang gốc `EXPO_PUBLIC_API_URL`.
+ * Không chấp nhận path traversal hay đường dẫn ngoài quy chuẩn (NFR-01).
+ */
+export function resolveReviewEvidenceUrl(rawUrl: string): string {
+  if (typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+
+  const configuredOrigin = getConfiguredApiOrigin();
+  if (!configuredOrigin) return trimmed;
+
+  if (CANONICAL_REVIEW_EVIDENCE_PATH_RE.test(trimmed)) {
+    return joinApiMediaPath(configuredOrigin, trimmed);
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      CANONICAL_REVIEW_EVIDENCE_PATH_RE.test(parsed.pathname) &&
+      isLocalOrPrivateHost(parsed.hostname)
+    ) {
+      return joinApiMediaPath(configuredOrigin, parsed.pathname, parsed.search);
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Kiểm tra URL bằng chứng đánh giá có khớp chính xác `/api/v1/reviews/evidence/{uuid}` và cùng origin backend hay không.
+ */
+export function isAppReviewEvidenceUrl(rawUrl: string): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (CANONICAL_REVIEW_EVIDENCE_PATH_RE.test(trimmed)) return true;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      !CANONICAL_REVIEW_EVIDENCE_PATH_RE.test(parsed.pathname)
+    ) {
+      return false;
+    }
+    const configuredUrl = getConfiguredApiOriginUrl();
+    if (!configuredUrl) {
+      return false;
+    }
+    return parsed.origin === configuredUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tạo `source` cho `<Image>` khi tải ảnh bằng chứng đánh giá riêng tư (NFR-01).
+ * Chỉ đính kèm `Authorization: Bearer <token>` khi URL đích khớp chính xác origin và đường dẫn bằng chứng của backend.
+ */
+export function buildReviewEvidenceImageSource(
+  rawUrl: string,
+  token?: string | null,
+): { uri: string; headers?: Record<string, string> } {
+  const uri = resolveReviewEvidenceUrl(rawUrl);
+  if (!uri) return { uri: '' };
+  const resolvedToken = token === undefined ? useSessionStore.getState().token : token;
+  const authToken = typeof resolvedToken === 'string' ? resolvedToken.trim() : '';
+  if (authToken && isAppReviewEvidenceUrl(uri)) {
     return {
       uri,
       headers: { Authorization: `Bearer ${authToken}` },

@@ -640,6 +640,23 @@ export default function ListingScreen() {
           onPress: () => setReputationSheetOpen(true),
           testID: 'action-sheet-reputation',
         },
+        ...(display.seller.id
+          ? [
+              {
+                key: 'seller-reviews',
+                label: 'Xem đánh giá người bán',
+                icon: 'star' as const,
+                onPress: () =>
+                  navigation.navigate('SellerReviews', {
+                    sellerId: display.seller.id,
+                    sellerName: display.seller.displayName,
+                    reputationScore: display.seller.reputationScore,
+                    isOwnProfile: false,
+                  }),
+                testID: 'action-sheet-seller-reviews',
+              },
+            ]
+          : []),
         {
           key: 'refresh',
           label: 'Tải lại thông tin',
@@ -1515,9 +1532,48 @@ export default function ListingScreen() {
         onClose={() => setReputationSheetOpen(false)}
         title="Điểm uy tín người bán"
         subtitle={display.seller.displayName}
-        footerLabel="Đã hiểu"
-        onFooterPress={() => setReputationSheetOpen(false)}
         testID="reputation-info-sheet"
+        footerSlot={
+          <View style={styles.reputationSheetFooter}>
+            <Pressable
+              testID="reputation-sheet-close-btn"
+              accessibilityRole="button"
+              accessibilityLabel="Đã hiểu"
+              onPress={() => setReputationSheetOpen(false)}
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                styles.reputationSheetCloseBtn,
+                pressed && styles.secondaryBtnPressed,
+              ]}
+            >
+              <Text style={styles.secondaryBtnText}>Đã hiểu</Text>
+            </Pressable>
+            {display.seller.id ? (
+              <Pressable
+                testID="open-seller-reviews-from-sheet"
+                accessibilityRole="button"
+                accessibilityLabel="Xem đánh giá công khai"
+                onPress={() => {
+                  setReputationSheetOpen(false);
+                  navigation.navigate('SellerReviews', {
+                    sellerId: display.seller.id,
+                    sellerName: display.seller.displayName,
+                    reputationScore: display.seller.reputationScore,
+                    isOwnProfile: isOwner,
+                  });
+                }}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  styles.reputationSheetReviewsBtn,
+                  pressed && styles.primaryBtnPressed,
+                ]}
+              >
+                <Icon name="star" size={15} color={component.button.primaryFg} />
+                <Text style={styles.primaryBtnText}>Xem đánh giá ({display.seller.reviewCount})</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        }
       >
         <View style={styles.reputationSheetBody}>
           <View style={styles.reputationOverviewRow}>
@@ -2227,5 +2283,18 @@ const styles = StyleSheet.create({
     ...semantic.type.caption,
     flex: 1,
     lineHeight: 19,
+  },
+  reputationSheetFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: primitive.space[2.5],
+  },
+  reputationSheetCloseBtn: {
+    paddingHorizontal: primitive.space[4],
+  },
+  reputationSheetReviewsBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: primitive.space[1.5],
   },
 });

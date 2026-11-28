@@ -1,5 +1,6 @@
 import type { InventoryItemStatus } from '../inventory/types';
 import type { CollapsibleAlertTone, StatusTone, StatusVariant } from '../components/ui';
+import type { OrderReviewSummary, ReviewStatus } from '../reviews/types';
 
 export type OrderStatus =
   | 'YEU_CAU'
@@ -93,7 +94,9 @@ export interface OrderSummary {
   reservedAt: string | null;
   deliveryStartedAt: string | null;
   reportedDeliveredAt: string | null;
+  completedAt?: string | null;
   cancelledAt: string | null;
+  reviewStatus?: ReviewStatus | null;
   version: number;
 }
 
@@ -124,6 +127,7 @@ export interface OrderDetail {
   updatedAt: string;
   version: number;
   viewer: OrderViewerFlags;
+  reviewSummary?: OrderReviewSummary | null;
 }
 
 export interface OrderPage {
@@ -319,15 +323,29 @@ export function getOrderStepperState(order: OrderDetail): OrderStepperState {
 
 export function getNotificationTone(type: string): CollapsibleAlertTone {
   const normalized = (type || '').toUpperCase();
-  if (normalized.includes('CANCEL') || normalized.includes('REJECT')) return 'danger';
+  if (
+    normalized.includes('CANCEL') ||
+    normalized.includes('REJECT') ||
+    normalized.includes('REVIEW_DELETED')
+  ) {
+    return 'danger';
+  }
   if (
     normalized.includes('ACCEPTED') ||
     normalized.includes('CONFIRMED') ||
-    normalized.includes('DELIVERY_STARTED')
+    normalized.includes('DELIVERY_STARTED') ||
+    normalized.includes('REVIEW_RECEIVED') ||
+    normalized.includes('NO_REVIEW_BONUS')
   ) {
     return 'success';
   }
-  if (normalized.includes('UPDATED') || normalized.includes('WARNING')) return 'warning';
+  if (
+    normalized.includes('UPDATED') ||
+    normalized.includes('WARNING') ||
+    normalized.includes('PENDING_MODERATION')
+  ) {
+    return 'warning';
+  }
   return 'accent';
 }
 

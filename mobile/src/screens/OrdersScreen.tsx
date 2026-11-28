@@ -15,6 +15,7 @@ import type { Nav, RootStack } from '../navigation';
 import { resolveMediaUrl } from '../api/client';
 import { resolveUserRestriction, useSession } from '../auth/session';
 import { useOrders } from '../orders/store';
+import { isOrderWithinReviewWindow } from '../reviews/types';
 import {
   formatExactVnd,
   formatOrderDateTime,
@@ -370,6 +371,31 @@ export default function OrdersScreen() {
                   Nhấn để xem và phản hồi yêu cầu giữ chỗ
                 </Text>
               </View>
+            ) : order.status === 'HOAN_TAT' ? (
+              order.reviewStatus === 'CHAP_NHAN' ? (
+                <View style={styles.cueLine}>
+                  <Icon name="star" size={13} color={semantic.color.ratingStar} />
+                  <Text style={styles.scheduleConfirmedText} numberOfLines={1}>
+                    Đã đánh giá giao dịch
+                  </Text>
+                </View>
+              ) : order.reviewStatus === 'CHO_XET' ? (
+                <View style={styles.cueLine}>
+                  <Icon name="clock" size={13} color={semantic.color.warning} />
+                  <Text style={styles.schedulePendingText} numberOfLines={1}>
+                    Đánh giá đang chờ kiểm duyệt
+                  </Text>
+                </View>
+              ) : !isSeller &&
+                !order.reviewStatus &&
+                isOrderWithinReviewWindow(order.completedAt) ? (
+                <View style={styles.cueLine}>
+                  <Icon name="star" size={13} color={semantic.color.accent} />
+                  <Text style={styles.actionNeededText} numberOfLines={1}>
+                    Chạm để đánh giá người bán
+                  </Text>
+                </View>
+              ) : null
             ) : null}
           </View>
 

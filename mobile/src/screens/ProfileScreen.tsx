@@ -18,8 +18,10 @@ import { api, RestrictedAccountError } from '../api/client';
 import { resolveUserRestriction, useSession, type User } from '../auth/session';
 import { profileApi, statusLabel, type Profile, type ProfileUpdate } from '../profile/api';
 import { useSellerListings } from '../listings/sellerStore';
-import { formatReputationSummary } from '../listings/types';
+import { formatReputationSummary, formatShortDate } from '../listings/types';
 import { useOrders } from '../orders/store';
+import { useReviews } from '../reviews/store';
+import { StarRatingRow } from '../components/reviews';
 import { Action, Field, Notice } from '../components/AuthUI';
 import { RestrictedAccountNotice } from '../components/RestrictedAccountNotice';
 import {
@@ -112,6 +114,7 @@ export default function ProfileScreen() {
   const quota = useSellerListings((s) => s.quota);
   const loadQuota = useSellerListings((s) => s.loadQuota);
   const unreadOrderNotifications = useOrders((s) => s.unreadCount);
+  const myReceivedReviews = useReviews((s) => s.myReceivedReviews);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [cardUri, setCardUri] = useState<string | null>(null);
@@ -164,8 +167,18 @@ export default function ProfileScreen() {
       sessionUser.profileApproved
     ) {
       void useOrders.getState().loadNotifications().catch(() => { });
+      if (sessionUser.id) {
+        void useReviews.getState().loadMyReceivedReviews(sessionUser.id).catch(() => { });
+      }
     }
-  }, [isActiveMember, loadQuota, sessionUser?.accountStatus, sessionUser?.emailVerified, sessionUser?.profileApproved]);
+  }, [
+    isActiveMember,
+    loadQuota,
+    sessionUser?.accountStatus,
+    sessionUser?.emailVerified,
+    sessionUser?.id,
+    sessionUser?.profileApproved,
+  ]);
 
   useEffect(() => {
     void load();
@@ -479,6 +492,75 @@ export default function ProfileScreen() {
                       ) : null}
                       <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
                     </Pressable>
+
+                    <Pressable
+                      testID="profile-shortcut-reviews"
+                      accessibilityRole="button"
+                      accessibilityLabel="Xem Đánh giá nhận được"
+                      onPress={() =>
+                        nav.navigate('SellerReviews', {
+                          sellerId: profile.id,
+                          sellerName: displayName,
+                          reputationScore: typeof reputationScore === 'number' ? reputationScore : 100,
+                          isOwnProfile: true,
+                        })
+                      }
+                      style={({ pressed }) => [styles.quickLinkTileFull, pressed && styles.tilePressed]}
+                    >
+                      <View style={[styles.quickLinkIcon, styles.quickLinkIconGold]}>
+                        <Icon name="star" size={18} color={semantic.color.ratingStar} />
+                      </View>
+                      <View style={styles.quickLinkTextWrap}>
+                        <Text style={styles.quickLinkTitle}>Đánh giá nhận được</Text>
+                        <Text style={styles.quickLinkSub} testID="profile-reviews-summary-sub">
+                          {myReceivedReviews &&
+                          myReceivedReviews.sellerId === profile.id &&
+                          myReceivedReviews.reviewCount > 0 &&
+                          myReceivedReviews.averageRating !== null
+                            ? `${myReceivedReviews.averageRating.toFixed(1)} · ${myReceivedReviews.reviewCount} đánh giá công khai`
+                            : 'Xem các đánh giá công khai từ người mua'}
+                        </Text>
+                      </View>
+                      <Icon name="chevron-right" size={15} color={semantic.color.textSecondary} />
+                    </Pressable>
+
+                    {myReceivedReviews &&
+                    myReceivedReviews.sellerId === profile.id &&
+                    myReceivedReviews.items.length > 0 ? (
+                      <View style={styles.receivedReviewsPreview} testID="profile-received-reviews-preview">
+                        {myReceivedReviews.items.map((rev, idx) => (
+                          <View
+                            key={rev.id}
+                            style={[
+                              styles.receivedReviewRow,
+                              idx > 0 && styles.detailRowBorder,
+                            ]}
+                          >
+                            <View style={styles.receivedReviewHeader}>
+                              <Text style={styles.receivedReviewBuyer} numberOfLines={1}>
+                                {rev.buyerDisplayName}
+                              </Text>
+                              <StarRatingRow
+                                value={rev.rating}
+                                readOnly
+                                size="sm"
+                                testIDPrefix={`profile-review-stars-${rev.id}`}
+                              />
+                            </View>
+                            {rev.comment ? (
+                              <Text style={styles.receivedReviewComment} numberOfLines={2}>
+                                {rev.comment}
+                              </Text>
+                            ) : null}
+                            {rev.publishedAt || rev.createdAt ? (
+                              <Text style={styles.receivedReviewDate}>
+                                {formatShortDate(rev.publishedAt ?? rev.createdAt)}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
                   <HairlineDivider />
                 </>
@@ -876,6 +958,38 @@ const styles = StyleSheet.create({
   },
   quickLinkIconEmerald: {
     backgroundColor: semantic.color.freeBg,
+  },
+  quickLinkIconGold: {
+    backgroundColor: semantic.color.ratingBg,
+  },
+  receivedReviewsPreview: {
+    backgroundColor: semantic.color.bgSubtle,
+    borderRadius: primitive.radius.md,
+    paddingHorizontal: primitive.space[3],
+    paddingVertical: primitive.space[1.5],
+  },
+  receivedReviewRow: {
+    paddingVertical: primitive.space[2],
+    gap: 4,
+  },
+  receivedReviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: primitive.space[2],
+  },
+  receivedReviewBuyer: {
+    ...semantic.type.label,
+    fontSize: primitive.fontSize.sm,
+    flex: 1,
+  },
+  receivedReviewComment: {
+    ...semantic.type.caption,
+    color: semantic.color.textPrimary,
+  },
+  receivedReviewDate: {
+    ...semantic.type.micro,
+    color: semantic.color.textSecondary,
   },
   quickLinkTextWrap: {
     flex: 1,

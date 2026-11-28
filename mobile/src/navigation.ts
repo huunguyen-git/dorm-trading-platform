@@ -32,6 +32,12 @@ export type RootStack = {
       }
     | undefined;
   OrderDetail: { id: string; justCreated?: boolean };
+  SellerReviews: {
+    sellerId: string;
+    sellerName?: string;
+    reputationScore?: number;
+    isOwnProfile?: boolean;
+  };
 };
 
 export type Nav = NativeStackNavigationProp<RootStack>;
