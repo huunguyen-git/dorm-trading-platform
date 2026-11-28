@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { api, ApiError, attachment } from '../api/client';
 import App from '../App';
 import { rolePages } from '../config/rolePages';
-import { normalizeApiPath } from './api';
+import {
+  formatCancelStatus,
+  formatItemStatus,
+  formatListingStatus,
+  formatScheduleStatus,
+  normalizeApiPath,
+} from './api';
 import DisputeDetailPage from './DisputeDetailPage';
 import DisputesQueuePage from './DisputesQueuePage';
 import type { DisputeDetail, DisputePage, DisputeSummary } from './types';
@@ -251,7 +257,7 @@ function renderDetail(orderId = ORDER_ID) {
   );
 }
 
-describe('normalizeApiPath', () => {
+describe('normalizeApiPath & status formatters', () => {
   it('strips leading /api/v1 before passing paths to attachment()', () => {
     expect(normalizeApiPath('/api/v1/admin/disputes/123/evidence/handover/p1')).toBe(
       '/admin/disputes/123/evidence/handover/p1',
@@ -262,6 +268,16 @@ describe('normalizeApiPath', () => {
     expect(normalizeApiPath('https://api.example.com/api/v1/admin/disputes/123/evidence/handover/p1')).toBe(
       '/admin/disputes/123/evidence/handover/p1',
     );
+  });
+
+  it('formats V13/V14 schedule, cancel, listing, and item statuses into Vietnamese without raw enum leaks', () => {
+    expect(formatScheduleStatus('DA_XAC_NHAN')).toBe('Đã xác nhận');
+    expect(formatScheduleStatus('DA_THAY_THE')).toBe('Đã thay thế');
+    expect(formatCancelStatus('CHO_XAC_NHAN')).toBe('Chờ xác nhận');
+    expect(formatListingStatus('CHO_DUYET')).toBe('Chờ duyệt');
+    expect(formatListingStatus('DA_RUT')).toBe('Đã rút');
+    expect(formatListingStatus('HET_HAN')).toBe('Hết hạn');
+    expect(formatItemStatus('DA_XOA')).toBe('Đã xóa khỏi kho');
   });
 });
 
@@ -592,6 +608,33 @@ describe('DisputeDetailPage', () => {
 
     expect(await screen.findByTestId('active-evidence-lock-notice')).toBeInTheDocument();
     expect(screen.getByTestId('submit-evidence-request-btn')).toBeDisabled();
+  });
+
+  it('UC-29 Alt 2: keeps evidence request form enabled when an overdue CHO_BO_SUNG row exists but backend reports hasActiveEvidenceRequest=false', async () => {
+    const expiredRowDetail = makeDetail({
+      handoverPhotos: [],
+      hasActiveEvidenceRequest: false,
+      queueState: 'READY',
+      evidenceRequests: [
+        {
+          id: 'ev-req-expired',
+          targetParty: 'BUYER',
+          instruction: 'Yêu cầu cũ đã quá hạn nhưng chưa chạy batch.',
+          dueAt: '2026-11-24T08:00:00Z',
+          status: 'CHO_BO_SUNG',
+          requestedByName: 'KDV Lê Hòa',
+          createdAt: '2026-11-22T08:00:00Z',
+          respondedAt: null,
+          responses: [],
+        },
+      ],
+    });
+    mockedApi.mockResolvedValueOnce(expiredRowDetail);
+
+    renderDetail();
+
+    expect(await screen.findByTestId('submit-evidence-request-btn')).toBeEnabled();
+    expect(screen.queryByTestId('active-evidence-lock-notice')).not.toBeInTheDocument();
   });
 
   it('UC-29 Exception 1: shows persistent stale banner and refreshes dossier on 409 DISPUTE_ALREADY_RESOLVED', async () => {

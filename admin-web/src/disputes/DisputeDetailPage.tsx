@@ -603,8 +603,8 @@ export default function DisputeDetailPage() {
     );
   }
 
-  const hasActiveEvidenceRequest =
-    detail.hasActiveEvidenceRequest || detail.evidenceRequests.some((item) => item.status === 'CHO_BO_SUNG');
+  // Dùng cờ `hasActiveEvidenceRequest` từ backend làm nguồn chuẩn để không khóa form khi yêu cầu cũ đã quá hạn.
+  const hasActiveEvidenceRequest = detail.hasActiveEvidenceRequest;
   const isSlaOverdue = detail.overdueSla && detail.queueState !== 'RESOLVED';
   const decisionButtonsDisabled = busy || refreshing || !detail.decidable || !allMediaLoaded;
 

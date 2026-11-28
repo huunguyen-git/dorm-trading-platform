@@ -192,8 +192,14 @@ export function formatListingStatus(status: string | null | undefined): string {
       return 'Công khai';
     case 'GIU_CHO':
       return 'Đang giữ chỗ';
+    case 'CHO_DUYET':
+      return 'Chờ duyệt';
     case 'AN':
       return 'Đang ẩn';
+    case 'DA_RUT':
+      return 'Đã rút';
+    case 'HET_HAN':
+      return 'Hết hạn';
     case 'KET_THUC':
       return 'Đã kết thúc (Lưu trữ)';
     case 'NHAP':
@@ -211,6 +217,8 @@ export function formatItemStatus(status: string): string {
       return 'Đang giữ chỗ';
     case 'DA_CHUYEN_GIAO':
       return 'Đã bán / Đã cho';
+    case 'DA_XOA':
+      return 'Đã xóa khỏi kho';
     default:
       return status;
   }
@@ -270,9 +278,13 @@ export function formatScheduleStatus(status: string): string {
   switch (status) {
     case 'CHO_XAC_NHAN':
       return 'Chờ xác nhận';
+    case 'DA_XAC_NHAN':
+      return 'Đã xác nhận';
     case 'DA_CHAP_NHAN':
     case 'CHAP_NHAN':
       return 'Đã chấp nhận';
+    case 'DA_THAY_THE':
+      return 'Đã thay thế';
     case 'BI_TU_CHOI':
     case 'TU_CHOI':
       return 'Bị từ chối';
@@ -286,6 +298,8 @@ export function formatScheduleStatus(status: string): string {
 
 export function formatCancelStatus(status: string): string {
   switch (status) {
+    case 'CHO_XAC_NHAN':
+      return 'Chờ xác nhận';
     case 'CHO_PHAN_HOI':
       return 'Chờ phản hồi';
     case 'DA_DONG_Y':
